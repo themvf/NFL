@@ -4935,7 +4935,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     with st.expander("📊 Last 3 Games Details"):
                         for _, p in t1_rushers.iterrows():
                             player_games = players_with_games[(players_with_games['team'] == p['team']) &
-                                                             (players_with_games['player'] == p['player'])].sort_values('week_y')
+                                                             (players_with_games['player'] == p['player'])].sort_values('week')
                             if len(player_games) >= 3:
                                 last_3 = player_games.tail(3)
                                 st.markdown(f"**{p['player']}**")
@@ -4948,7 +4948,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
-                                        'Week': int(row['week_y']),
+                                        'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
@@ -4982,7 +4982,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     with st.expander("📊 Last 3 Games Details"):
                         for _, p in t2_rushers.iterrows():
                             player_games = players_with_games[(players_with_games['team'] == p['team']) &
-                                                             (players_with_games['player'] == p['player'])].sort_values('week_y')
+                                                             (players_with_games['player'] == p['player'])].sort_values('week')
                             if len(player_games) >= 3:
                                 last_3 = player_games.tail(3)
                                 st.markdown(f"**{p['player']}**")
@@ -4995,7 +4995,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
-                                        'Week': int(row['week_y']),
+                                        'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
@@ -5100,7 +5100,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
-                                        'Week': int(row['week_y']),
+                                        'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
@@ -5153,7 +5153,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
-                                        'Week': int(row['week_y']),
+                                        'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),

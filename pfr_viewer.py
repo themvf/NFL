@@ -136,6 +136,30 @@ def init_transactions_table():
         st.error(f"Error initializing transactions table: {e}")
 
 
+def init_upcoming_games_table():
+    """Initialize upcoming_games table if it doesn't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS upcoming_games (
+                game_id TEXT PRIMARY KEY,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                date TEXT NOT NULL,
+                home_team TEXT NOT NULL,
+                away_team TEXT NOT NULL,
+                day_of_week TEXT,
+                primetime INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Error initializing upcoming games table: {e}")
+
+
 def extract_tags(note_text):
     """
     Extract hashtags from note text and categorize them.
@@ -1100,6 +1124,124 @@ def detect_unreported_transactions(season):
     except Exception as e:
         st.error(f"Error detecting transactions: {e}")
         return pd.DataFrame()
+
+
+# ============================================================================
+# Upcoming Games Functions
+# ============================================================================
+
+def upload_upcoming_schedule(json_data, season):
+    """
+    Parse and upload upcoming games from JSON data.
+
+    Parameters:
+    - json_data: List of game dictionaries from JSON
+    - season: Season number
+
+    Returns:
+    - Tuple of (success_count, error_messages)
+    """
+    success_count = 0
+    errors = []
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        for game in json_data:
+            try:
+                # Validate required fields
+                required_fields = ['week', 'date', 'home_team', 'away_team']
+                missing_fields = [f for f in required_fields if f not in game]
+                if missing_fields:
+                    errors.append(f"Missing fields {missing_fields} in game: {game}")
+                    continue
+
+                # Create game_id from date and teams
+                game_id = f"{game['date'].replace('-', '')}{game['home_team']}"
+
+                # Insert or replace game
+                cursor.execute("""
+                    INSERT OR REPLACE INTO upcoming_games
+                    (game_id, season, week, date, home_team, away_team, day_of_week, primetime)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    game_id,
+                    season,
+                    game['week'],
+                    game['date'],
+                    game['home_team'],
+                    game['away_team'],
+                    game.get('day_of_week', ''),
+                    1 if game.get('primetime', False) else 0
+                ))
+                success_count += 1
+
+            except Exception as e:
+                errors.append(f"Error processing game {game}: {str(e)}")
+
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        errors.append(f"Database error: {str(e)}")
+
+    return success_count, errors
+
+
+def get_upcoming_games(season=None, week=None):
+    """Get upcoming games from the database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        sql = "SELECT * FROM upcoming_games WHERE 1=1"
+        params = []
+
+        if season:
+            sql += " AND season = ?"
+            params.append(season)
+
+        if week:
+            sql += " AND week = ?"
+            params.append(week)
+
+        sql += " ORDER BY week, date, game_id"
+
+        df = pd.read_sql_query(sql, conn, params=params)
+        conn.close()
+        return df
+
+    except Exception as e:
+        st.error(f"Error fetching upcoming games: {e}")
+        return pd.DataFrame()
+
+
+def delete_upcoming_game(game_id):
+    """Delete an upcoming game by ID."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM upcoming_games WHERE game_id = ?", (game_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting game: {e}")
+        return False
+
+
+def clear_upcoming_games(season):
+    """Clear all upcoming games for a season."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM upcoming_games WHERE season = ?", (season,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Error clearing games: {e}")
+        return False
 
 
 # ============================================================================
@@ -10062,7 +10204,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
     st.header("🔄 Transaction Manager")
 
     # Tab layout for different views
-    tab1, tab2, tab3, tab4 = st.tabs(["Active Rosters", "Add Transaction", "Transaction History", "Injuries"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Active Rosters", "Add Transaction", "Transaction History", "Injuries", "Upcoming Games"])
 
     with tab1:
         st.subheader("Current Team Rosters")
@@ -10528,6 +10670,167 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
             else:
                 st.info("No injuries found with the selected filters.")
 
+    with tab5:
+        st.subheader("📅 Upcoming Games Schedule")
+        st.caption("Upload upcoming games JSON to power the Game Preview feature")
+
+        # Create sub-tabs for Upload and View
+        upload_tab, view_tab, reference_tab = st.tabs(["📤 Upload Schedule", "📋 Current Schedule", "📖 JSON Format"])
+
+        with upload_tab:
+            st.markdown("### Upload JSON Schedule")
+
+            if not season:
+                st.warning("⚠️ Please select a season from the sidebar first.")
+            else:
+                uploaded_file = st.file_uploader(
+                    "Choose a JSON file",
+                    type=['json'],
+                    help="Upload a JSON file containing upcoming games"
+                )
+
+                if uploaded_file is not None:
+                    try:
+                        import json
+                        json_data = json.load(uploaded_file)
+
+                        # Validate it's a list
+                        if not isinstance(json_data, list):
+                            st.error("❌ JSON must be an array of game objects")
+                        else:
+                            st.success(f"✅ Loaded {len(json_data)} games from file")
+
+                            # Preview first few games
+                            st.markdown("**Preview (first 3 games):**")
+                            st.json(json_data[:3])
+
+                            # Upload button
+                            if st.button("📥 Upload to Database", type="primary"):
+                                with st.spinner("Uploading schedule..."):
+                                    success_count, errors = upload_upcoming_schedule(json_data, season)
+
+                                    if errors:
+                                        st.error(f"⚠️ Encountered {len(errors)} errors:")
+                                        for err in errors[:5]:  # Show first 5 errors
+                                            st.error(err)
+
+                                    if success_count > 0:
+                                        st.success(f"✅ Successfully uploaded {success_count} games!")
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ No games were uploaded successfully")
+
+                    except json.JSONDecodeError as e:
+                        st.error(f"❌ Invalid JSON file: {str(e)}")
+                    except Exception as e:
+                        st.error(f"❌ Error reading file: {str(e)}")
+
+        with view_tab:
+            st.markdown("### Scheduled Upcoming Games")
+
+            # Get upcoming games
+            upcoming_df = get_upcoming_games(season=season)
+
+            if not upcoming_df.empty:
+                # Show count by week
+                st.metric("Total Games Scheduled", len(upcoming_df))
+
+                # Group by week
+                weeks = sorted(upcoming_df['week'].unique())
+
+                for wk in weeks:
+                    week_games = upcoming_df[upcoming_df['week'] == wk]
+
+                    with st.expander(f"📅 Week {wk} ({len(week_games)} games)", expanded=(wk == weeks[0])):
+                        for _, game in week_games.iterrows():
+                            col1, col2, col3 = st.columns([3, 1, 1])
+
+                            with col1:
+                                matchup = f"**{game['away_team']} @ {game['home_team']}**"
+                                prime_badge = " 🌟" if game['primetime'] else ""
+                                day_info = f"{game['day_of_week']}, {game['date']}" if game['day_of_week'] else game['date']
+                                st.markdown(f"{matchup}{prime_badge}")
+                                st.caption(day_info)
+
+                            with col2:
+                                if game['primetime']:
+                                    st.caption("Primetime")
+
+                            with col3:
+                                if st.button("🗑️", key=f"del_{game['game_id']}", help="Delete game"):
+                                    if delete_upcoming_game(game['game_id']):
+                                        st.success("Game deleted!")
+                                        st.rerun()
+
+                st.divider()
+
+                # Clear all button
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("🗑️ Clear All Games", type="secondary"):
+                        if clear_upcoming_games(season):
+                            st.success("All games cleared!")
+                            st.rerun()
+
+            else:
+                st.info("📭 No upcoming games scheduled for this season. Upload a JSON file to get started!")
+
+        with reference_tab:
+            st.markdown("### JSON Format Reference")
+
+            st.markdown("""
+Upload a JSON file with an array of game objects. Each game must include:
+- **week** (integer): NFL week number
+- **date** (string): Game date in YYYY-MM-DD format
+- **home_team** (string): Home team abbreviation (e.g., "KC", "BUF")
+- **away_team** (string): Away team abbreviation
+- **day_of_week** (string, optional): Day name (e.g., "Sunday", "Monday")
+- **primetime** (boolean, optional): True for primetime games
+
+**Example JSON:**
+""")
+
+            example_json = [
+                {
+                    "week": 8,
+                    "date": "2025-10-26",
+                    "home_team": "KC",
+                    "away_team": "LV",
+                    "day_of_week": "Sunday",
+                    "primetime": False
+                },
+                {
+                    "week": 8,
+                    "date": "2025-10-27",
+                    "home_team": "DAL",
+                    "away_team": "SF",
+                    "day_of_week": "Monday",
+                    "primetime": True
+                },
+                {
+                    "week": 8,
+                    "date": "2025-10-26",
+                    "home_team": "PHI",
+                    "away_team": "CIN",
+                    "day_of_week": "Sunday",
+                    "primetime": False
+                }
+            ]
+
+            st.json(example_json)
+
+            st.markdown("""
+**Common Team Abbreviations:**
+- AFC East: BUF, MIA, NE, NYJ
+- AFC North: BAL, CIN, CLE, PIT
+- AFC South: HOU, IND, JAX, TEN
+- AFC West: DEN, KC, LV, LAC
+- NFC East: DAL, NYG, PHI, WAS
+- NFC North: CHI, DET, GB, MIN
+- NFC South: ATL, CAR, NO, TB
+- NFC West: ARI, LAR, SF, SEA
+""")
+
 
 # ============================================================================
 # Main App
@@ -10540,6 +10843,7 @@ def main():
     init_notes_table()
     init_injuries_table()
     init_transactions_table()
+    init_upcoming_games_table()
 
     # Render sidebar and get selections
     view, season, week, team = render_sidebar()

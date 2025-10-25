@@ -4740,7 +4740,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             pass_stats = pass_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            games_query = f"SELECT game_id, week, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
+            # Note: Don't select 'week' from games table since players_df already has it
+            games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
             games_info = query(games_query)
             pass_players_with_games = players_df[players_df['pass_att'] > 0].merge(games_info, on='game_id', how='left')
 
@@ -4872,7 +4873,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             rush_stats = rush_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            games_query = f"SELECT game_id, week, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
+            # Note: Don't select 'week' from games table since players_df already has it
+            games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
             games_info = query(games_query)
             players_with_games = players_df[players_df['rush_att'] > 0].merge(games_info, on='game_id', how='left')
 
@@ -5023,7 +5025,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             rec_stats = rec_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            rec_games_query = f"SELECT game_id, week, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
+            # Note: Don't select 'week' from games table since players_df already has it
+            rec_games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
             rec_games_info = query(rec_games_query)
             rec_players_with_games = players_df[players_df['rec'] > 0].merge(rec_games_info, on='game_id', how='left')
 
@@ -5081,7 +5084,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     with st.expander("📊 Last 3 Games Details"):
                         for _, p in t1_receivers.iterrows():
                             player_games = rec_players_with_games[(rec_players_with_games['team'] == p['team']) &
-                                                                  (rec_players_with_games['player'] == p['player'])].sort_values('week_y')
+                                                                  (rec_players_with_games['player'] == p['player'])].sort_values('week')
                             if len(player_games) >= 3:
                                 last_3 = player_games.tail(3)
                                 st.markdown(f"**{p['player']}**")
@@ -5134,7 +5137,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     with st.expander("📊 Last 3 Games Details"):
                         for _, p in t2_receivers.iterrows():
                             player_games = rec_players_with_games[(rec_players_with_games['team'] == p['team']) &
-                                                                  (rec_players_with_games['player'] == p['player'])].sort_values('week_y')
+                                                                  (rec_players_with_games['player'] == p['player'])].sort_values('week')
                             if len(player_games) >= 3:
                                 last_3 = player_games.tail(3)
                                 st.markdown(f"**{p['player']}**")

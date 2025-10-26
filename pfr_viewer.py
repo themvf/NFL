@@ -1280,47 +1280,73 @@ def calculate_defensive_stats(season, max_week):
 
         for team in teams:
             # Pass yards allowed (opponent QBs)
+            # Join with games to find players who played AGAINST this team
             pass_query = """
-                SELECT AVG(pass_yds) as avg_pass_allowed
-                FROM player_box_score
-                WHERE season = ? AND week < ? AND opponent = ? AND pass_att > 10
+                SELECT AVG(p.pass_yds) as avg_pass_allowed
+                FROM player_box_score p
+                JOIN games g ON p.season = g.season AND p.week = g.week
+                WHERE p.season = ? AND p.week < ? AND p.pass_att > 10
+                  AND (
+                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
+                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
+                  )
             """
-            pass_df = pd.read_sql_query(pass_query, conn, params=(season, max_week, team))
+            pass_df = pd.read_sql_query(pass_query, conn, params=(season, max_week, team, team))
 
             # Rush yards allowed (opponent RBs)
             rush_query = """
-                SELECT AVG(rush_yds) as avg_rush_allowed
-                FROM player_box_score
-                WHERE season = ? AND week < ? AND opponent = ? AND rush_att >= 5
+                SELECT AVG(p.rush_yds) as avg_rush_allowed
+                FROM player_box_score p
+                JOIN games g ON p.season = g.season AND p.week = g.week
+                WHERE p.season = ? AND p.week < ? AND p.rush_att >= 5
+                  AND (
+                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
+                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
+                  )
             """
-            rush_df = pd.read_sql_query(rush_query, conn, params=(season, max_week, team))
+            rush_df = pd.read_sql_query(rush_query, conn, params=(season, max_week, team, team))
 
             # Receiving yards allowed to RBs (opponents with rush + rec)
             rec_rb_query = """
-                SELECT AVG(rec_yds) as avg_rec_to_rb
-                FROM player_box_score
-                WHERE season = ? AND week < ? AND opponent = ?
-                  AND rush_att >= 5 AND targets > 0
+                SELECT AVG(p.rec_yds) as avg_rec_to_rb
+                FROM player_box_score p
+                JOIN games g ON p.season = g.season AND p.week = g.week
+                WHERE p.season = ? AND p.week < ?
+                  AND p.rush_att >= 5 AND p.targets > 0
+                  AND (
+                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
+                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
+                  )
             """
-            rec_rb_df = pd.read_sql_query(rec_rb_query, conn, params=(season, max_week, team))
+            rec_rb_df = pd.read_sql_query(rec_rb_query, conn, params=(season, max_week, team, team))
 
             # Receiving yards allowed to WRs
             rec_wr_query = """
-                SELECT AVG(rec_yds) as avg_rec_to_wr
-                FROM player_box_score
-                WHERE season = ? AND week < ? AND opponent = ?
-                  AND targets >= 4 AND rush_att < 3
+                SELECT AVG(p.rec_yds) as avg_rec_to_wr
+                FROM player_box_score p
+                JOIN games g ON p.season = g.season AND p.week = g.week
+                WHERE p.season = ? AND p.week < ?
+                  AND p.targets >= 4 AND p.rush_att < 3
+                  AND (
+                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
+                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
+                  )
             """
-            rec_wr_df = pd.read_sql_query(rec_wr_query, conn, params=(season, max_week, team))
+            rec_wr_df = pd.read_sql_query(rec_wr_query, conn, params=(season, max_week, team, team))
 
             # Receiving yards allowed to TEs
             rec_te_query = """
-                SELECT AVG(rec_yds) as avg_rec_to_te
-                FROM player_box_score
-                WHERE season = ? AND week < ? AND opponent = ?
-                  AND targets >= 2 AND targets < 10 AND rush_att < 2
+                SELECT AVG(p.rec_yds) as avg_rec_to_te
+                FROM player_box_score p
+                JOIN games g ON p.season = g.season AND p.week = g.week
+                WHERE p.season = ? AND p.week < ?
+                  AND p.targets >= 2 AND p.targets < 10 AND p.rush_att < 2
+                  AND (
+                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
+                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
+                  )
             """
-            rec_te_df = pd.read_sql_query(rec_te_query, conn, params=(season, max_week, team))
+            rec_te_df = pd.read_sql_query(rec_te_query, conn, params=(season, max_week, team, team))
 
             defensive_stats[team] = {
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,

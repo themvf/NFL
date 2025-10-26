@@ -8,10 +8,20 @@ import sqlite3
 from pathlib import Path
 from typing import Optional, List, Tuple
 import re
+import time
+import logging
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+
+# Configure logging
+logging.basicConfig(
+    filename='nfl_app.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Database configuration - relative path for deployment
 DB_PATH = Path(__file__).parent / "data" / "pfr.db"
@@ -320,24 +330,62 @@ def delete_note(note_id):
 
 def add_persistent_injury(player_name, team, season, injury_type, start_week=None, end_week=None, description=None):
     """
-    Add or update a persistent injury.
-    Returns injury_id if successful, None otherwise.
+    Add or update a persistent injury with retry logic for database locks.
+    Returns (injury_id, error_message) tuple.
     """
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO player_injuries
-            (player_name, team_abbr, season, injury_type, start_week, end_week, injury_description, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (player_name, team, season, injury_type, start_week, end_week, description))
-        injury_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        return injury_id
-    except Exception as e:
-        st.error(f"Error adding injury: {e}")
-        return None
+    max_retries = 5
+    retry_delay = 0.1  # 100ms
+
+    for attempt in range(max_retries):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=10.0)
+            cursor = conn.cursor()
+
+            logging.info(f"Saving injury: {player_name} ({team}) Season {season} - {injury_type}")
+
+            cursor.execute("""
+                INSERT OR REPLACE INTO player_injuries
+                (player_name, team_abbr, season, injury_type, start_week, end_week, injury_description, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (player_name, team, season, injury_type, start_week, end_week, description))
+
+            injury_id = cursor.lastrowid
+            conn.commit()
+
+            # Verify the save
+            cursor.execute("""
+                SELECT injury_id, player_name, team_abbr FROM player_injuries
+                WHERE player_name = ? AND team_abbr = ? AND season = ?
+            """, (player_name, team, season))
+            result = cursor.fetchone()
+
+            conn.close()
+
+            if result:
+                logging.info(f"Successfully saved injury ID {result[0]} for {player_name}")
+                return result[0], None
+            else:
+                logging.error(f"Injury saved but could not verify: {player_name}")
+                return injury_id, "Saved but verification failed"
+
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < max_retries - 1:
+                logging.warning(f"Database locked, retry {attempt + 1}/{max_retries}: {e}")
+                time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                continue
+            else:
+                error_msg = f"Database error after {attempt + 1} attempts: {e}"
+                logging.error(error_msg)
+                return None, error_msg
+
+        except Exception as e:
+            error_msg = f"Unexpected error saving injury: {type(e).__name__}: {e}"
+            logging.error(error_msg)
+            return None, error_msg
+
+    error_msg = f"Failed to save injury after {max_retries} attempts"
+    logging.error(error_msg)
+    return None, error_msg
 
 
 def get_persistent_injuries(team=None, season=None, injury_type=None):
@@ -470,6 +518,55 @@ def update_persistent_injury(injury_id, injury_type=None, start_week=None, end_w
     except Exception as e:
         st.error(f"Error updating injury: {e}")
         return False
+
+
+def get_database_stats():
+    """
+    Get statistics about the database for the status panel.
+    Returns dict with injury_count, game_count, last_modified, db_size_mb.
+    """
+    try:
+        import os
+
+        # Get file stats
+        db_path = DB_PATH
+        if os.path.exists(db_path):
+            stat_info = os.stat(db_path)
+            last_modified = datetime.fromtimestamp(stat_info.st_mtime)
+            db_size_mb = stat_info.st_size / (1024 * 1024)
+        else:
+            last_modified = None
+            db_size_mb = 0
+
+        # Get record counts
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
+        cursor = conn.cursor()
+
+        # Count injuries
+        cursor.execute("SELECT COUNT(*) FROM player_injuries")
+        injury_count = cursor.fetchone()[0]
+
+        # Count upcoming games
+        cursor.execute("SELECT COUNT(*) FROM upcoming_games")
+        game_count = cursor.fetchone()[0]
+
+        conn.close()
+
+        return {
+            'injury_count': injury_count,
+            'game_count': game_count,
+            'last_modified': last_modified,
+            'db_size_mb': db_size_mb
+        }
+    except Exception as e:
+        logging.error(f"Error getting database stats: {e}")
+        return {
+            'injury_count': 0,
+            'game_count': 0,
+            'last_modified': None,
+            'db_size_mb': 0,
+            'error': str(e)
+        }
 
 
 # ============================================================================
@@ -1140,7 +1237,7 @@ def detect_unreported_transactions(season):
 
 def upload_upcoming_schedule_csv(csv_data, season):
     """
-    Parse and upload upcoming games from CSV data.
+    Parse and upload upcoming games from CSV data with retry logic.
 
     Parameters:
     - csv_data: Pandas DataFrame from CSV
@@ -1151,55 +1248,78 @@ def upload_upcoming_schedule_csv(csv_data, season):
     """
     success_count = 0
     errors = []
+    max_retries = 5
+    retry_delay = 0.1
 
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+    logging.info(f"Starting CSV upload: {len(csv_data)} games for season {season}")
 
-        for idx, row in csv_data.iterrows():
-            try:
-                # Validate required fields
-                if pd.isna(row.get('Week')) or pd.isna(row.get('Home')) or pd.isna(row.get('Away')):
-                    errors.append(f"Missing required fields in row {idx + 2}: {row.to_dict()}")
-                    continue
+    for attempt in range(max_retries):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=10.0)
+            cursor = conn.cursor()
 
-                week = int(row['Week'])
-                home_team = str(row['Home']).strip()
-                away_team = str(row['Away']).strip()
-                day_of_week = str(row.get('Day', '')).strip() if not pd.isna(row.get('Day')) else ''
-                primetime = 1 if str(row.get('Primetime', '')).strip().lower() == 'yes' else 0
-                location = str(row.get('Location', '')).strip() if not pd.isna(row.get('Location')) else ''
+            for idx, row in csv_data.iterrows():
+                try:
+                    # Validate required fields
+                    if pd.isna(row.get('Week')) or pd.isna(row.get('Home')) or pd.isna(row.get('Away')):
+                        errors.append(f"Missing required fields in row {idx + 2}: {row.to_dict()}")
+                        continue
 
-                # Create game_id from week and teams
-                game_id = f"{season}W{week:02d}{away_team}{home_team}"
+                    week = int(row['Week'])
+                    home_team = str(row['Home']).strip()
+                    away_team = str(row['Away']).strip()
+                    day_of_week = str(row.get('Day', '')).strip() if not pd.isna(row.get('Day')) else ''
+                    primetime = 1 if str(row.get('Primetime', '')).strip().lower() == 'yes' else 0
+                    location = str(row.get('Location', '')).strip() if not pd.isna(row.get('Location')) else ''
 
-                # Insert or replace game
-                cursor.execute("""
-                    INSERT OR REPLACE INTO upcoming_games
-                    (game_id, season, week, date, home_team, away_team, day_of_week, primetime, location)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    game_id,
-                    season,
-                    week,
-                    None,  # No date in CSV
-                    home_team,
-                    away_team,
-                    day_of_week,
-                    primetime,
-                    location
-                ))
-                success_count += 1
+                    # Create game_id from week and teams
+                    game_id = f"{season}W{week:02d}{away_team}{home_team}"
 
-            except Exception as e:
-                errors.append(f"Error processing row {idx + 2}: {str(e)}")
+                    # Insert or replace game
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO upcoming_games
+                        (game_id, season, week, date, home_team, away_team, day_of_week, primetime, location)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        game_id,
+                        season,
+                        week,
+                        None,  # No date in CSV
+                        home_team,
+                        away_team,
+                        day_of_week,
+                        primetime,
+                        location
+                    ))
+                    success_count += 1
 
-        conn.commit()
-        conn.close()
+                except Exception as e:
+                    errors.append(f"Error processing row {idx + 2}: {str(e)}")
 
-    except Exception as e:
-        errors.append(f"Database error: {str(e)}")
+            conn.commit()
+            conn.close()
 
+            logging.info(f"Successfully uploaded {success_count} games")
+            return success_count, errors
+
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < max_retries - 1:
+                logging.warning(f"Database locked during CSV upload, retry {attempt + 1}/{max_retries}: {e}")
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            else:
+                error_msg = f"Database error after {attempt + 1} attempts: {str(e)}"
+                logging.error(error_msg)
+                errors.append(error_msg)
+                return success_count, errors
+
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            logging.error(error_msg)
+            errors.append(error_msg)
+            return success_count, errors
+
+    errors.append(f"Failed to upload CSV after {max_retries} attempts")
     return success_count, errors
 
 
@@ -3488,6 +3608,39 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
     recent_notes = get_notes()
     if not recent_notes.empty:
         st.sidebar.caption(f"Total notes: {len(recent_notes)}")
+
+    # Database Status Panel
+    st.sidebar.divider()
+    st.sidebar.header("Database Status")
+
+    # Add refresh button
+    col1, col2 = st.sidebar.columns([3, 1])
+    with col2:
+        refresh_stats = st.button("🔄", key="refresh_db_stats", help="Refresh database stats")
+
+    # Get database stats (refresh if button clicked)
+    if refresh_stats or 'db_stats' not in st.session_state:
+        st.session_state.db_stats = get_database_stats()
+
+    stats = st.session_state.db_stats
+
+    # Display stats
+    if 'error' in stats:
+        st.sidebar.error(f"Error loading stats: {stats['error']}")
+    else:
+        # Record counts with icons
+        col1, col2 = st.sidebar.columns(2)
+        with col1:
+            st.metric("Injuries", stats['injury_count'])
+        with col2:
+            st.metric("Games", stats['game_count'])
+
+        # Last modified time
+        if stats['last_modified']:
+            st.sidebar.caption(f"Last modified: {stats['last_modified'].strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Database size
+        st.sidebar.caption(f"DB Size: {stats['db_size_mb']:.2f} MB")
 
     return view, season, week, team
 
@@ -11010,7 +11163,8 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                     elif not inj_team:
                         st.error("Please select a team")
                     else:
-                        injury_id = add_persistent_injury(
+                        # Save with detailed error handling
+                        injury_id, error_msg = add_persistent_injury(
                             inj_player,
                             inj_team,
                             inj_season,
@@ -11021,11 +11175,29 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                         )
 
                         if injury_id:
-                            st.success(f"✅ Injury added/updated for {inj_player}")
-                            st.balloons()
+                            # Store success message in session state to persist across rerun
+                            st.session_state.injury_success = f"✅ Successfully saved injury for {inj_player} (ID: {injury_id})"
+                            st.session_state.injury_last_saved = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             # Increment form counter to reset form
                             st.session_state.injury_form_counter += 1
+                            st.balloons()
                             st.rerun()
+                        else:
+                            # Show detailed error
+                            st.error(f"❌ Failed to save injury for {inj_player}")
+                            if error_msg:
+                                st.error(f"Error details: {error_msg}")
+                            st.warning("Please check the log file (nfl_app.log) for more details")
+
+            # Show success message if it exists
+            if 'injury_success' in st.session_state:
+                st.success(st.session_state.injury_success)
+                if 'injury_last_saved' in st.session_state:
+                    st.caption(f"Saved at: {st.session_state.injury_last_saved}")
+                # Clear the message after displaying
+                del st.session_state.injury_success
+                if 'injury_last_saved' in st.session_state:
+                    del st.session_state.injury_last_saved
 
         with injury_tab2:
             st.markdown("### Active Injuries")

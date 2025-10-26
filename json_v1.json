@@ -1,0 +1,2610 @@
+[
+  {
+    "date": "2025-09-04",
+    "week": 1,
+    "home_team": "CLE",
+    "away_team": "DAL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "GB",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "PHI",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "ATL",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "BAL",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "CIN",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "HOU",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "JAX",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "KC",
+    "away_team": "DEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "MIA",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "MIN",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "NO",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "NYG",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "SEA",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-07",
+    "week": 1,
+    "home_team": "TB",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-08",
+    "week": 1,
+    "home_team": "LAR",
+    "away_team": "DET",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-08",
+    "week": 1,
+    "home_team": "LAC",
+    "away_team": "NYJ",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-11",
+    "week": 2,
+    "home_team": "BUF",
+    "away_team": "MIA",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "ARI",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "CAR",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "CHI",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "DAL",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "DEN",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "DET",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "IND",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "NE",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "NYJ",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "PIT",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "SF",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "TEN",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-14",
+    "week": 2,
+    "home_team": "WAS",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-15",
+    "week": 2,
+    "home_team": "LV",
+    "away_team": "LAC",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-15",
+    "week": 2,
+    "home_team": "ATL",
+    "away_team": "TB",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-18",
+    "week": 3,
+    "home_team": "DET",
+    "away_team": "GB",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "BAL",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "BUF",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "CAR",
+    "away_team": "ATL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "CHI",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "CLE",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "DEN",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "HOU",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "IND",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "KC",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "MIA",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "MIN",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "NYJ",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "PHI",
+    "away_team": "DAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "SEA",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-21",
+    "week": 3,
+    "home_team": "TB",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-22",
+    "week": 3,
+    "home_team": "GB",
+    "away_team": "CHI",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-22",
+    "week": 3,
+    "home_team": "LAC",
+    "away_team": "DEN",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-25",
+    "week": 4,
+    "home_team": "NYG",
+    "away_team": "DAL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "ARI",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "ATL",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "CIN",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "DAL",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "IND",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "JAX",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "LAR",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "LV",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "NE",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "NO",
+    "away_team": "ATL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "PIT",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "SF",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "TEN",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-28",
+    "week": 4,
+    "home_team": "WAS",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-09-29",
+    "week": 4,
+    "home_team": "LAC",
+    "away_team": "BUF",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-09-29",
+    "week": 4,
+    "home_team": "SEA",
+    "away_team": "DET",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-02",
+    "week": 5,
+    "home_team": "MIN",
+    "away_team": "GB",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "ATL",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "BAL",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "BUF",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "CAR",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "CHI",
+    "away_team": "DET",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "CIN",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "DAL",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "DEN",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "HOU",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "JAX",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "KC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "MIA",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "NYG",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "SEA",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-05",
+    "week": 5,
+    "home_team": "SF",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-06",
+    "week": 5,
+    "home_team": "TEN",
+    "away_team": "HOU",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-06",
+    "week": 5,
+    "home_team": "NO",
+    "away_team": "CAR",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-09",
+    "week": 6,
+    "home_team": "TB",
+    "away_team": "ATL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "ARI",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "CAR",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "CLE",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "DET",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "GB",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "IND",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "LAC",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "LAR",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "LV",
+    "away_team": "DEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "NE",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "NYJ",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "PHI",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "PIT",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-12",
+    "week": 6,
+    "home_team": "WAS",
+    "away_team": "DAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-13",
+    "week": 6,
+    "home_team": "NO",
+    "away_team": "ATL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-13",
+    "week": 6,
+    "home_team": "HOU",
+    "away_team": "JAX",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-16",
+    "week": 7,
+    "home_team": "SF",
+    "away_team": "SEA",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "ATL",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "BAL",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "BUF",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "CHI",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "CIN",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "DAL",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "DEN",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "DET",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "IND",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "KC",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "LAR",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "MIA",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "NO",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "PHI",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-19",
+    "week": 7,
+    "home_team": "TEN",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-20",
+    "week": 7,
+    "home_team": "NYG",
+    "away_team": "DAL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-20",
+    "week": 7,
+    "home_team": "SEA",
+    "away_team": "SF",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-23",
+    "week": 8,
+    "home_team": "NE",
+    "away_team": "BUF",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "ARI",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "ATL",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "CAR",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "CHI",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "CLE",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "DAL",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "DEN",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "GB",
+    "away_team": "DET",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "HOU",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "JAX",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "LAC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "NYJ",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "PIT",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-26",
+    "week": 8,
+    "home_team": "WAS",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-10-27",
+    "week": 8,
+    "home_team": "SF",
+    "away_team": "GB",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-10-27",
+    "week": 8,
+    "home_team": "SEA",
+    "away_team": "LAR",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+    {
+    "date": "2025-10-30",
+    "week": 9,
+    "home_team": "GB",
+    "away_team": "DET",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "ATL",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "BAL",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "BUF",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "CHI",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "CLE",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "DAL",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "DEN",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "HOU",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "IND",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "KC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "LAR",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "NYG",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "NO",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "NYJ",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-02",
+    "week": 9,
+    "home_team": "SEA",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-03",
+    "week": 9,
+    "home_team": "PHI",
+    "away_team": "DAL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-03",
+    "week": 9,
+    "home_team": "TB",
+    "away_team": "ATL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-06",
+    "week": 10,
+    "home_team": "CIN",
+    "away_team": "BAL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "ARI",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "CAR",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "DET",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "GB",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "HOU",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "JAX",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "LAC",
+    "away_team": "DEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "LV",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "MIA",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "MIN",
+    "away_team": "DET",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "NE",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "PIT",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "SF",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "TB",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-09",
+    "week": 10,
+    "home_team": "WAS",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-10",
+    "week": 10,
+    "home_team": "NYG",
+    "away_team": "DAL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-10",
+    "week": 10,
+    "home_team": "NO",
+    "away_team": "ATL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-13",
+    "week": 11,
+    "home_team": "PIT",
+    "away_team": "BAL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "ATL",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "BAL",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "BUF",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "CAR",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "CHI",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "CIN",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "CLE",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "DAL",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "DEN",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "DET",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "IND",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "KC",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "LAR",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "MIA",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "NYG",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "SEA",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-16",
+    "week": 11,
+    "home_team": "TEN",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-17",
+    "week": 11,
+    "home_team": "GB",
+    "away_team": "CHI",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-17",
+    "week": 11,
+    "home_team": "PHI",
+    "away_team": "NYG",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-20",
+    "week": 12,
+    "home_team": "KC",
+    "away_team": "DEN",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "ARI",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "ATL",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "BUF",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "CAR",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "CHI",
+    "away_team": "DET",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "CLE",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "DAL",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "DEN",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "HOU",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "IND",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "JAX",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "LV",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "NYJ",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "PHI",
+    "away_team": "DAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-23",
+    "week": 12,
+    "home_team": "SEA",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-24",
+    "week": 12,
+    "home_team": "LAR",
+    "away_team": "GB",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-24",
+    "week": 12,
+    "home_team": "NE",
+    "away_team": "NYJ",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-27",
+    "week": 13,
+    "home_team": "DET",
+    "away_team": "CHI",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-27",
+    "week": 13,
+    "home_team": "DAL",
+    "away_team": "NYG",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-27",
+    "week": 13,
+    "home_team": "MIA",
+    "away_team": "BUF",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "ATL",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "BAL",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "CIN",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "HOU",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "JAX",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "KC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "LAC",
+    "away_team": "DEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "NO",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "NYJ",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "PHI",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-11-30",
+    "week": 13,
+    "home_team": "SF",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-01",
+    "week": 13,
+    "home_team": "LAR",
+    "away_team": "ARI",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-01",
+    "week": 13,
+    "home_team": "TB",
+    "away_team": "ATL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-04",
+    "week": 14,
+    "home_team": "MIN",
+    "away_team": "DET",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "ARI",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "CAR",
+    "away_team": "ATL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "CHI",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "CLE",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "DAL",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "DEN",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "DET",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "IND",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "LV",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "NE",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "NO",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "PIT",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "SEA",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "TEN",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-07",
+    "week": 14,
+    "home_team": "WAS",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-08",
+    "week": 14,
+    "home_team": "BUF",
+    "away_team": "MIA",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-08",
+    "week": 14,
+    "home_team": "TB",
+    "away_team": "NO",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-11",
+    "week": 15,
+    "home_team": "LAR",
+    "away_team": "SF",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "ATL",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "BAL",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "BUF",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "CAR",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "CHI",
+    "away_team": "DET",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "CIN",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "DAL",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "DEN",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "HOU",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "IND",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "KC",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "MIA",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "NYG",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-14",
+    "week": 15,
+    "home_team": "SEA",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-15",
+    "week": 15,
+    "home_team": "LAC",
+    "away_team": "DEN",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-15",
+    "week": 15,
+    "home_team": "SF",
+    "away_team": "GB",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-18",
+    "week": 16,
+    "home_team": "CLE",
+    "away_team": "BAL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "ARI",
+    "away_team": "SEA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "ATL",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "CAR",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "CHI",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "CIN",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "DAL",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "DEN",
+    "away_team": "KC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "DET",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "HOU",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "JAX",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "LAC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "NE",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "NYJ",
+    "away_team": "MIA",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "PIT",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-21",
+    "week": 16,
+    "home_team": "WAS",
+    "away_team": "NYG",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-22",
+    "week": 16,
+    "home_team": "LAR",
+    "away_team": "DET",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-22",
+    "week": 16,
+    "home_team": "SF",
+    "away_team": "SEA",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-25",
+    "week": 17,
+    "home_team": "IND",
+    "away_team": "HOU",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "ATL",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "BAL",
+    "away_team": "PIT",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "BUF",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "CHI",
+    "away_team": "GB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "CLE",
+    "away_team": "CIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "DAL",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "DEN",
+    "away_team": "LAC",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "DET",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "GB",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "HOU",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "KC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "MIA",
+    "away_team": "NE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "NO",
+    "away_team": "TB",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "NYG",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "SEA",
+    "away_team": "ARI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-28",
+    "week": 17,
+    "home_team": "TEN",
+    "away_team": "IND",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2025-12-29",
+    "week": 17,
+    "home_team": "LAR",
+    "away_team": "SF",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2025-12-29",
+    "week": 17,
+    "home_team": "PIT",
+    "away_team": "BAL",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2026-01-01",
+    "week": 18,
+    "home_team": "TB",
+    "away_team": "ATL",
+    "day_of_week": "Thursday",
+    "primetime": true
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "ARI",
+    "away_team": "LAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "CAR",
+    "away_team": "NO",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "CIN",
+    "away_team": "BAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "DET",
+    "away_team": "CHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "GB",
+    "away_team": "MIN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "HOU",
+    "away_team": "TEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "IND",
+    "away_team": "JAX",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "JAX",
+    "away_team": "HOU",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "KC",
+    "away_team": "DEN",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "LAC",
+    "away_team": "LV",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "MIA",
+    "away_team": "BUF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "NE",
+    "away_team": "NYJ",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "NYG",
+    "away_team": "DAL",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "PHI",
+    "away_team": "WAS",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "PIT",
+    "away_team": "CLE",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "SEA",
+    "away_team": "SF",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "TB",
+    "away_team": "CAR",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-04",
+    "week": 18,
+    "home_team": "WAS",
+    "away_team": "PHI",
+    "day_of_week": "Sunday",
+    "primetime": false
+  },
+  {
+    "date": "2026-01-05",
+    "week": 18,
+    "home_team": "LV",
+    "away_team": "KC",
+    "day_of_week": "Monday",
+    "primetime": true
+  },
+  {
+    "date": "2026-01-05",
+    "week": 18,
+    "home_team": "NYJ",
+    "away_team": "MIA",
+    "day_of_week": "Monday",
+    "primetime": true
+  }
+]

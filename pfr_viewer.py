@@ -2974,6 +2974,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Stats & Trends",
             "Advanced Team Analytics",
             "Matchup Predictor",
+            "Upcoming Matches",
             "Skill Yards Grid",
             "Skill TDs Grid",
             "First TD Grid",
@@ -10833,6 +10834,146 @@ Upload a JSON file with an array of game objects. Each game must include:
 
 
 # ============================================================================
+# Section: Upcoming Matches
+# ============================================================================
+
+def render_upcoming_matches(season: Optional[int], week: Optional[int]):
+    """Display upcoming games schedule with week filter."""
+    st.header("📅 Upcoming Matches")
+
+    # Get all available weeks from upcoming_games table
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Get all unique weeks and seasons
+        cursor.execute("""
+            SELECT DISTINCT season, week
+            FROM upcoming_games
+            ORDER BY season DESC, week ASC
+        """)
+        available_data = cursor.fetchall()
+
+        if not available_data:
+            st.info("No upcoming games schedule uploaded yet. Upload schedule via Transaction Manager → Upcoming Games.")
+            conn.close()
+            return
+
+        # Get unique seasons and weeks
+        available_seasons = sorted(list(set([row[0] for row in available_data])), reverse=True)
+
+        # Season selector
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            selected_season = st.selectbox(
+                "Season",
+                available_seasons,
+                index=0 if season in available_seasons else 0,
+                key="upcoming_season_select"
+            )
+
+        # Get weeks for selected season
+        weeks_for_season = sorted([row[1] for row in available_data if row[0] == selected_season])
+
+        with col2:
+            selected_week = st.selectbox(
+                "Week",
+                ["All Weeks"] + weeks_for_season,
+                index=0,
+                key="upcoming_week_select"
+            )
+
+        # Build query
+        if selected_week == "All Weeks":
+            cursor.execute("""
+                SELECT date, week, home_team, away_team, day_of_week, primetime
+                FROM upcoming_games
+                WHERE season = ?
+                ORDER BY week ASC, date ASC
+            """, (selected_season,))
+        else:
+            cursor.execute("""
+                SELECT date, week, home_team, away_team, day_of_week, primetime
+                FROM upcoming_games
+                WHERE season = ? AND week = ?
+                ORDER BY date ASC
+            """, (selected_season, selected_week))
+
+        games = cursor.fetchall()
+        conn.close()
+
+        if not games:
+            st.warning(f"No games found for the selected filter.")
+            return
+
+        # Convert to DataFrame
+        df = pd.DataFrame(games, columns=['Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Primetime'])
+
+        # Format primetime column
+        df['Primetime'] = df['Primetime'].apply(lambda x: '⭐' if x == 1 else '')
+
+        # Create matchup column
+        df['Matchup'] = df['Away Team'] + ' @ ' + df['Home Team']
+
+        # Display summary metrics
+        st.divider()
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Games", len(df))
+        with col2:
+            st.metric("Weeks", df['Week'].nunique())
+        with col3:
+            primetime_count = (df['Primetime'] == '⭐').sum()
+            st.metric("Primetime Games", primetime_count)
+        with col4:
+            teams = set(df['Home Team'].tolist() + df['Away Team'].tolist())
+            st.metric("Teams", len(teams))
+
+        st.divider()
+
+        # Group by week if showing all weeks
+        if selected_week == "All Weeks":
+            for week_num in sorted(df['Week'].unique()):
+                week_games = df[df['Week'] == week_num].copy()
+
+                with st.expander(f"Week {week_num} ({len(week_games)} games)", expanded=(week_num == weeks_for_season[0])):
+                    # Display games for this week
+                    display_df = week_games[['Date', 'Day', 'Matchup', 'Primetime']].copy()
+
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
+                            "Day": st.column_config.TextColumn("Day"),
+                            "Matchup": st.column_config.TextColumn("Matchup", width="medium"),
+                            "Primetime": st.column_config.TextColumn("Prime", width="small")
+                        }
+                    )
+        else:
+            # Display single week
+            st.subheader(f"Week {selected_week} Schedule")
+
+            display_df = df[['Date', 'Day', 'Matchup', 'Primetime']].copy()
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
+                    "Day": st.column_config.TextColumn("Day"),
+                    "Matchup": st.column_config.TextColumn("Matchup", width="medium"),
+                    "Primetime": st.column_config.TextColumn("Prime", width="small")
+                }
+            )
+
+    except Exception as e:
+        st.error(f"Error loading upcoming games: {e}")
+
+
+# ============================================================================
 # Main App
 # ============================================================================
 
@@ -10874,6 +11015,9 @@ def main():
 
     elif view == "Matchup Predictor":
         render_matchup_predictor(season, week)
+
+    elif view == "Upcoming Matches":
+        render_upcoming_matches(season, week)
 
     elif view == "Skill Yards Grid":
         render_skill_yards_grid(season, week)

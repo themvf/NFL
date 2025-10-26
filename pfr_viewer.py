@@ -146,14 +146,22 @@ def init_upcoming_games_table():
                 game_id TEXT PRIMARY KEY,
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
-                date TEXT NOT NULL,
+                date TEXT,
                 home_team TEXT NOT NULL,
                 away_team TEXT NOT NULL,
                 day_of_week TEXT,
                 primetime INTEGER DEFAULT 0,
+                location TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+
+        # Add location column to existing tables if it doesn't exist
+        cursor.execute("PRAGMA table_info(upcoming_games)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'location' not in columns:
+            cursor.execute("ALTER TABLE upcoming_games ADD COLUMN location TEXT")
+
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1130,12 +1138,12 @@ def detect_unreported_transactions(season):
 # Upcoming Games Functions
 # ============================================================================
 
-def upload_upcoming_schedule(json_data, season):
+def upload_upcoming_schedule_csv(csv_data, season):
     """
-    Parse and upload upcoming games from JSON data.
+    Parse and upload upcoming games from CSV data.
 
     Parameters:
-    - json_data: List of game dictionaries from JSON
+    - csv_data: Pandas DataFrame from CSV
     - season: Season number
 
     Returns:
@@ -1148,37 +1156,43 @@ def upload_upcoming_schedule(json_data, season):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        for game in json_data:
+        for idx, row in csv_data.iterrows():
             try:
                 # Validate required fields
-                required_fields = ['week', 'date', 'home_team', 'away_team']
-                missing_fields = [f for f in required_fields if f not in game]
-                if missing_fields:
-                    errors.append(f"Missing fields {missing_fields} in game: {game}")
+                if pd.isna(row.get('Week')) or pd.isna(row.get('Home')) or pd.isna(row.get('Away')):
+                    errors.append(f"Missing required fields in row {idx + 2}: {row.to_dict()}")
                     continue
 
-                # Create game_id from date and teams
-                game_id = f"{game['date'].replace('-', '')}{game['home_team']}"
+                week = int(row['Week'])
+                home_team = str(row['Home']).strip()
+                away_team = str(row['Away']).strip()
+                day_of_week = str(row.get('Day', '')).strip() if not pd.isna(row.get('Day')) else ''
+                primetime = 1 if str(row.get('Primetime', '')).strip().lower() == 'yes' else 0
+                location = str(row.get('Location', '')).strip() if not pd.isna(row.get('Location')) else ''
+
+                # Create game_id from week and teams
+                game_id = f"{season}W{week:02d}{away_team}{home_team}"
 
                 # Insert or replace game
                 cursor.execute("""
                     INSERT OR REPLACE INTO upcoming_games
-                    (game_id, season, week, date, home_team, away_team, day_of_week, primetime)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (game_id, season, week, date, home_team, away_team, day_of_week, primetime, location)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     game_id,
                     season,
-                    game['week'],
-                    game['date'],
-                    game['home_team'],
-                    game['away_team'],
-                    game.get('day_of_week', ''),
-                    1 if game.get('primetime', False) else 0
+                    week,
+                    None,  # No date in CSV
+                    home_team,
+                    away_team,
+                    day_of_week,
+                    primetime,
+                    location
                 ))
                 success_count += 1
 
             except Exception as e:
-                errors.append(f"Error processing game {game}: {str(e)}")
+                errors.append(f"Error processing row {idx + 2}: {str(e)}")
 
         conn.commit()
         conn.close()
@@ -10676,39 +10690,41 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
         st.caption("Upload upcoming games JSON to power the Game Preview feature")
 
         # Create sub-tabs for Upload and View
-        upload_tab, view_tab, reference_tab = st.tabs(["📤 Upload Schedule", "📋 Current Schedule", "📖 JSON Format"])
+        upload_tab, view_tab, reference_tab = st.tabs(["📤 Upload Schedule", "📋 Current Schedule", "📖 CSV Format"])
 
         with upload_tab:
-            st.markdown("### Upload JSON Schedule")
+            st.markdown("### Upload CSV Schedule")
 
             if not season:
                 st.warning("⚠️ Please select a season from the sidebar first.")
             else:
                 uploaded_file = st.file_uploader(
-                    "Choose a JSON file",
-                    type=['json'],
-                    help="Upload a JSON file containing upcoming games"
+                    "Choose a CSV file",
+                    type=['csv'],
+                    help="Upload a CSV file containing upcoming games (Week, Away, Home, Day, Primetime, Location)"
                 )
 
                 if uploaded_file is not None:
                     try:
-                        import json
-                        json_data = json.load(uploaded_file)
+                        csv_data = pd.read_csv(uploaded_file)
 
-                        # Validate it's a list
-                        if not isinstance(json_data, list):
-                            st.error("❌ JSON must be an array of game objects")
+                        # Validate required columns
+                        required_cols = ['Week', 'Away', 'Home']
+                        missing_cols = [col for col in required_cols if col not in csv_data.columns]
+
+                        if missing_cols:
+                            st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
                         else:
-                            st.success(f"✅ Loaded {len(json_data)} games from file")
+                            st.success(f"✅ Loaded {len(csv_data)} games from file")
 
                             # Preview first few games
-                            st.markdown("**Preview (first 3 games):**")
-                            st.json(json_data[:3])
+                            st.markdown("**Preview (first 5 games):**")
+                            st.dataframe(csv_data.head(), use_container_width=True)
 
                             # Upload button
                             if st.button("📥 Upload to Database", type="primary"):
                                 with st.spinner("Uploading schedule..."):
-                                    success_count, errors = upload_upcoming_schedule(json_data, season)
+                                    success_count, errors = upload_upcoming_schedule_csv(csv_data, season)
 
                                     if errors:
                                         st.error(f"⚠️ Encountered {len(errors)} errors:")
@@ -10721,8 +10737,6 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                                     else:
                                         st.error("❌ No games were uploaded successfully")
 
-                    except json.JSONDecodeError as e:
-                        st.error(f"❌ Invalid JSON file: {str(e)}")
                     except Exception as e:
                         st.error(f"❌ Error reading file: {str(e)}")
 
@@ -10744,20 +10758,28 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
 
                     with st.expander(f"📅 Week {wk} ({len(week_games)} games)", expanded=(wk == weeks[0])):
                         for _, game in week_games.iterrows():
-                            col1, col2, col3 = st.columns([3, 1, 1])
+                            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
                             with col1:
                                 matchup = f"**{game['away_team']} @ {game['home_team']}**"
                                 prime_badge = " 🌟" if game['primetime'] else ""
-                                day_info = f"{game['day_of_week']}, {game['date']}" if game['day_of_week'] else game['date']
                                 st.markdown(f"{matchup}{prime_badge}")
-                                st.caption(day_info)
+                                # Show day and location
+                                location_text = f"📍 {game['location']}" if game.get('location') else ""
+                                day_info = game['day_of_week'] if game.get('day_of_week') else ""
+                                caption = f"{day_info}  {location_text}".strip()
+                                if caption:
+                                    st.caption(caption)
 
                             with col2:
+                                if game.get('location') and game['location'] != game['home_team']:
+                                    st.caption("🌍 Neutral")
+
+                            with col3:
                                 if game['primetime']:
                                     st.caption("Primetime")
 
-                            with col3:
+                            with col4:
                                 if st.button("🗑️", key=f"del_{game['game_id']}", help="Delete game"):
                                     if delete_upcoming_game(game['game_id']):
                                         st.success("Game deleted!")
@@ -10774,62 +10796,43 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                             st.rerun()
 
             else:
-                st.info("📭 No upcoming games scheduled for this season. Upload a JSON file to get started!")
+                st.info("📭 No upcoming games scheduled for this season. Upload a CSV file to get started!")
 
         with reference_tab:
-            st.markdown("### JSON Format Reference")
+            st.markdown("### CSV Format Reference")
 
             st.markdown("""
-Upload a JSON file with an array of game objects. Each game must include:
-- **week** (integer): NFL week number
-- **date** (string): Game date in YYYY-MM-DD format
-- **home_team** (string): Home team abbreviation (e.g., "KC", "BUF")
-- **away_team** (string): Away team abbreviation
-- **day_of_week** (string, optional): Day name (e.g., "Sunday", "Monday")
-- **primetime** (boolean, optional): True for primetime games
+Upload a CSV file with the following columns:
 
-**Example JSON:**
+**Required Columns:**
+- **Week** (integer): NFL week number (1-18)
+- **Away** (string): Away team abbreviation
+- **Home** (string): Home team abbreviation
+
+**Optional Columns:**
+- **Day** (string): Day name (e.g., "Sunday", "Monday", "Thursday")
+- **Primetime** (string): "Yes" for primetime games, empty otherwise
+- **Location** (string): Game location - use team abbreviation or special location (e.g., "London", "Germany", "Brazil")
+
+**Example CSV:**
 """)
 
-            example_json = [
-                {
-                    "week": 8,
-                    "date": "2025-10-26",
-                    "home_team": "KC",
-                    "away_team": "LV",
-                    "day_of_week": "Sunday",
-                    "primetime": False
-                },
-                {
-                    "week": 8,
-                    "date": "2025-10-27",
-                    "home_team": "DAL",
-                    "away_team": "SF",
-                    "day_of_week": "Monday",
-                    "primetime": True
-                },
-                {
-                    "week": 8,
-                    "date": "2025-10-26",
-                    "home_team": "PHI",
-                    "away_team": "CIN",
-                    "day_of_week": "Sunday",
-                    "primetime": False
-                }
-            ]
+            example_csv = pd.DataFrame([
+                {"Week": 1, "Away": "DAL", "Home": "PHI", "Day": "Thursday", "Primetime": "Yes", "Location": "PHI"},
+                {"Week": 1, "Away": "KAN", "Home": "LAC", "Day": "Friday", "Primetime": "Yes", "Location": "Brazil"},
+                {"Week": 1, "Away": "PIT", "Home": "NYJ", "Day": "Sunday", "Primetime": "", "Location": "NYJ"},
+                {"Week": 5, "Away": "MIN", "Home": "CLE", "Day": "Sunday", "Primetime": "", "Location": "London"},
+                {"Week": 8, "Away": "PHI", "Home": "DAL", "Day": "Sunday", "Primetime": "Yes", "Location": "DAL"}
+            ])
 
-            st.json(example_json)
+            st.dataframe(example_csv, use_container_width=True, hide_index=True)
 
             st.markdown("""
-**Common Team Abbreviations:**
-- AFC East: BUF, MIA, NE, NYJ
-- AFC North: BAL, CIN, CLE, PIT
-- AFC South: HOU, IND, JAX, TEN
-- AFC West: DEN, KC, LV, LAC
-- NFC East: DAL, NYG, PHI, WAS
-- NFC North: CHI, DET, GB, MIN
-- NFC South: ATL, CAR, NO, TB
-- NFC West: ARI, LAR, SF, SEA
+**Notes:**
+- **Location**: Typically matches the Home team, but use special locations for international games (London, Germany, Brazil, Mexico, etc.)
+- **Neutral Site Games**: For neutral site games, set Location to the actual game location (different from Home team)
+- **Primetime**: Use "Yes" for primetime games (SNF, MNF, TNF), leave empty for regular games
+- Team abbreviations can be any consistent format (2-3 letters)
 """)
 
 
@@ -10886,14 +10889,14 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
         # Build query
         if selected_week == "All Weeks":
             cursor.execute("""
-                SELECT date, week, home_team, away_team, day_of_week, primetime
+                SELECT date, week, home_team, away_team, day_of_week, primetime, location
                 FROM upcoming_games
                 WHERE season = ?
                 ORDER BY week ASC, date ASC
             """, (selected_season,))
         else:
             cursor.execute("""
-                SELECT date, week, home_team, away_team, day_of_week, primetime
+                SELECT date, week, home_team, away_team, day_of_week, primetime, location
                 FROM upcoming_games
                 WHERE season = ? AND week = ?
                 ORDER BY date ASC
@@ -10907,13 +10910,19 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             return
 
         # Convert to DataFrame
-        df = pd.DataFrame(games, columns=['Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Primetime'])
+        df = pd.DataFrame(games, columns=['Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Primetime', 'Location'])
 
         # Format primetime column
         df['Primetime'] = df['Primetime'].apply(lambda x: '⭐' if x == 1 else '')
 
-        # Create matchup column
-        df['Matchup'] = df['Away Team'] + ' @ ' + df['Home Team']
+        # Create matchup column with location info
+        def format_matchup(row):
+            matchup = f"{row['Away Team']} @ {row['Home Team']}"
+            if row['Location'] and row['Location'] != row['Home Team']:
+                matchup += f" ({row['Location']})"
+            return matchup
+
+        df['Matchup'] = df.apply(format_matchup, axis=1)
 
         # Display summary metrics
         st.divider()

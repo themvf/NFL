@@ -1259,6 +1259,375 @@ def clear_upcoming_games(season):
 
 
 # ============================================================================
+# Player Projection Functions
+# ============================================================================
+
+def calculate_defensive_stats(season, max_week):
+    """
+    Calculate defensive stats for each team (yards allowed by position).
+
+    Returns dict: {team: {pass_allowed, rush_allowed, rec_to_rb, rec_to_wr, rec_to_te}}
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Get all teams
+        teams_query = "SELECT DISTINCT team FROM player_box_score WHERE season = ?"
+        teams_df = pd.read_sql_query(teams_query, conn, params=(season,))
+        teams = teams_df['team'].tolist()
+
+        defensive_stats = {}
+
+        for team in teams:
+            # Pass yards allowed (opponent QBs)
+            pass_query = """
+                SELECT AVG(pass_yds) as avg_pass_allowed
+                FROM player_box_score
+                WHERE season = ? AND week < ? AND opponent = ? AND pass_att > 10
+            """
+            pass_df = pd.read_sql_query(pass_query, conn, params=(season, max_week, team))
+
+            # Rush yards allowed (opponent RBs)
+            rush_query = """
+                SELECT AVG(rush_yds) as avg_rush_allowed
+                FROM player_box_score
+                WHERE season = ? AND week < ? AND opponent = ? AND rush_att >= 5
+            """
+            rush_df = pd.read_sql_query(rush_query, conn, params=(season, max_week, team))
+
+            # Receiving yards allowed to RBs (opponents with rush + rec)
+            rec_rb_query = """
+                SELECT AVG(rec_yds) as avg_rec_to_rb
+                FROM player_box_score
+                WHERE season = ? AND week < ? AND opponent = ?
+                  AND rush_att >= 5 AND targets > 0
+            """
+            rec_rb_df = pd.read_sql_query(rec_rb_query, conn, params=(season, max_week, team))
+
+            # Receiving yards allowed to WRs
+            rec_wr_query = """
+                SELECT AVG(rec_yds) as avg_rec_to_wr
+                FROM player_box_score
+                WHERE season = ? AND week < ? AND opponent = ?
+                  AND targets >= 4 AND rush_att < 3
+            """
+            rec_wr_df = pd.read_sql_query(rec_wr_query, conn, params=(season, max_week, team))
+
+            # Receiving yards allowed to TEs
+            rec_te_query = """
+                SELECT AVG(rec_yds) as avg_rec_to_te
+                FROM player_box_score
+                WHERE season = ? AND week < ? AND opponent = ?
+                  AND targets >= 2 AND targets < 10 AND rush_att < 2
+            """
+            rec_te_df = pd.read_sql_query(rec_te_query, conn, params=(season, max_week, team))
+
+            defensive_stats[team] = {
+                'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
+                'rush_allowed': rush_df['avg_rush_allowed'].iloc[0] if not rush_df.empty and not pd.isna(rush_df['avg_rush_allowed'].iloc[0]) else 80,
+                'rec_to_rb': rec_rb_df['avg_rec_to_rb'].iloc[0] if not rec_rb_df.empty and not pd.isna(rec_rb_df['avg_rec_to_rb'].iloc[0]) else 20,
+                'rec_to_wr': rec_wr_df['avg_rec_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['avg_rec_to_wr'].iloc[0]) else 60,
+                'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40
+            }
+
+        conn.close()
+        return defensive_stats
+
+    except Exception as e:
+        st.error(f"Error calculating defensive stats: {e}")
+        return {}
+
+
+def calculate_player_medians(season, max_week, teams_playing=None):
+    """
+    Calculate median stats for all players by position.
+
+    Returns DataFrame with columns: player, team, position_type, median stats, games_played
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Base query for all players
+        base_query = """
+            SELECT
+                player,
+                team,
+                pass_yds,
+                pass_td,
+                pass_cmp,
+                pass_att,
+                rush_yds,
+                rush_att,
+                rec_yds,
+                rec,
+                targets,
+                rush_td,
+                rec_td
+            FROM player_box_score
+            WHERE season = ? AND week < ?
+        """
+
+        params = [season, max_week]
+
+        if teams_playing:
+            placeholders = ','.join(['?' for _ in teams_playing])
+            base_query += f" AND team IN ({placeholders})"
+            params.extend(teams_playing)
+
+        df = pd.read_sql_query(base_query, conn, params=params)
+        conn.close()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # Classify position and calculate medians
+        results = []
+
+        for (player, team), group in df.groupby(['player', 'team']):
+            games_played = len(group)
+
+            if games_played < 2:  # Need at least 2 games
+                continue
+
+            # Determine position
+            avg_pass_att = group['pass_att'].mean()
+            avg_rush_att = group['rush_att'].mean()
+            avg_targets = group['targets'].mean()
+
+            position = None
+            stats = {'player': player, 'team': team, 'games_played': games_played}
+
+            # QB: High pass attempts
+            if avg_pass_att > 10:
+                position = 'QB'
+                stats.update({
+                    'median_pass_yds': group['pass_yds'].median(),
+                    'median_pass_td': group['pass_td'].median(),
+                    'median_pass_cmp_pct': (group['pass_cmp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
+                })
+
+            # RB: High rush attempts
+            elif avg_rush_att >= 5:
+                position = 'RB'
+                stats.update({
+                    'median_rush_yds': group['rush_yds'].median(),
+                    'median_rec_yds': group['rec_yds'].median(),
+                    'median_total_yds': (group['rush_yds'] + group['rec_yds']).median(),
+                    'median_total_td': (group['rush_td'] + group['rec_td']).median(),
+                    'median_targets': group['targets'].median()
+                })
+
+            # WR: High targets, low rushing
+            elif avg_targets >= 4 and avg_rush_att < 3:
+                position = 'WR'
+                stats.update({
+                    'median_rec_yds': group['rec_yds'].median(),
+                    'median_targets': group['targets'].median(),
+                    'median_rec_td': group['rec_td'].median(),
+                    'median_rec': group['rec'].median()
+                })
+
+            # TE: Moderate targets
+            elif avg_targets >= 2 and avg_targets < 10 and avg_rush_att < 2:
+                position = 'TE'
+                stats.update({
+                    'median_rec_yds': group['rec_yds'].median(),
+                    'median_targets': group['targets'].median(),
+                    'median_rec_td': group['rec_td'].median(),
+                    'median_rec': group['rec'].median()
+                })
+
+            if position:
+                stats['position_type'] = position
+                results.append(stats)
+
+        return pd.DataFrame(results)
+
+    except Exception as e:
+        st.error(f"Error calculating player medians: {e}")
+        return pd.DataFrame()
+
+
+def generate_player_projections(season, week, teams_playing):
+    """
+    Generate defensive-adjusted projections for all players.
+
+    Returns dict: {position: DataFrame with projections}
+    """
+    try:
+        # Calculate defensive stats
+        defensive_stats = calculate_defensive_stats(season, week)
+
+        # Calculate league averages for normalization
+        league_avg = {
+            'pass': sum([d['pass_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 240,
+            'rush': sum([d['rush_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 80,
+            'rec_rb': sum([d['rec_to_rb'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
+            'rec_wr': sum([d['rec_to_wr'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 60,
+            'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40
+        }
+
+        # Get player medians
+        player_medians = calculate_player_medians(season, week, teams_playing)
+
+        if player_medians.empty:
+            return {}
+
+        # Get matchups from upcoming_games
+        conn = sqlite3.connect(DB_PATH)
+        matchups_query = """
+            SELECT home_team, away_team
+            FROM upcoming_games
+            WHERE season = ? AND week = ?
+        """
+        matchups_df = pd.read_sql_query(matchups_query, conn, params=(season, week))
+        conn.close()
+
+        # Create team to opponent mapping
+        team_opponent = {}
+        for _, row in matchups_df.iterrows():
+            team_opponent[row['home_team']] = row['away_team']
+            team_opponent[row['away_team']] = row['home_team']
+
+        # Apply defensive multipliers
+        projections = {'QB': [], 'RB': [], 'WR': [], 'TE': [], 'SKILL': []}
+
+        for _, player in player_medians.iterrows():
+            opponent = team_opponent.get(player['team'])
+            if not opponent or opponent not in defensive_stats:
+                continue
+
+            opponent_def = defensive_stats[opponent]
+            position = player['position_type']
+
+            if position == 'QB':
+                multiplier = opponent_def['pass_allowed'] / league_avg['pass']
+                projected_yds = player['median_pass_yds'] * multiplier
+
+                projections['QB'].append({
+                    'Player': player['player'],
+                    'Team': player['team'],
+                    'Opponent': opponent,
+                    'Median Pass Yds': round(player['median_pass_yds'], 1),
+                    'Def Allows': round(opponent_def['pass_allowed'], 1),
+                    'Projected Yds': round(projected_yds, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Games': player['games_played']
+                })
+
+            elif position == 'RB':
+                rush_mult = opponent_def['rush_allowed'] / league_avg['rush']
+                rec_mult = opponent_def['rec_to_rb'] / league_avg['rec_rb']
+
+                proj_rush = player['median_rush_yds'] * rush_mult
+                proj_rec = player['median_rec_yds'] * rec_mult
+                proj_total = proj_rush + proj_rec
+
+                avg_mult = (rush_mult + rec_mult) / 2
+
+                projections['RB'].append({
+                    'Player': player['player'],
+                    'Team': player['team'],
+                    'Opponent': opponent,
+                    'Median Rush': round(player['median_rush_yds'], 1),
+                    'Median Rec': round(player['median_rec_yds'], 1),
+                    'Projected Total': round(proj_total, 1),
+                    'Multiplier': round(avg_mult, 2),
+                    'Games': player['games_played']
+                })
+
+                projections['SKILL'].append({
+                    'Player': player['player'],
+                    'Team': f"{player['team']} (RB)",
+                    'Opponent': opponent,
+                    'Median Yds': round(player['median_total_yds'], 1),
+                    'Projected Yds': round(proj_total, 1),
+                    'Multiplier': round(avg_mult, 2),
+                    'Games': player['games_played']
+                })
+
+            elif position == 'WR':
+                multiplier = opponent_def['rec_to_wr'] / league_avg['rec_wr']
+                projected_yds = player['median_rec_yds'] * multiplier
+
+                projections['WR'].append({
+                    'Player': player['player'],
+                    'Team': player['team'],
+                    'Opponent': opponent,
+                    'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Median Tgts': round(player['median_targets'], 1),
+                    'Projected Yds': round(projected_yds, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Games': player['games_played']
+                })
+
+                projections['SKILL'].append({
+                    'Player': player['player'],
+                    'Team': f"{player['team']} (WR)",
+                    'Opponent': opponent,
+                    'Median Yds': round(player['median_rec_yds'], 1),
+                    'Projected Yds': round(projected_yds, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Games': player['games_played']
+                })
+
+            elif position == 'TE':
+                multiplier = opponent_def['rec_to_te'] / league_avg['rec_te']
+                projected_yds = player['median_rec_yds'] * multiplier
+
+                projections['TE'].append({
+                    'Player': player['player'],
+                    'Team': player['team'],
+                    'Opponent': opponent,
+                    'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Median Tgts': round(player['median_targets'], 1),
+                    'Projected Yds': round(projected_yds, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Games': player['games_played']
+                })
+
+                projections['SKILL'].append({
+                    'Player': player['player'],
+                    'Team': f"{player['team']} (TE)",
+                    'Opponent': opponent,
+                    'Median Yds': round(player['median_rec_yds'], 1),
+                    'Projected Yds': round(projected_yds, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Games': player['games_played']
+                })
+
+        # Convert to DataFrames and sort
+        result = {}
+        for pos, data in projections.items():
+            if data:
+                df = pd.DataFrame(data)
+                sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
+                result[pos] = df.sort_values(sort_col, ascending=False)
+            else:
+                result[pos] = pd.DataFrame()
+
+        return result
+
+    except Exception as e:
+        st.error(f"Error generating projections: {e}")
+        return {}
+
+
+def get_matchup_rating(multiplier):
+    """Convert multiplier to matchup rating and color."""
+    if multiplier >= 1.15:
+        return '🔥 Great', 'background-color: #90EE90'
+    elif multiplier >= 1.05:
+        return '✅ Good', 'background-color: #D3FFD3'
+    elif multiplier >= 0.95:
+        return '⚪ Average', ''
+    elif multiplier >= 0.85:
+        return '⚠️ Tough', 'background-color: #FFD3D3'
+    else:
+        return '🛑 Brutal', 'background-color: #FF9090'
+
+
+# ============================================================================
 # Advanced Metrics Functions
 # ============================================================================
 
@@ -10977,6 +11346,150 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     "Primetime": st.column_config.TextColumn("Prime", width="small")
                 }
             )
+
+            # Add player projections for this week
+            st.divider()
+            st.subheader("📊 Player Projections (Defensive Matchup Adjusted)")
+
+            # Get teams playing this week
+            teams_playing = list(set(df['Home Team'].tolist() + df['Away Team'].tolist()))
+
+            # Generate projections
+            with st.spinner("Calculating matchup-adjusted projections..."):
+                projections = generate_player_projections(selected_season, selected_week, teams_playing)
+
+            if projections and any(not proj_df.empty for proj_df in projections.values()):
+                # Create tabs for each position
+                proj_tabs = st.tabs(["🎯 Top QBs", "🏃 Top RBs", "🙌 Top WRs", "💪 Top TEs", "⭐ Top Skill Players"])
+
+                # QB Tab
+                with proj_tabs[0]:
+                    if not projections.get('QB', pd.DataFrame()).empty:
+                        st.markdown("##### Quarterbacks - Matchup-Adjusted Passing Yard Projections")
+
+                        qb_df = projections['QB'].head(10).copy()
+
+                        # Add matchup rating column
+                        qb_df['Matchup'] = qb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+
+                        # Style the dataframe with colors
+                        def style_matchup(row):
+                            _, color = get_matchup_rating(row['Multiplier'])
+                            return [color] * len(row) if color else [''] * len(row)
+
+                        styled_df = qb_df.style.apply(style_matchup, axis=1)
+
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No QB data available for this week")
+
+                # RB Tab
+                with proj_tabs[1]:
+                    if not projections.get('RB', pd.DataFrame()).empty:
+                        st.markdown("##### Running Backs - Matchup-Adjusted Total Yard Projections")
+
+                        rb_df = projections['RB'].head(10).copy()
+                        rb_df['Matchup'] = rb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+
+                        def style_matchup(row):
+                            _, color = get_matchup_rating(row['Multiplier'])
+                            return [color] * len(row) if color else [''] * len(row)
+
+                        styled_df = rb_df.style.apply(style_matchup, axis=1)
+
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No RB data available for this week")
+
+                # WR Tab
+                with proj_tabs[2]:
+                    if not projections.get('WR', pd.DataFrame()).empty:
+                        st.markdown("##### Wide Receivers - Matchup-Adjusted Receiving Yard Projections")
+
+                        wr_df = projections['WR'].head(10).copy()
+                        wr_df['Matchup'] = wr_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+
+                        def style_matchup(row):
+                            _, color = get_matchup_rating(row['Multiplier'])
+                            return [color] * len(row) if color else [''] * len(row)
+
+                        styled_df = wr_df.style.apply(style_matchup, axis=1)
+
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No WR data available for this week")
+
+                # TE Tab
+                with proj_tabs[3]:
+                    if not projections.get('TE', pd.DataFrame()).empty:
+                        st.markdown("##### Tight Ends - Matchup-Adjusted Receiving Yard Projections")
+
+                        te_df = projections['TE'].head(10).copy()
+                        te_df['Matchup'] = te_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+
+                        def style_matchup(row):
+                            _, color = get_matchup_rating(row['Multiplier'])
+                            return [color] * len(row) if color else [''] * len(row)
+
+                        styled_df = te_df.style.apply(style_matchup, axis=1)
+
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No TE data available for this week")
+
+                # Skill Players Combined Tab
+                with proj_tabs[4]:
+                    if not projections.get('SKILL', pd.DataFrame()).empty:
+                        st.markdown("##### Top Skill Position Players (RB/WR/TE) - All Positions Combined")
+
+                        skill_df = projections['SKILL'].head(15).copy()
+                        skill_df['Matchup'] = skill_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+
+                        def style_matchup(row):
+                            _, color = get_matchup_rating(row['Multiplier'])
+                            return [color] * len(row) if color else [''] * len(row)
+
+                        styled_df = skill_df.style.apply(style_matchup, axis=1)
+
+                        st.dataframe(
+                            styled_df,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No skill position data available for this week")
+
+                # Add legend
+                st.divider()
+                st.markdown("""
+**Matchup Rating Legend:**
+- 🔥 **Great** (1.15+ multiplier): Highly favorable matchup - defense allows significantly more yards than average
+- ✅ **Good** (1.05-1.14): Favorable matchup - defense allows more yards than average
+- ⚪ **Average** (0.95-1.04): Neutral matchup - defense performs near league average
+- ⚠️ **Tough** (0.85-0.94): Difficult matchup - defense allows fewer yards than average
+- 🛑 **Brutal** (<0.85): Very difficult matchup - elite defense, significantly limits yards
+
+*Projections are calculated by multiplying player's median yards by the defensive matchup factor. The multiplier shows how the opponent's defense compares to league average.*
+                """)
+
+            else:
+                st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")
 
     except Exception as e:
         st.error(f"Error loading upcoming games: {e}")

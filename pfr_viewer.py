@@ -15,6 +15,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+from google.cloud import storage
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -26,6 +28,10 @@ logging.basicConfig(
 # Database configuration - relative path for deployment
 DB_PATH = Path(__file__).parent / "data" / "pfr.db"
 
+# GCS Configuration (from Streamlit secrets)
+GCS_BUCKET_NAME = st.secrets.get("gcs_bucket_name", "")
+GCS_DB_BLOB_NAME = "pfr.db"
+
 # Page configuration
 st.set_page_config(
     page_title="NFL Data Viewer",
@@ -34,11 +40,84 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Verify database exists
+# ============================================================================
+# Google Cloud Storage Functions
+# ============================================================================
+
+def get_gcs_client():
+    """Initialize GCS client from Streamlit secrets."""
+    try:
+        if "gcs_service_account" in st.secrets:
+            credentials_dict = dict(st.secrets["gcs_service_account"])
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_info(credentials_dict)
+            return storage.Client(credentials=credentials, project=credentials_dict.get("project_id"))
+        else:
+            # Try default credentials (for local development)
+            return storage.Client()
+    except Exception as e:
+        logging.error(f"Failed to initialize GCS client: {e}")
+        return None
+
+
+def download_db_from_gcs():
+    """Download database from Google Cloud Storage."""
+    if not GCS_BUCKET_NAME:
+        logging.info("GCS bucket name not configured, using local database")
+        return False
+
+    try:
+        client = get_gcs_client()
+        if not client:
+            logging.warning("GCS client not available, using local database")
+            return False
+
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(GCS_DB_BLOB_NAME)
+
+        # Create data directory if it doesn't exist
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+        # Download the database
+        blob.download_to_filename(str(DB_PATH))
+        logging.info(f"Successfully downloaded database from GCS: {GCS_BUCKET_NAME}/{GCS_DB_BLOB_NAME}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to download database from GCS: {e}")
+        return False
+
+
+def upload_db_to_gcs():
+    """Upload database to Google Cloud Storage."""
+    if not GCS_BUCKET_NAME:
+        logging.info("GCS bucket name not configured, skipping upload")
+        return False
+
+    try:
+        client = get_gcs_client()
+        if not client:
+            logging.warning("GCS client not available, skipping upload")
+            return False
+
+        bucket = client.bucket(GCS_BUCKET_NAME)
+        blob = bucket.blob(GCS_DB_BLOB_NAME)
+
+        # Upload the database
+        blob.upload_from_filename(str(DB_PATH))
+        logging.info(f"Successfully uploaded database to GCS: {GCS_BUCKET_NAME}/{GCS_DB_BLOB_NAME}")
+        return True
+    except Exception as e:
+        logging.error(f"Failed to upload database to GCS: {e}")
+        return False
+
+
+# Verify database exists or download from GCS
 if not DB_PATH.exists():
-    st.error(f"❌ Database not found at {DB_PATH}")
-    st.info("Please ensure the Scrape & Excel project database exists at the specified path.")
-    st.stop()
+    st.info("📥 Downloading database from cloud storage...")
+    if not download_db_from_gcs():
+        st.error(f"❌ Database not found at {DB_PATH} and could not download from GCS")
+        st.info("Please ensure the database exists in Google Cloud Storage or locally.")
+        st.stop()
 
 
 # ============================================================================
@@ -222,6 +301,8 @@ def save_note(note_text, season=None, week=None):
         conn.commit()
         conn.close()
 
+        # Upload database to GCS after successful save
+        upload_db_to_gcs()
         return note_id
     except Exception as e:
         st.error(f"Error saving note: {e}")
@@ -300,6 +381,8 @@ def update_note(note_id, note_text):
         conn.commit()
         conn.close()
 
+        # Upload database to GCS after successful save
+        upload_db_to_gcs()
         return True
     except Exception as e:
         st.error(f"Error updating note: {e}")
@@ -318,6 +401,8 @@ def delete_note(note_id):
         conn.commit()
         conn.close()
 
+        # Upload database to GCS after successful save
+        upload_db_to_gcs()
         return True
     except Exception as e:
         st.error(f"Error deleting note: {e}")
@@ -363,6 +448,8 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
 
             if result:
                 logging.info(f"Successfully saved injury ID {result[0]} for {player_name}")
+                # Upload database to GCS after successful save
+                upload_db_to_gcs()
                 return result[0], None
             else:
                 logging.error(f"Injury saved but could not verify: {player_name}")
@@ -456,6 +543,8 @@ def remove_persistent_injury(player_name, team, season):
         """, (player_name, team, season))
         conn.commit()
         conn.close()
+        # Upload database to GCS after successful save
+        upload_db_to_gcs()
         return True
     except Exception as e:
         st.error(f"Error removing injury: {e}")
@@ -514,6 +603,8 @@ def update_persistent_injury(injury_id, injury_type=None, start_week=None, end_w
         cursor.execute(sql, params)
         conn.commit()
         conn.close()
+        # Upload database to GCS after successful save
+        upload_db_to_gcs()
         return True
     except Exception as e:
         st.error(f"Error updating injury: {e}")
@@ -1300,6 +1391,8 @@ def upload_upcoming_schedule_csv(csv_data, season):
             conn.close()
 
             logging.info(f"Successfully uploaded {success_count} games")
+            # Upload database to GCS after successful save
+            upload_db_to_gcs()
             return success_count, errors
 
         except sqlite3.OperationalError as e:

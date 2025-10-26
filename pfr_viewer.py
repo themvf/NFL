@@ -1427,6 +1427,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
             if avg_pass_att > 10:
                 position = 'QB'
                 stats.update({
+                    'avg_pass_yds': group['pass_yds'].mean(),
                     'median_pass_yds': group['pass_yds'].median(),
                     'median_pass_td': group['pass_td'].median(),
                     'median_pass_cmp_pct': (group['pass_cmp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
@@ -1436,6 +1437,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
             elif avg_rush_att >= 5:
                 position = 'RB'
                 stats.update({
+                    'avg_total_yds': (group['rush_yds'] + group['rec_yds']).mean(),
                     'median_rush_yds': group['rush_yds'].median(),
                     'median_rec_yds': group['rec_yds'].median(),
                     'median_total_yds': (group['rush_yds'] + group['rec_yds']).median(),
@@ -1447,6 +1449,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
             elif avg_targets >= 4 and avg_rush_att < 3:
                 position = 'WR'
                 stats.update({
+                    'avg_rec_yds': group['rec_yds'].mean(),
                     'median_rec_yds': group['rec_yds'].median(),
                     'median_targets': group['targets'].median(),
                     'median_rec_td': group['rec_td'].median(),
@@ -1457,6 +1460,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
             elif avg_targets >= 2 and avg_targets < 10 and avg_rush_att < 2:
                 position = 'TE'
                 stats.update({
+                    'avg_rec_yds': group['rec_yds'].mean(),
                     'median_rec_yds': group['rec_yds'].median(),
                     'median_targets': group['targets'].median(),
                     'median_rec_td': group['rec_td'].median(),
@@ -1553,7 +1557,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_pass_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1575,7 +1579,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_total_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush': round(player['median_rush_yds'], 1),
                     'Median Rec': round(player['median_rec_yds'], 1),
                     'Projected Total': round(proj_total, 1),
@@ -1587,7 +1591,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (RB)",
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_total_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Yds': round(player['median_total_yds'], 1),
                     'Projected Yds': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 2),
@@ -1602,7 +1606,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1614,7 +1618,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (WR)",
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
@@ -1629,7 +1633,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1641,7 +1645,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (TE)",
                     'Opponent': opponent,
-                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
+                    'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),

@@ -11560,11 +11560,15 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 def main():
     """Main application entry point."""
 
-    # Initialize database tables
-    init_notes_table()
-    init_injuries_table()
-    init_transactions_table()
-    init_upcoming_games_table()
+    # Initialize database tables on every startup to ensure they exist
+    try:
+        init_notes_table()
+        init_injuries_table()
+        init_transactions_table()
+        init_upcoming_games_table()
+    except Exception as e:
+        st.error(f"Database initialization error: {e}")
+        st.info("Some features may not work correctly. Please check database permissions.")
 
     # Render sidebar and get selections
     view, season, week, team = render_sidebar()

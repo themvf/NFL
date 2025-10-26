@@ -6185,6 +6185,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             if not trans_info['is_valid']:
                                 continue
 
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team1, season, week):
+                                continue
+
                             # Use smart aggregation function
                             smart_stats = calculate_smart_expected_stats(
                                 player_name=p['player'],
@@ -6312,6 +6316,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             # Skip players who weren't on team during analysis period
                             if not trans_info['is_valid']:
+                                continue
+
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team2, season, week):
                                 continue
 
                             # Use smart aggregation function
@@ -6471,6 +6479,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             if not trans_info['is_valid']:
                                 continue
 
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team1, season, week):
+                                continue
+
                             # Use smart aggregation function
                             smart_stats = calculate_smart_expected_stats(
                                 player_name=p['player'],
@@ -6599,6 +6611,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             # Skip players who weren't on team during analysis period
                             if not trans_info['is_valid']:
+                                continue
+
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team2, season, week):
                                 continue
 
                             # Use smart aggregation function
@@ -6758,6 +6774,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             if not trans_info['is_valid']:
                                 continue
 
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team1, season, week):
+                                continue
+
                             # Use smart aggregation function
                             smart_stats = calculate_smart_expected_stats(
                                 player_name=p['player'],
@@ -6900,6 +6920,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             # Skip players who weren't on team during analysis period
                             if not trans_info['is_valid']:
+                                continue
+
+                            # Skip players who are injured for this week
+                            if is_player_on_injury_list(p['player'], team2, season, week):
                                 continue
 
                             # Use smart aggregation function

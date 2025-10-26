@@ -1499,15 +1499,30 @@ def generate_player_projections(season, week, teams_playing):
         if player_medians.empty:
             return {}
 
-        # Get matchups from upcoming_games
+        # Get matchups and injured players from database
         conn = sqlite3.connect(DB_PATH)
+
         matchups_query = """
             SELECT home_team, away_team
             FROM upcoming_games
             WHERE season = ? AND week = ?
         """
         matchups_df = pd.read_sql_query(matchups_query, conn, params=(season, week))
+
+        # Get injured players for this week
+        injuries_query = """
+            SELECT player_name, team_abbr
+            FROM player_injuries
+            WHERE season = ?
+              AND ? >= start_week
+              AND ? <= end_week
+        """
+        injuries_df = pd.read_sql_query(injuries_query, conn, params=(season, week, week))
+
         conn.close()
+
+        # Create set of injured players for fast lookup
+        injured_players = set(injuries_df['player_name'].tolist()) if not injuries_df.empty else set()
 
         # Create team to opponent mapping
         team_opponent = {}
@@ -1519,6 +1534,10 @@ def generate_player_projections(season, week, teams_playing):
         projections = {'QB': [], 'RB': [], 'WR': [], 'TE': [], 'SKILL': []}
 
         for _, player in player_medians.iterrows():
+            # Skip injured players
+            if player['player'] in injured_players:
+                continue
+
             opponent = team_opponent.get(player['team'])
             if not opponent or opponent not in defensive_stats:
                 continue
@@ -1534,6 +1553,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1555,6 +1575,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_total_yds'], 1),
                     'Median Rush': round(player['median_rush_yds'], 1),
                     'Median Rec': round(player['median_rec_yds'], 1),
                     'Projected Total': round(proj_total, 1),
@@ -1566,6 +1587,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (RB)",
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_total_yds'], 1),
                     'Median Yds': round(player['median_total_yds'], 1),
                     'Projected Yds': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 2),
@@ -1580,6 +1602,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1591,6 +1614,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (WR)",
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
@@ -1605,6 +1629,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
                     'Projected Yds': round(projected_yds, 1),
@@ -1616,6 +1641,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (TE)",
                     'Opponent': opponent,
+                    'Avg Yds/Game': round(player['median_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
@@ -10901,6 +10927,10 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
         with injury_tab1:
             st.markdown("### Add or Update Player Injury")
 
+            # Initialize form counter for resetting
+            if 'injury_form_counter' not in st.session_state:
+                st.session_state.injury_form_counter = 0
+
             # Get all unique players from the season
             if season:
                 players_query = f"SELECT DISTINCT player FROM player_box_score WHERE season = {season} ORDER BY player"
@@ -10909,7 +10939,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
             else:
                 all_players = []
 
-            with st.form("add_injury_form"):
+            with st.form(f"add_injury_form_{st.session_state.injury_form_counter}"):
                 col1, col2 = st.columns(2)
 
                 with col1:
@@ -10989,6 +11019,8 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                         if injury_id:
                             st.success(f"✅ Injury added/updated for {inj_player}")
                             st.balloons()
+                            # Increment form counter to reset form
+                            st.session_state.injury_form_counter += 1
                             st.rerun()
 
         with injury_tab2:
@@ -11393,7 +11425,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('QB', pd.DataFrame()).empty:
                         st.markdown("##### Quarterbacks - Matchup-Adjusted Passing Yard Projections")
 
-                        qb_df = projections['QB'].head(10).copy()
+                        qb_df = projections['QB'].head(20).copy()
 
                         # Add matchup rating column
                         qb_df['Matchup'] = qb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
@@ -11418,7 +11450,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('RB', pd.DataFrame()).empty:
                         st.markdown("##### Running Backs - Matchup-Adjusted Total Yard Projections")
 
-                        rb_df = projections['RB'].head(10).copy()
+                        rb_df = projections['RB'].head(20).copy()
                         rb_df['Matchup'] = rb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -11440,7 +11472,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('WR', pd.DataFrame()).empty:
                         st.markdown("##### Wide Receivers - Matchup-Adjusted Receiving Yard Projections")
 
-                        wr_df = projections['WR'].head(10).copy()
+                        wr_df = projections['WR'].head(20).copy()
                         wr_df['Matchup'] = wr_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -11462,7 +11494,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('TE', pd.DataFrame()).empty:
                         st.markdown("##### Tight Ends - Matchup-Adjusted Receiving Yard Projections")
 
-                        te_df = projections['TE'].head(10).copy()
+                        te_df = projections['TE'].head(20).copy()
                         te_df['Matchup'] = te_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -11484,7 +11516,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('SKILL', pd.DataFrame()).empty:
                         st.markdown("##### Top Skill Position Players (RB/WR/TE) - All Positions Combined")
 
-                        skill_df = projections['SKILL'].head(15).copy()
+                        skill_df = projections['SKILL'].head(20).copy()
                         skill_df['Matchup'] = skill_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):

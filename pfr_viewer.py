@@ -4606,9 +4606,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
     t1_net_epa = t1_epa.get('off_epa_per_play', 0) - t1_epa.get('def_epa_per_play', 0)
     t2_net_epa = t2_epa.get('off_epa_per_play', 0) - t2_epa.get('def_epa_per_play', 0)
 
-    # Step 6: Calculate final power ratings with z-scoring
-    t1_power = calculate_team_power_rating(team1, season, week, all_team_powers, league_stats)
-    t2_power = calculate_team_power_rating(team2, season, week, all_team_powers, league_stats)
+    # Step 6: Get normalized power ratings from all_team_powers (1-100 scale)
+    t1_power = all_team_powers.get(team1, 50)  # Default to 50 if team not found
+    t2_power = all_team_powers.get(team2, 50)
 
     # Calculate win probability (logistic function with adjusted scaling)
     rating_diff = t1_power - t2_power

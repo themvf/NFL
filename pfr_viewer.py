@@ -28,17 +28,17 @@ logging.basicConfig(
 # Database configuration - relative path for deployment
 DB_PATH = Path(__file__).parent / "data" / "pfr.db"
 
-# GCS Configuration (from Streamlit secrets)
-GCS_BUCKET_NAME = st.secrets.get("gcs_bucket_name", "")
-GCS_DB_BLOB_NAME = "pfr.db"
-
-# Page configuration
+# Page configuration (must be first st command)
 st.set_page_config(
     page_title="NFL Data Viewer",
     page_icon="🏈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# GCS Configuration (from Streamlit secrets) - loaded after page config
+GCS_BUCKET_NAME = st.secrets.get("gcs_bucket_name", "")
+GCS_DB_BLOB_NAME = "pfr.db"
 
 # ============================================================================
 # Google Cloud Storage Functions

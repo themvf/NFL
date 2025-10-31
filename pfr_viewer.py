@@ -11971,40 +11971,21 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
             y=df['avg_points'],
             mode='markers',
             marker=dict(
-                size=12,
+                size=1,
                 color=df['avg_points'],
                 colorscale='RdYlGn',
                 showscale=True,
                 colorbar=dict(title="PPG"),
-                opacity=0,  # Invisible markers
-                line=dict(width=0)
+                opacity=0
             ),
             text=df['team_abbr'],
-            hovertemplate='<b>%{text}</b><br>' +
+            customdata=df['team_abbr'],
+            hovertemplate='<b>%{customdata}</b><br>' +
                          'Yards/Game: %{x:.1f}<br>' +
                          'Points/Game: %{y:.1f}<br>' +
                          '<extra></extra>',
             showlegend=False
         ))
-
-        # Calculate dynamic logo sizing based on axis ranges
-        x_range = df['avg_yards'].max() - df['avg_yards'].min()
-        y_range = df['avg_points'].max() - df['avg_points'].min()
-        logo_size_x = x_range * 0.04  # 4% of x-axis range
-        logo_size_y = y_range * 0.08  # 8% of y-axis range
-
-        # Add team logos as layout images
-        for idx, row in df.iterrows():
-            fig.add_layout_image(
-                source=get_team_logo_url(row['team_abbr']),
-                x=row['avg_yards'],
-                y=row['avg_points'],
-                sizex=logo_size_x,
-                sizey=logo_size_y,
-                xanchor="center",
-                yanchor="middle",
-                layer="above"
-            )
 
         # Add league average lines
         avg_yards = df['avg_yards'].mean()
@@ -12015,6 +11996,23 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
         fig.add_vline(x=avg_yards, line_dash="dash", line_color="gray", opacity=0.5,
                      annotation_text="League Avg YPG", annotation_position="top")
 
+        # Build layout with images using larger fixed size
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team_abbr']),
+                xref="x",
+                yref="y",
+                x=row['avg_yards'],
+                y=row['avg_points'],
+                sizex=30,  # 30 yards wide
+                sizey=3,   # 3 points tall
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
         fig.update_layout(
             title=f"Yards per Game vs Points per Game ({season} Season)",
             xaxis_title="Total Yards per Game",
@@ -12022,7 +12020,8 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -12097,41 +12096,22 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
             y=df['avg_points_allowed'],
             mode='markers',
             marker=dict(
-                size=14,
+                size=1,
                 color=df['dominance'],
                 colorscale='RdYlGn',
                 showscale=True,
                 colorbar=dict(title="Point Diff"),
-                opacity=0,  # Invisible markers
-                line=dict(width=0)
+                opacity=0
             ),
             text=df['team_abbr'],
+            customdata=df['dominance'],
             hovertemplate='<b>%{text}</b><br>' +
                          'Points Scored/Game: %{x:.1f}<br>' +
                          'Points Allowed/Game: %{y:.1f}<br>' +
-                         'Point Differential: %{marker.color:.1f}<br>' +
+                         'Point Differential: %{customdata:.1f}<br>' +
                          '<extra></extra>',
             showlegend=False
         ))
-
-        # Calculate dynamic logo sizing based on axis ranges
-        x_range = df['avg_points_scored'].max() - df['avg_points_scored'].min()
-        y_range = df['avg_points_allowed'].max() - df['avg_points_allowed'].min()
-        logo_size_x = x_range * 0.04  # 4% of x-axis range
-        logo_size_y = y_range * 0.08  # 8% of y-axis range
-
-        # Add team logos as layout images
-        for idx, row in df.iterrows():
-            fig.add_layout_image(
-                source=get_team_logo_url(row['team_abbr']),
-                x=row['avg_points_scored'],
-                y=row['avg_points_allowed'],
-                sizex=logo_size_x,
-                sizey=logo_size_y,
-                xanchor="center",
-                yanchor="middle",
-                layer="above"
-            )
 
         # Add league average lines
         avg_scored = df['avg_points_scored'].mean()
@@ -12152,6 +12132,23 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         fig.add_annotation(x=df['avg_points_scored'].min() * 1.05, y=df['avg_points_allowed'].max() * 0.95,
                           text="Struggling", showarrow=False, font=dict(size=14, color="red"))
 
+        # Build layout with images using larger fixed size
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team_abbr']),
+                xref="x",
+                yref="y",
+                x=row['avg_points_scored'],
+                y=row['avg_points_allowed'],
+                sizex=3,  # 3 points wide
+                sizey=3,  # 3 points tall
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
         fig.update_layout(
             title=f"Points Scored vs Points Allowed ({season} Season)",
             xaxis_title="Points Scored per Game",
@@ -12159,7 +12156,8 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
         )
 
         # Reverse y-axis so lower (better defense) is at top

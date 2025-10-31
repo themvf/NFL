@@ -28,8 +28,8 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
-# Data (optional - remove if you want to version control data)
-# data/*.db
+# Data (databases stored in GCS, not Git)
+data/*.db
 
 # Artifacts
 artifacts/

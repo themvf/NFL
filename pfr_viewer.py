@@ -11914,7 +11914,7 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
         # Build query with week filter
         week_filter = f"AND week <= {week}" if week else ""
 
-        query = f"""
+        sql_query = f"""
         SELECT
             team_abbr,
             COUNT(DISTINCT game_id) as games,
@@ -11930,7 +11930,7 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
         ORDER BY avg_points DESC
         """
 
-        df = query(query, (season,))
+        df = query(sql_query, (season,))
 
         if df.empty:
             st.info("No data available for selected filters")
@@ -12007,7 +12007,7 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         week_filter = f"AND week <= {week}" if week else ""
 
         # Get offensive stats (points scored)
-        query_offense = f"""
+        sql_offense = f"""
         SELECT
             team_abbr,
             AVG(points) as avg_points_scored
@@ -12018,7 +12018,7 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         """
 
         # Get defensive stats (points allowed) - opponent's points
-        query_defense = f"""
+        sql_defense = f"""
         SELECT
             t1.team_abbr,
             AVG(t2.points) as avg_points_allowed
@@ -12029,8 +12029,8 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         GROUP BY t1.team_abbr
         """
 
-        df_offense = query(query_offense, (season,))
-        df_defense = query(query_defense, (season,))
+        df_offense = query(sql_offense, (season,))
+        df_defense = query(sql_defense, (season,))
 
         # Merge datasets
         df = df_offense.merge(df_defense, on='team_abbr')
@@ -12128,7 +12128,7 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
     try:
         week_filter = f"AND g.week <= {week}" if week else ""
 
-        query_text = f"""
+        sql_rb = f"""
         SELECT
             pb.player,
             pb.team,
@@ -12148,7 +12148,7 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
         ORDER BY total_yards DESC
         """
 
-        df = query(query_text, (season, min_touches))
+        df = query(sql_rb, (season, min_touches))
 
         if df.empty:
             st.info(f"No running backs with at least {min_touches} attempts found")
@@ -12223,7 +12223,7 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
     try:
         week_filter = f"AND g.week <= {week}" if week else ""
 
-        query_text = f"""
+        sql_wr = f"""
         SELECT
             pb.player,
             pb.team,
@@ -12244,7 +12244,7 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
         ORDER BY total_yards DESC
         """
 
-        df = query(query_text, (season, min_targets))
+        df = query(sql_wr, (season, min_targets))
 
         if df.empty:
             st.info(f"No receivers with at least {min_targets} targets found")

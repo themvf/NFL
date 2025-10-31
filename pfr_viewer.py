@@ -3620,6 +3620,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
         "Select View",
         [
             "Games Browser",
+            "Charts",
             "Team Overview",
             "Team Comparison",
             "Power Rankings",
@@ -11868,6 +11869,453 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
 
 # ============================================================================
+# Charts Section
+# ============================================================================
+
+def render_charts_view(season: Optional[int], week: Optional[int]):
+    """Render comprehensive charts and visualizations."""
+    st.header("📊 Analytics Charts")
+    st.markdown("Visual analytics to identify efficiency, trends, and opportunities")
+
+    # Chart selection
+    chart_type = st.selectbox(
+        "Select Chart",
+        [
+            "Team Offense Efficiency (Yards vs Points)",
+            "Team Balance (Points Scored vs Allowed)",
+            "RB Efficiency (Rush Yards vs TDs)",
+            "WR Efficiency (Targets vs Yards per Route Run)"
+        ]
+    )
+
+    st.divider()
+
+    if chart_type == "Team Offense Efficiency (Yards vs Points)":
+        render_team_offense_efficiency_chart(season, week)
+    elif chart_type == "Team Balance (Points Scored vs Allowed)":
+        render_team_balance_chart(season, week)
+    elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
+        render_rb_efficiency_chart(season, week)
+    elif chart_type == "WR Efficiency (Targets vs Yards per Route Run)":
+        render_wr_efficiency_chart(season, week)
+
+
+def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[int]):
+    """Chart 1: Yards per Game vs Points per Game - Scoring Efficiency"""
+    st.subheader("⚡ Team Offense Efficiency")
+    st.markdown("""
+    **Goal:** Identify teams that turn yardage into actual scoring efficiency.
+    - **High yards, high points:** Dominant offense
+    - **High yards, low points:** Inefficient in red zone
+    - **Low yards, high points:** Explosive/efficient plays
+    """)
+
+    try:
+        # Build query with week filter
+        week_filter = f"AND week <= {week}" if week else ""
+
+        query = f"""
+        SELECT
+            team_abbr,
+            COUNT(DISTINCT game_id) as games,
+            AVG(yards_total) as avg_yards,
+            AVG(points) as avg_points,
+            SUM(points) as total_points,
+            SUM(yards_total) as total_yards
+        FROM team_game_summary
+        WHERE season = ?
+        {week_filter}
+        GROUP BY team_abbr
+        HAVING games > 0
+        ORDER BY avg_points DESC
+        """
+
+        df = query(query, (season,))
+
+        if df.empty:
+            st.info("No data available for selected filters")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=df['avg_yards'],
+            y=df['avg_points'],
+            mode='markers+text',
+            marker=dict(
+                size=12,
+                color=df['avg_points'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="PPG"),
+                line=dict(width=1, color='white')
+            ),
+            text=df['team_abbr'],
+            textposition='top center',
+            textfont=dict(size=10, color='white'),
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Yards/Game: %{x:.1f}<br>' +
+                         'Points/Game: %{y:.1f}<br>' +
+                         '<extra></extra>'
+        ))
+
+        # Add league average lines
+        avg_yards = df['avg_yards'].mean()
+        avg_points = df['avg_points'].mean()
+
+        fig.add_hline(y=avg_points, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg PPG", annotation_position="right")
+        fig.add_vline(x=avg_yards, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg YPG", annotation_position="top")
+
+        fig.update_layout(
+            title=f"Yards per Game vs Points per Game ({season} Season)",
+            xaxis_title="Total Yards per Game",
+            yaxis_title="Points per Game",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Data Table"):
+            display_df = df[['team_abbr', 'games', 'avg_yards', 'avg_points']].copy()
+            display_df.columns = ['Team', 'Games', 'Yards/Game', 'Points/Game']
+            display_df = display_df.round(1)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_team_balance_chart(season: Optional[int], week: Optional[int]):
+    """Chart 2: Points Scored vs Points Allowed - Team Balance"""
+    st.subheader("⚖️ Team Balance Chart")
+    st.markdown("""
+    **Goal:** Classic balance chart showing team dominance.
+    - **Top-right quadrant:** Elite teams (high scoring, strong defense)
+    - **Top-left:** Good defense, struggling offense
+    - **Bottom-right:** High-powered offense, weak defense
+    - **Bottom-left:** Struggling on both sides
+    """)
+
+    try:
+        week_filter = f"AND week <= {week}" if week else ""
+
+        # Get offensive stats (points scored)
+        query_offense = f"""
+        SELECT
+            team_abbr,
+            AVG(points) as avg_points_scored
+        FROM team_game_summary
+        WHERE season = ?
+        {week_filter}
+        GROUP BY team_abbr
+        """
+
+        # Get defensive stats (points allowed) - opponent's points
+        query_defense = f"""
+        SELECT
+            t1.team_abbr,
+            AVG(t2.points) as avg_points_allowed
+        FROM team_game_summary t1
+        JOIN team_game_summary t2 ON t1.game_id = t2.game_id AND t1.team_abbr != t2.team_abbr
+        WHERE t1.season = ?
+        {week_filter}
+        GROUP BY t1.team_abbr
+        """
+
+        df_offense = query(query_offense, (season,))
+        df_defense = query(query_defense, (season,))
+
+        # Merge datasets
+        df = df_offense.merge(df_defense, on='team_abbr')
+
+        if df.empty:
+            st.info("No data available for selected filters")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Calculate dominance score (higher scored, lower allowed = better)
+        df['dominance'] = df['avg_points_scored'] - df['avg_points_allowed']
+
+        fig.add_trace(go.Scatter(
+            x=df['avg_points_scored'],
+            y=df['avg_points_allowed'],
+            mode='markers+text',
+            marker=dict(
+                size=14,
+                color=df['dominance'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Point Diff"),
+                line=dict(width=1, color='white')
+            ),
+            text=df['team_abbr'],
+            textposition='top center',
+            textfont=dict(size=10, color='white'),
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Points Scored/Game: %{x:.1f}<br>' +
+                         'Points Allowed/Game: %{y:.1f}<br>' +
+                         'Point Differential: %{marker.color:.1f}<br>' +
+                         '<extra></extra>'
+        ))
+
+        # Add league average lines
+        avg_scored = df['avg_points_scored'].mean()
+        avg_allowed = df['avg_points_allowed'].mean()
+
+        fig.add_hline(y=avg_allowed, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Allowed", annotation_position="right")
+        fig.add_vline(x=avg_scored, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Scored", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=df['avg_points_scored'].max() * 0.95, y=df['avg_points_allowed'].min() * 1.05,
+                          text="Elite", showarrow=False, font=dict(size=14, color="green"))
+        fig.add_annotation(x=df['avg_points_scored'].min() * 1.05, y=df['avg_points_allowed'].min() * 1.05,
+                          text="Strong Defense", showarrow=False, font=dict(size=14, color="blue"))
+        fig.add_annotation(x=df['avg_points_scored'].max() * 0.95, y=df['avg_points_allowed'].max() * 0.95,
+                          text="High Scoring", showarrow=False, font=dict(size=14, color="orange"))
+        fig.add_annotation(x=df['avg_points_scored'].min() * 1.05, y=df['avg_points_allowed'].max() * 0.95,
+                          text="Struggling", showarrow=False, font=dict(size=14, color="red"))
+
+        fig.update_layout(
+            title=f"Points Scored vs Points Allowed ({season} Season)",
+            xaxis_title="Points Scored per Game",
+            yaxis_title="Points Allowed per Game (Lower is Better)",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        # Reverse y-axis so lower (better defense) is at top
+        fig.update_yaxes(autorange="reversed")
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Data Table"):
+            display_df = df[['team_abbr', 'avg_points_scored', 'avg_points_allowed', 'dominance']].copy()
+            display_df.columns = ['Team', 'PPG Scored', 'PPG Allowed', 'Point Diff']
+            display_df = display_df.round(1).sort_values('Point Diff', ascending=False)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
+    """Chart 3: Rushing Yards vs Rushing TDs - RB Efficiency"""
+    st.subheader("🏃 Running Back Efficiency")
+    st.markdown("""
+    **Goal:** Identify volume vs scoring efficiency among running backs.
+    - **Minimum 20 touches** to filter for relevant players
+    - **High yards, high TDs:** Workhorse RBs
+    - **High TDs, lower yards:** Goal-line specialists
+    """)
+
+    # Minimum touches filter
+    min_touches = st.slider("Minimum Rush Attempts", 10, 50, 20, 5)
+
+    try:
+        week_filter = f"AND g.week <= {week}" if week else ""
+
+        query_text = f"""
+        SELECT
+            pb.player,
+            pb.team,
+            SUM(pb.rush_att) as total_attempts,
+            SUM(pb.rush_yds) as total_yards,
+            SUM(pb.rush_td) as total_tds,
+            COUNT(DISTINCT pb.game_id) as games,
+            AVG(pb.rush_yds) as avg_yards_per_game,
+            CAST(SUM(pb.rush_yds) AS FLOAT) / NULLIF(SUM(pb.rush_att), 0) as yards_per_carry
+        FROM player_box_score pb
+        JOIN games g ON pb.game_id = g.game_id
+        WHERE g.season = ?
+        {week_filter}
+        AND pb.rush_att > 0
+        GROUP BY pb.player, pb.team
+        HAVING total_attempts >= ?
+        ORDER BY total_yards DESC
+        """
+
+        df = query(query_text, (season, min_touches))
+
+        if df.empty:
+            st.info(f"No running backs with at least {min_touches} attempts found")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=df['total_yards'],
+            y=df['total_tds'],
+            mode='markers+text',
+            marker=dict(
+                size=df['total_attempts'] / 10,  # Size by volume
+                color=df['yards_per_carry'],
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(title="YPC"),
+                line=dict(width=1, color='white')
+            ),
+            text=df['player'].str.split().str[-1],  # Last name only
+            textposition='top center',
+            textfont=dict(size=9, color='white'),
+            hovertemplate='<b>%{customdata[0]}</b> (%{customdata[1]})<br>' +
+                         'Rush Yards: %{x}<br>' +
+                         'Rush TDs: %{y}<br>' +
+                         'Attempts: %{customdata[2]}<br>' +
+                         'Yards/Carry: %{marker.color:.2f}<br>' +
+                         '<extra></extra>',
+            customdata=df[['player', 'team', 'total_attempts']]
+        ))
+
+        fig.update_layout(
+            title=f"Rushing Yards vs Touchdowns ({season} Season)",
+            xaxis_title="Total Rushing Yards",
+            yaxis_title="Total Rushing Touchdowns",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Data Table"):
+            display_df = df[['player', 'team', 'games', 'total_attempts', 'total_yards', 'total_tds', 'yards_per_carry']].copy()
+            display_df.columns = ['Player', 'Team', 'Games', 'Attempts', 'Yards', 'TDs', 'YPC']
+            display_df['YPC'] = display_df['YPC'].round(2)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
+    """Chart 4: Targets vs Yards per Route Run - WR Efficiency"""
+    st.subheader("🎯 Wide Receiver Efficiency")
+    st.markdown("""
+    **Goal:** Identify true efficiency vs volume receivers.
+    - **Note:** Yards per Route Run requires route data (approximated by receptions)
+    - **High targets, high efficiency:** Elite WR1s
+    - **High targets, lower efficiency:** Volume receivers
+    - **Low targets, high efficiency:** Deep threats/efficient role players
+    """)
+
+    st.warning("⚠️ YPRR calculation is approximated as Yards/Reception since route data is not available in this dataset")
+
+    # Minimum targets filter
+    min_targets = st.slider("Minimum Targets", 5, 30, 10, 5)
+
+    try:
+        week_filter = f"AND g.week <= {week}" if week else ""
+
+        query_text = f"""
+        SELECT
+            pb.player,
+            pb.team,
+            SUM(pb.targets) as total_targets,
+            SUM(pb.rec) as total_receptions,
+            SUM(pb.rec_yds) as total_yards,
+            SUM(pb.rec_td) as total_tds,
+            COUNT(DISTINCT pb.game_id) as games,
+            CAST(SUM(pb.rec_yds) AS FLOAT) / NULLIF(SUM(pb.rec), 0) as yards_per_reception,
+            CAST(SUM(pb.rec) AS FLOAT) / NULLIF(SUM(pb.targets), 0) as catch_rate
+        FROM player_box_score pb
+        JOIN games g ON pb.game_id = g.game_id
+        WHERE g.season = ?
+        {week_filter}
+        AND pb.targets > 0
+        GROUP BY pb.player, pb.team
+        HAVING total_targets >= ?
+        ORDER BY total_yards DESC
+        """
+
+        df = query(query_text, (season, min_targets))
+
+        if df.empty:
+            st.info(f"No receivers with at least {min_targets} targets found")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=df['total_targets'],
+            y=df['yards_per_reception'],
+            mode='markers+text',
+            marker=dict(
+                size=df['total_receptions'] / 5,  # Size by receptions
+                color=df['catch_rate'] * 100,
+                colorscale='Plasma',
+                showscale=True,
+                colorbar=dict(title="Catch %"),
+                line=dict(width=1, color='white'),
+                cmin=40,
+                cmax=100
+            ),
+            text=df['player'].str.split().str[-1],  # Last name only
+            textposition='top center',
+            textfont=dict(size=9, color='white'),
+            hovertemplate='<b>%{customdata[0]}</b> (%{customdata[1]})<br>' +
+                         'Targets: %{x}<br>' +
+                         'Yards/Reception: %{y:.2f}<br>' +
+                         'Total Yards: %{customdata[2]}<br>' +
+                         'Receptions: %{customdata[3]}<br>' +
+                         'Catch Rate: %{marker.color:.1f}%<br>' +
+                         'TDs: %{customdata[4]}<br>' +
+                         '<extra></extra>',
+            customdata=df[['player', 'team', 'total_yards', 'total_receptions', 'total_tds']]
+        ))
+
+        # Add league average lines
+        avg_targets = df['total_targets'].mean()
+        avg_ypr = df['yards_per_reception'].mean()
+
+        fig.add_hline(y=avg_ypr, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Y/R", annotation_position="right")
+        fig.add_vline(x=avg_targets, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Targets", annotation_position="top")
+
+        fig.update_layout(
+            title=f"Targets vs Yards per Reception ({season} Season)",
+            xaxis_title="Total Targets",
+            yaxis_title="Yards per Reception (Proxy for YPRR)",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Data Table"):
+            display_df = df[['player', 'team', 'games', 'total_targets', 'total_receptions',
+                            'total_yards', 'total_tds', 'yards_per_reception', 'catch_rate']].copy()
+            display_df.columns = ['Player', 'Team', 'Games', 'Targets', 'Rec', 'Yards', 'TDs', 'Y/R', 'Catch %']
+            display_df['Y/R'] = display_df['Y/R'].round(2)
+            display_df['Catch %'] = (display_df['Catch %'] * 100).round(1)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+# ============================================================================
 # Main App
 # ============================================================================
 
@@ -11895,6 +12343,9 @@ def main():
     # Render selected view
     if view == "Games Browser":
         render_games_browser(season, week)
+
+    elif view == "Charts":
+        render_charts_view(season, week)
 
     elif view == "Team Overview":
         render_team_overview(season, week)

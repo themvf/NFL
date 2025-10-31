@@ -11996,7 +11996,7 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
         fig.add_vline(x=avg_yards, line_dash="dash", line_color="gray", opacity=0.5,
                      annotation_text="League Avg YPG", annotation_position="top")
 
-        # Build layout with images using larger fixed size
+        # Build layout with images
         layout_images = []
         for idx, row in df.iterrows():
             layout_images.append(dict(
@@ -12005,8 +12005,8 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
                 yref="y",
                 x=row['avg_yards'],
                 y=row['avg_points'],
-                sizex=30,  # 30 yards wide
-                sizey=3,   # 3 points tall
+                sizex=15,  # 15 yards wide
+                sizey=1.5, # 1.5 points tall
                 xanchor="center",
                 yanchor="middle",
                 layer="above",
@@ -12132,7 +12132,7 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         fig.add_annotation(x=df['avg_points_scored'].min() * 1.05, y=df['avg_points_allowed'].max() * 0.95,
                           text="Struggling", showarrow=False, font=dict(size=14, color="red"))
 
-        # Build layout with images using larger fixed size
+        # Build layout with images
         layout_images = []
         for idx, row in df.iterrows():
             layout_images.append(dict(
@@ -12141,8 +12141,8 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
                 yref="y",
                 x=row['avg_points_scored'],
                 y=row['avg_points_allowed'],
-                sizex=3,  # 3 points wide
-                sizey=3,  # 3 points tall
+                sizex=1.5,  # 1.5 points wide
+                sizey=1.5,  # 1.5 points tall
                 xanchor="center",
                 yanchor="middle",
                 layer="above",

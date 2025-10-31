@@ -137,6 +137,32 @@ def query(sql: str, params: tuple = ()) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def get_team_logo_url(team_abbr: str) -> str:
+    """
+    Get ESPN CDN URL for NFL team logo.
+
+    Args:
+        team_abbr: 3-letter team abbreviation from database
+
+    Returns:
+        URL to team logo PNG (500x500 transparent background)
+    """
+    # Map database abbreviations to ESPN CDN abbreviations
+    TEAM_LOGO_MAP = {
+        'ARI': 'ari', 'ATL': 'atl', 'BAL': 'bal', 'BUF': 'buf',
+        'CAR': 'car', 'CHI': 'chi', 'CIN': 'cin', 'CLE': 'cle',
+        'DAL': 'dal', 'DEN': 'den', 'DET': 'det', 'GNB': 'gb',
+        'HOU': 'hou', 'IND': 'ind', 'JAX': 'jax', 'KAN': 'kc',
+        'LAC': 'lac', 'LAR': 'lar', 'LVR': 'lv', 'MIA': 'mia',
+        'MIN': 'min', 'NOR': 'no', 'NWE': 'ne', 'NYG': 'nyg',
+        'NYJ': 'nyj', 'PHI': 'phi', 'PIT': 'pit', 'SEA': 'sea',
+        'SFO': 'sf', 'TAM': 'tb', 'TEN': 'ten', 'WAS': 'wsh'
+    }
+
+    espn_abbr = TEAM_LOGO_MAP.get(team_abbr, team_abbr.lower())
+    return f"https://a.espncdn.com/i/teamlogos/nfl/500/{espn_abbr}.png"
+
+
 @st.cache_data(ttl=300)
 def get_seasons() -> List[int]:
     """Get list of available seasons."""
@@ -11939,26 +11965,46 @@ def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[i
         # Create scatter plot
         fig = go.Figure()
 
+        # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
             x=df['avg_yards'],
             y=df['avg_points'],
-            mode='markers+text',
+            mode='markers',
             marker=dict(
                 size=12,
                 color=df['avg_points'],
                 colorscale='RdYlGn',
                 showscale=True,
                 colorbar=dict(title="PPG"),
-                line=dict(width=1, color='white')
+                opacity=0,  # Invisible markers
+                line=dict(width=0)
             ),
             text=df['team_abbr'],
-            textposition='top center',
-            textfont=dict(size=10, color='white'),
             hovertemplate='<b>%{text}</b><br>' +
                          'Yards/Game: %{x:.1f}<br>' +
                          'Points/Game: %{y:.1f}<br>' +
-                         '<extra></extra>'
+                         '<extra></extra>',
+            showlegend=False
         ))
+
+        # Calculate dynamic logo sizing based on axis ranges
+        x_range = df['avg_yards'].max() - df['avg_yards'].min()
+        y_range = df['avg_points'].max() - df['avg_points'].min()
+        logo_size_x = x_range * 0.04  # 4% of x-axis range
+        logo_size_y = y_range * 0.08  # 8% of y-axis range
+
+        # Add team logos as layout images
+        for idx, row in df.iterrows():
+            fig.add_layout_image(
+                source=get_team_logo_url(row['team_abbr']),
+                x=row['avg_yards'],
+                y=row['avg_points'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above"
+            )
 
         # Add league average lines
         avg_yards = df['avg_yards'].mean()
@@ -12045,27 +12091,47 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
         # Calculate dominance score (higher scored, lower allowed = better)
         df['dominance'] = df['avg_points_scored'] - df['avg_points_allowed']
 
+        # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
             x=df['avg_points_scored'],
             y=df['avg_points_allowed'],
-            mode='markers+text',
+            mode='markers',
             marker=dict(
                 size=14,
                 color=df['dominance'],
                 colorscale='RdYlGn',
                 showscale=True,
                 colorbar=dict(title="Point Diff"),
-                line=dict(width=1, color='white')
+                opacity=0,  # Invisible markers
+                line=dict(width=0)
             ),
             text=df['team_abbr'],
-            textposition='top center',
-            textfont=dict(size=10, color='white'),
             hovertemplate='<b>%{text}</b><br>' +
                          'Points Scored/Game: %{x:.1f}<br>' +
                          'Points Allowed/Game: %{y:.1f}<br>' +
                          'Point Differential: %{marker.color:.1f}<br>' +
-                         '<extra></extra>'
+                         '<extra></extra>',
+            showlegend=False
         ))
+
+        # Calculate dynamic logo sizing based on axis ranges
+        x_range = df['avg_points_scored'].max() - df['avg_points_scored'].min()
+        y_range = df['avg_points_allowed'].max() - df['avg_points_allowed'].min()
+        logo_size_x = x_range * 0.04  # 4% of x-axis range
+        logo_size_y = y_range * 0.08  # 8% of y-axis range
+
+        # Add team logos as layout images
+        for idx, row in df.iterrows():
+            fig.add_layout_image(
+                source=get_team_logo_url(row['team_abbr']),
+                x=row['avg_points_scored'],
+                y=row['avg_points_allowed'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above"
+            )
 
         # Add league average lines
         avg_scored = df['avg_points_scored'].mean()

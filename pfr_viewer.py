@@ -3706,10 +3706,31 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
     st.sidebar.divider()
     st.sidebar.header("Database Status")
 
-    # Add refresh button
-    col1, col2 = st.sidebar.columns([3, 1])
+    # Add refresh button and sync button
+    col1, col2, col3 = st.sidebar.columns([2, 1, 1])
     with col2:
         refresh_stats = st.button("🔄", key="refresh_db_stats", help="Refresh database stats")
+    with col3:
+        sync_from_cloud = st.button("☁️", key="sync_from_cloud", help="Download latest database from GCS")
+
+    # Handle sync from cloud
+    if sync_from_cloud:
+        if GCS_BUCKET_NAME:
+            with st.spinner("Downloading latest database from cloud..."):
+                # Delete local database to force fresh download
+                if DB_PATH.exists():
+                    DB_PATH.unlink()
+
+                # Download from GCS
+                if download_db_from_gcs():
+                    st.success("✅ Database updated from cloud!")
+                    st.cache_data.clear()  # Clear all cached queries
+                    time.sleep(1)
+                    st.rerun()  # Reload the app with new database
+                else:
+                    st.error("❌ Failed to download database from cloud")
+        else:
+            st.warning("Cloud storage not configured")
 
     # Get database stats (refresh if button clicked)
     if refresh_stats or 'db_stats' not in st.session_state:

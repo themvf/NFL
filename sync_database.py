@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Database GCS Sync Helper for Weekly Updates
 
@@ -8,10 +9,15 @@ Usage:
 """
 
 import sys
+import io
 from pathlib import Path
 from google.cloud import storage
 from google.oauth2 import service_account
 import json
+
+# Set stdout to use UTF-8 encoding
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # Configuration (update these to match your setup)
 DB_PATH = Path(__file__).parent / "data" / "pfr.db"

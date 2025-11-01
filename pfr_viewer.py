@@ -12912,20 +12912,21 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
     SELECT
         pb.player,
         pb.team,
-        SUM(pb.rush_att) as total_rush_att,
-        SUM(pb.rush_yds) as total_rush_yds,
-        SUM(pb.rush_td) as total_rush_tds,
-        SUM(pb.rec) as total_receptions,
-        SUM(pb.rec_yds) as total_rec_yds,
-        SUM(pb.rec_td) as total_rec_tds,
+        SUM(COALESCE(pb.rush_att, 0)) as total_rush_att,
+        SUM(COALESCE(pb.rush_yds, 0)) as total_rush_yds,
+        SUM(COALESCE(pb.rush_td, 0)) as total_rush_tds,
+        SUM(COALESCE(pb.rec, 0)) as total_receptions,
+        SUM(COALESCE(pb.rec_yds, 0)) as total_rec_yds,
+        SUM(COALESCE(pb.rec_td, 0)) as total_rec_tds,
         COUNT(DISTINCT pb.game_id) as games
     FROM player_box_score pb
     JOIN games g ON pb.game_id = g.game_id
     WHERE g.season = ?
     {week_filter}
-    AND (pb.rush_att > 0 OR pb.rec > 0)
+    AND (COALESCE(pb.rush_att, 0) > 0 OR COALESCE(pb.rec, 0) > 0 OR COALESCE(pb.targets, 0) > 0)
     GROUP BY pb.player, pb.team
-    ORDER BY total_rush_yds + total_rec_yds DESC
+    HAVING (SUM(COALESCE(pb.rush_att, 0)) + SUM(COALESCE(pb.rec, 0))) > 0
+    ORDER BY (SUM(COALESCE(pb.rush_yds, 0)) + SUM(COALESCE(pb.rec_yds, 0))) DESC
     """
 
     try:
@@ -12935,11 +12936,16 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
             st.info("No skill player data available for the selected season/week.")
             return
 
-        # Calculate combined totals
+        # Calculate combined totals (already summed with COALESCE, so no NULLs)
         df['total_touches'] = df['total_rush_att'] + df['total_receptions']
         df['total_yards'] = df['total_rush_yds'] + df['total_rec_yds']
         df['total_tds'] = df['total_rush_tds'] + df['total_rec_tds']
-        df['yards_per_touch'] = (df['total_yards'] / df['total_touches']).round(2)
+
+        # Avoid division by zero
+        df['yards_per_touch'] = df.apply(
+            lambda row: round(row['total_yards'] / row['total_touches'], 2) if row['total_touches'] > 0 else 0,
+            axis=1
+        )
 
         # Filter by minimum touches
         chart_df = df[df['total_touches'] >= min_touches].copy()

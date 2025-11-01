@@ -163,6 +163,56 @@ def get_team_logo_url(team_abbr: str) -> str:
     return f"https://a.espncdn.com/i/teamlogos/nfl/500/{espn_abbr}.png"
 
 
+@st.cache_data(ttl=86400)  # Cache for 24 hours
+def load_player_ids():
+    """Load player ID mapping from nflverse."""
+    try:
+        import pandas as pd
+        # Load player IDs from nflverse GitHub
+        url = "https://github.com/nflverse/nflverse-data/releases/download/players/players.csv"
+        df = pd.read_csv(url)
+        # Create mapping: player name -> espn_id
+        player_map = {}
+        for _, row in df.iterrows():
+            if pd.notna(row.get('espn_id')):
+                # Store by display name
+                if pd.notna(row.get('display_name')):
+                    player_map[row['display_name']] = str(int(row['espn_id']))
+                # Also store by short name if available
+                if pd.notna(row.get('short_name')):
+                    player_map[row['short_name']] = str(int(row['espn_id']))
+        return player_map
+    except Exception as e:
+        st.warning(f"Could not load player IDs: {e}")
+        return {}
+
+
+def get_player_headshot_url(player_name: str, team_abbr: str = None) -> str:
+    """
+    Get ESPN CDN URL for NFL player headshot.
+
+    Args:
+        player_name: Player's full name (e.g., "Patrick Mahomes")
+        team_abbr: Team abbreviation (fallback to team logo if player not found)
+
+    Returns:
+        URL to player headshot or team logo as fallback
+    """
+    player_map = load_player_ids()
+
+    # Try to find player ID
+    espn_id = player_map.get(player_name)
+
+    if espn_id:
+        return f"https://a.espncdn.com/i/headshots/nfl/players/full/{espn_id}.png"
+    else:
+        # Fallback to team logo if we have team_abbr
+        if team_abbr:
+            return get_team_logo_url(team_abbr)
+        # Ultimate fallback: generic player icon
+        return "https://a.espncdn.com/i/headshots/nophoto.png"
+
+
 @st.cache_data(ttl=300)
 def get_seasons() -> List[int]:
     """Get list of available seasons."""
@@ -3647,6 +3697,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
         [
             "Games Browser",
             "Charts",
+            "Analytics Chart",
             "Team Overview",
             "Team Comparison",
             "Power Rankings",
@@ -12221,29 +12272,54 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
         # Create scatter plot
         fig = go.Figure()
 
+        # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
             x=df['total_yards'],
             y=df['total_tds'],
-            mode='markers+text',
+            mode='markers',
             marker=dict(
-                size=df['total_attempts'] / 10,  # Size by volume
+                size=1,
                 color=df['yards_per_carry'],
                 colorscale='Viridis',
                 showscale=True,
                 colorbar=dict(title="YPC"),
-                line=dict(width=1, color='white')
+                opacity=0
             ),
-            text=df['player'].str.split().str[-1],  # Last name only
-            textposition='top center',
-            textfont=dict(size=9, color='white'),
+            text=df['player'],
+            customdata=df[['player', 'team', 'total_attempts', 'yards_per_carry']],
             hovertemplate='<b>%{customdata[0]}</b> (%{customdata[1]})<br>' +
                          'Rush Yards: %{x}<br>' +
                          'Rush TDs: %{y}<br>' +
                          'Attempts: %{customdata[2]}<br>' +
-                         'Yards/Carry: %{marker.color:.2f}<br>' +
+                         'Yards/Carry: %{customdata[3]:.2f}<br>' +
                          '<extra></extra>',
-            customdata=df[['player', 'team', 'total_attempts']]
+            showlegend=False
         ))
+
+        # Calculate dynamic sizing based on data ranges
+        x_range = df['total_yards'].max() - df['total_yards'].min()
+        y_range = df['total_tds'].max() - df['total_tds'].min()
+
+        # Use fixed size that works well for player headshots
+        headshot_size_x = max(x_range * 0.04, 20)  # At least 20 yards wide
+        headshot_size_y = max(y_range * 0.15, 0.5)  # At least 0.5 TDs tall
+
+        # Build layout with player headshot images
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_player_headshot_url(row['player'], row['team']),
+                xref="x",
+                yref="y",
+                x=row['total_yards'],
+                y=row['total_tds'],
+                sizex=headshot_size_x,
+                sizey=headshot_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
 
         fig.update_layout(
             title=f"Rushing Yards vs Touchdowns ({season} Season)",
@@ -12252,7 +12328,8 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -12317,32 +12394,32 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
         # Create scatter plot
         fig = go.Figure()
 
+        # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
             x=df['total_targets'],
             y=df['yards_per_reception'],
-            mode='markers+text',
+            mode='markers',
             marker=dict(
-                size=df['total_receptions'] / 5,  # Size by receptions
+                size=1,
                 color=df['catch_rate'] * 100,
                 colorscale='Plasma',
                 showscale=True,
                 colorbar=dict(title="Catch %"),
-                line=dict(width=1, color='white'),
+                opacity=0,
                 cmin=40,
                 cmax=100
             ),
-            text=df['player'].str.split().str[-1],  # Last name only
-            textposition='top center',
-            textfont=dict(size=9, color='white'),
+            text=df['player'],
+            customdata=df[['player', 'team', 'total_yards', 'total_receptions', 'total_tds', 'catch_rate']],
             hovertemplate='<b>%{customdata[0]}</b> (%{customdata[1]})<br>' +
                          'Targets: %{x}<br>' +
                          'Yards/Reception: %{y:.2f}<br>' +
                          'Total Yards: %{customdata[2]}<br>' +
                          'Receptions: %{customdata[3]}<br>' +
-                         'Catch Rate: %{marker.color:.1f}%<br>' +
+                         'Catch Rate: %{customdata[5]:.1%}<br>' +
                          'TDs: %{customdata[4]}<br>' +
                          '<extra></extra>',
-            customdata=df[['player', 'team', 'total_yards', 'total_receptions', 'total_tds']]
+            showlegend=False
         ))
 
         # Add league average lines
@@ -12354,6 +12431,31 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
         fig.add_vline(x=avg_targets, line_dash="dash", line_color="gray", opacity=0.5,
                      annotation_text="Avg Targets", annotation_position="top")
 
+        # Calculate dynamic sizing based on data ranges
+        x_range = df['total_targets'].max() - df['total_targets'].min()
+        y_range = df['yards_per_reception'].max() - df['yards_per_reception'].min()
+
+        # Use fixed size that works well for player headshots
+        headshot_size_x = max(x_range * 0.04, 3)  # At least 3 targets wide
+        headshot_size_y = max(y_range * 0.10, 0.5)  # At least 0.5 Y/R tall
+
+        # Build layout with player headshot images
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_player_headshot_url(row['player'], row['team']),
+                xref="x",
+                yref="y",
+                x=row['total_targets'],
+                y=row['yards_per_reception'],
+                sizex=headshot_size_x,
+                sizey=headshot_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
         fig.update_layout(
             title=f"Targets vs Yards per Reception ({season} Season)",
             xaxis_title="Total Targets",
@@ -12361,7 +12463,8 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
         )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -12377,6 +12480,122 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")
+
+
+# ============================================================================
+# Section: Analytics Chart (QB Passing Stats)
+# ============================================================================
+
+def render_analytics_chart(season: Optional[int], week: Optional[int]):
+    """Render QB passing analytics charts."""
+    st.header("📊 QB Analytics Charts")
+    st.markdown("Visual analytics for quarterback passing performance")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Build query to get QB passing stats
+    week_filter = f"AND g.week <= {week}" if week else ""
+
+    sql_qb = f"""
+    SELECT
+        pb.player,
+        pb.team,
+        SUM(pb.pass_yds) as total_pass_yds,
+        SUM(pb.pass_td) as total_pass_tds,
+        SUM(pb.pass_int) as total_interceptions,
+        SUM(pb.pass_att) as total_pass_att,
+        COUNT(DISTINCT pb.game_id) as games
+    FROM player_box_score pb
+    JOIN games g ON pb.game_id = g.game_id
+    WHERE g.season = ?
+    {week_filter}
+    AND pb.pass_att > 0
+    GROUP BY pb.player, pb.team
+    HAVING total_pass_att >= 10
+    ORDER BY total_pass_yds DESC
+    """
+
+    try:
+        df = query(sql_qb, (season,))
+
+        if df.empty:
+            st.info("No QB passing data available for the selected season/week.")
+            return
+
+        # Chart 1: QB Passing Touchdowns vs. Interceptions
+        st.markdown("### QB Passing Touchdowns vs. Interceptions")
+        st.markdown("*Shows the TD-to-INT ratio for QBs. Top-left quadrant represents QBs with high TDs and low INTs.*")
+
+        # Filter out QBs with 0 TDs and 0 INTs
+        chart_df = df[(df['total_pass_tds'] > 0) | (df['total_interceptions'] > 0)].copy()
+
+        if not chart_df.empty:
+            import plotly.express as px
+
+            fig1 = px.scatter(
+                chart_df,
+                x='total_interceptions',
+                y='total_pass_tds',
+                hover_data=['player', 'team', 'total_pass_yds', 'games'],
+                text='player',
+                labels={
+                    'total_interceptions': 'Interceptions',
+                    'total_pass_tds': 'Passing Touchdowns'
+                },
+                title=f"QB Passing TDs vs Interceptions ({season})"
+            )
+            fig1.update_traces(textposition='top center', marker=dict(size=12))
+            fig1.update_layout(height=600)
+            st.plotly_chart(fig1, use_container_width=True)
+        else:
+            st.info("No QB data available with passing TDs or interceptions.")
+
+        st.markdown("---")
+
+        # Chart 2: QB Passing Yards vs. Attempts
+        st.markdown("### QB Passing Yards vs. Attempts")
+        st.markdown("*Shows passing efficiency. Steeper slopes indicate higher yards per attempt.*")
+
+        # Calculate yards per attempt for color coding
+        chart_df2 = df[df['total_pass_att'] >= 10].copy()
+
+        if not chart_df2.empty:
+            chart_df2['yards_per_attempt'] = (chart_df2['total_pass_yds'] / chart_df2['total_pass_att']).round(2)
+
+            fig2 = px.scatter(
+                chart_df2,
+                x='total_pass_att',
+                y='total_pass_yds',
+                hover_data=['player', 'team', 'yards_per_attempt', 'total_pass_tds', 'games'],
+                text='player',
+                color='yards_per_attempt',
+                labels={
+                    'total_pass_att': 'Pass Attempts',
+                    'total_pass_yds': 'Passing Yards',
+                    'yards_per_attempt': 'Yards/Attempt'
+                },
+                title=f"QB Passing Yards vs Attempts ({season})",
+                color_continuous_scale='Viridis'
+            )
+            fig2.update_traces(textposition='top center', marker=dict(size=12))
+            fig2.update_layout(height=600)
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Show data table
+            with st.expander("📋 View QB Stats Table"):
+                display_df = df[['player', 'team', 'games', 'total_pass_att', 'total_pass_yds',
+                                'total_pass_tds', 'total_interceptions']].copy()
+                display_df.columns = ['Player', 'Team', 'Games', 'Attempts', 'Yards', 'TDs', 'INTs']
+                display_df['Y/A'] = (display_df['Yards'] / display_df['Attempts']).round(2)
+                display_df['TD:INT'] = (display_df['TDs'] / display_df['INTs'].replace(0, 1)).round(2)
+                st.dataframe(display_df.sort_values('Yards', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info("No QB data available with sufficient pass attempts (minimum 10).")
+
+    except Exception as e:
+        st.error(f"Error generating QB analytics charts: {e}")
 
 
 # ============================================================================
@@ -12410,6 +12629,9 @@ def main():
 
     elif view == "Charts":
         render_charts_view(season, week)
+
+    elif view == "Analytics Chart":
+        render_analytics_chart(season, week)
 
     elif view == "Team Overview":
         render_team_overview(season, week)

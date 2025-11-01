@@ -233,6 +233,7 @@ with colD:
             "Scores",
             "Team Overview",
             "Team Comparison",
+            "Analytics Chart",
             "Skill Yards Grid",
             "Skill TDs Grid",
             "First TD Grid",
@@ -1225,6 +1226,140 @@ elif view == "Team Comparison":
                     with c3:
                         st.write("WR/TE median receiving yards")
                         st.dataframe(wr_med, use_container_width=True)
+elif view == "Analytics Chart":
+    st.subheader(f"QB Analytics Charts — {season}{' through Week ' + str(week) if week else ''}")
+
+    # Load player week data
+    pw_df = _read_all(str(DATA_BASE / f"player_week/season={season}/week=*/player_week.parquet"))
+    if pw_df.empty:
+        st.info("No player-week data available for this season.")
+    else:
+        # Filter by week if specified
+        if "week" in pw_df.columns and week:
+            pw_df = pw_df[pw_df["week"] <= week]
+
+        # Identify column names robustly
+        name_col = _pick_col(pw_df, ["full_name", "player_display_name", "player_name", "name"]) or "player_id"
+        pos_col = _pick_col(pw_df, ["position", "pos", "player_position", "role"]) or "position"
+        team_col = _pick_team_column(pw_df)
+        pass_y = _pick_col(pw_df, ["passing_yards", "pass_yards", "pass_yds"])
+        pass_td = _pick_col(pw_df, ["passing_tds", "pass_td", "pass_touchdown"])
+        pass_att = _pick_col(pw_df, ["pass_attempts", "passing_attempts", "attempts"])
+        ints_thrown = _pick_col(pw_df, ["interceptions", "int", "interceptions_thrown"])
+
+        # Filter for QBs only
+        qb_df = pw_df[pw_df[pos_col].astype(str).str.upper().str.contains("QB", na=False)].copy()
+
+        if qb_df.empty:
+            st.info("No QB data available for the selected season/week.")
+        else:
+            # Prepare columns for analysis
+            cols_to_keep = [name_col, team_col, pass_y, pass_td, pass_att, ints_thrown]
+            cols_to_keep = [c for c in cols_to_keep if c and c in qb_df.columns]
+
+            qb_data = qb_df[cols_to_keep].copy()
+
+            # Rename columns for easier access
+            rename_map = {name_col: "player"}
+            if team_col:
+                rename_map[team_col] = "team"
+            if pass_y:
+                rename_map[pass_y] = "passing_yards"
+            if pass_td:
+                rename_map[pass_td] = "passing_tds"
+            if pass_att:
+                rename_map[pass_att] = "pass_attempts"
+            if ints_thrown:
+                rename_map[ints_thrown] = "interceptions"
+
+            qb_data = qb_data.rename(columns=rename_map)
+
+            # Convert to numeric
+            for col in ["passing_yards", "passing_tds", "pass_attempts", "interceptions"]:
+                if col in qb_data.columns:
+                    qb_data[col] = pd.to_numeric(qb_data[col], errors="coerce").fillna(0)
+
+            # Aggregate by player (sum across all weeks)
+            agg_cols = ["player"]
+            if "team" in qb_data.columns:
+                agg_cols.append("team")
+
+            numeric_cols = [c for c in ["passing_yards", "passing_tds", "pass_attempts", "interceptions"] if c in qb_data.columns]
+            if numeric_cols:
+                qb_agg = qb_data.groupby(agg_cols, as_index=False)[numeric_cols].sum()
+            else:
+                st.warning("Required QB statistics columns not found in the data.")
+                qb_agg = pd.DataFrame()
+
+            if not qb_agg.empty:
+                # Chart 1: QB Passing Touchdowns vs. Interceptions
+                if "passing_tds" in qb_agg.columns and "interceptions" in qb_agg.columns:
+                    st.markdown("### QB Passing Touchdowns vs. Interceptions")
+                    st.markdown("*Shows the TD-to-INT ratio for QBs. Top-left quadrant represents QBs with high TDs and low INTs.*")
+
+                    try:
+                        import plotly.express as px
+
+                        # Filter out QBs with 0 TDs and 0 INTs (likely minimal playing time)
+                        chart_df = qb_agg[(qb_agg["passing_tds"] > 0) | (qb_agg["interceptions"] > 0)].copy()
+
+                        if not chart_df.empty:
+                            fig = px.scatter(
+                                chart_df,
+                                x="interceptions",
+                                y="passing_tds",
+                                hover_data=["player"] + (["team"] if "team" in chart_df.columns else []),
+                                text="player",
+                                labels={"interceptions": "Interceptions", "passing_tds": "Passing Touchdowns"},
+                                title="QB Passing TDs vs Interceptions"
+                            )
+                            fig.update_traces(textposition="top center", marker=dict(size=12))
+                            fig.update_layout(height=600)
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("No QB data available with passing TDs or interceptions.")
+                    except ImportError:
+                        st.warning("Plotly is required for interactive charts. Install with: pip install plotly")
+
+                st.markdown("---")
+
+                # Chart 2: QB Passing Yards vs. Attempts
+                if "passing_yards" in qb_agg.columns and "pass_attempts" in qb_agg.columns:
+                    st.markdown("### QB Passing Yards vs. Attempts")
+                    st.markdown("*Shows passing efficiency. Steeper slopes indicate higher yards per attempt.*")
+
+                    try:
+                        import plotly.express as px
+
+                        # Filter out QBs with very few attempts (< 10 total)
+                        chart_df = qb_agg[qb_agg["pass_attempts"] >= 10].copy()
+
+                        if not chart_df.empty:
+                            # Calculate yards per attempt for color coding
+                            chart_df["yards_per_attempt"] = (chart_df["passing_yards"] / chart_df["pass_attempts"]).round(2)
+
+                            fig = px.scatter(
+                                chart_df,
+                                x="pass_attempts",
+                                y="passing_yards",
+                                hover_data=["player", "yards_per_attempt"] + (["team"] if "team" in chart_df.columns else []),
+                                text="player",
+                                color="yards_per_attempt",
+                                labels={
+                                    "pass_attempts": "Pass Attempts",
+                                    "passing_yards": "Passing Yards",
+                                    "yards_per_attempt": "Yards/Attempt"
+                                },
+                                title="QB Passing Yards vs Attempts",
+                                color_continuous_scale="Viridis"
+                            )
+                            fig.update_traces(textposition="top center", marker=dict(size=12))
+                            fig.update_layout(height=600)
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("No QB data available with sufficient pass attempts (minimum 10).")
+                    except ImportError:
+                        st.warning("Plotly is required for interactive charts. Install with: pip install plotly")
 
 elif view == "Skill Yards Grid":
     st.subheader(f"RB/WR/TE Combined Rush + Receiving Yards — {season}{' (<= Week ' + str(week) + ')' if week else ''}")

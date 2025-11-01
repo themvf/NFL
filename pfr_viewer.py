@@ -12500,6 +12500,9 @@ def render_qb_td_int_chart(season: Optional[int], week: Optional[int]):
         st.warning("No season data available.")
         return
 
+    # Minimum attempts filter
+    min_attempts = st.slider("Minimum Pass Attempts", 10, 300, 50, 10, key="qb_td_int_min_att")
+
     # Build query to get QB passing stats
     week_filter = f"AND g.week <= {week}" if week else ""
 
@@ -12518,15 +12521,15 @@ def render_qb_td_int_chart(season: Optional[int], week: Optional[int]):
     {week_filter}
     AND pb.pass_att > 0
     GROUP BY pb.player, pb.team
-    HAVING total_pass_att >= 10
+    HAVING total_pass_att >= ?
     ORDER BY total_pass_yds DESC
     """
 
     try:
-        df = query(sql_qb, (season,))
+        df = query(sql_qb, (season, min_attempts))
 
         if df.empty:
-            st.info("No QB passing data available for the selected season/week.")
+            st.info(f"No QB passing data available with at least {min_attempts} attempts.")
             return
 
         # Filter out QBs with 0 TDs and 0 INTs
@@ -12576,6 +12579,9 @@ def render_qb_yards_attempts_chart(season: Optional[int], week: Optional[int]):
         st.warning("No season data available.")
         return
 
+    # Minimum attempts filter
+    min_attempts = st.slider("Minimum Pass Attempts", 10, 300, 50, 10, key="qb_yards_att_min_att")
+
     # Build query to get QB passing stats
     week_filter = f"AND g.week <= {week}" if week else ""
 
@@ -12594,19 +12600,19 @@ def render_qb_yards_attempts_chart(season: Optional[int], week: Optional[int]):
     {week_filter}
     AND pb.pass_att > 0
     GROUP BY pb.player, pb.team
-    HAVING total_pass_att >= 10
+    HAVING total_pass_att >= ?
     ORDER BY total_pass_yds DESC
     """
 
     try:
-        df = query(sql_qb, (season,))
+        df = query(sql_qb, (season, min_attempts))
 
         if df.empty:
-            st.info("No QB passing data available for the selected season/week.")
+            st.info(f"No QB passing data available with at least {min_attempts} attempts.")
             return
 
         # Calculate yards per attempt for color coding
-        chart_df = df[df['total_pass_att'] >= 10].copy()
+        chart_df = df.copy()
 
         if not chart_df.empty:
             chart_df['yards_per_attempt'] = (chart_df['total_pass_yds'] / chart_df['total_pass_att']).round(2)

@@ -11962,6 +11962,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Defense Yards Allowed (Pass vs Rush)",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
+            "Skill Player Total Yards vs Touches",
             "WR Efficiency (Targets vs Yards per Route Run)",
             "QB Passing TDs vs Interceptions",
             "QB Passing Yards vs Attempts"
@@ -11980,6 +11981,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_rb_efficiency_chart(season, week)
     elif chart_type == "RB Yards per Carry":
         render_rb_yards_per_carry_chart(season, week)
+    elif chart_type == "Skill Player Total Yards vs Touches":
+        render_skill_player_yards_touches_chart(season, week)
     elif chart_type == "WR Efficiency (Targets vs Yards per Route Run)":
         render_wr_efficiency_chart(season, week)
     elif chart_type == "QB Passing TDs vs Interceptions":
@@ -12885,6 +12888,97 @@ def render_rb_yards_per_carry_chart(season: Optional[int], week: Optional[int]):
                 st.dataframe(display_df.sort_values('Yards', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.info(f"No RB data available with at least {min_carries} carries.")
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_skill_player_yards_touches_chart(season: Optional[int], week: Optional[int]):
+    """Chart: Skill Player Total Yards (Rush + Rec) vs Total Touches (Carries + Receptions)."""
+    st.subheader("💨 Skill Player Total Yards vs Touches")
+    st.markdown("*Shows offensive involvement and production. X-axis = Total Yards (Rush + Rec), Y-axis = Total Touches (Carries + Receptions).*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Minimum touches filter
+    min_touches = st.slider("Minimum Total Touches", 10, 200, 30, 10, key="skill_total_touches")
+
+    # Build query to get combined stats
+    week_filter = f"AND g.week <= {week}" if week else ""
+
+    sql_skill = f"""
+    SELECT
+        pb.player,
+        pb.team,
+        SUM(pb.rush_att) as total_rush_att,
+        SUM(pb.rush_yds) as total_rush_yds,
+        SUM(pb.rush_td) as total_rush_tds,
+        SUM(pb.rec) as total_receptions,
+        SUM(pb.rec_yds) as total_rec_yds,
+        SUM(pb.rec_td) as total_rec_tds,
+        COUNT(DISTINCT pb.game_id) as games
+    FROM player_box_score pb
+    JOIN games g ON pb.game_id = g.game_id
+    WHERE g.season = ?
+    {week_filter}
+    AND (pb.rush_att > 0 OR pb.rec > 0)
+    GROUP BY pb.player, pb.team
+    ORDER BY total_rush_yds + total_rec_yds DESC
+    """
+
+    try:
+        df = query(sql_skill, (season,))
+
+        if df.empty:
+            st.info("No skill player data available for the selected season/week.")
+            return
+
+        # Calculate combined totals
+        df['total_touches'] = df['total_rush_att'] + df['total_receptions']
+        df['total_yards'] = df['total_rush_yds'] + df['total_rec_yds']
+        df['total_tds'] = df['total_rush_tds'] + df['total_rec_tds']
+        df['yards_per_touch'] = (df['total_yards'] / df['total_touches']).round(2)
+
+        # Filter by minimum touches
+        chart_df = df[df['total_touches'] >= min_touches].copy()
+
+        if not chart_df.empty:
+            import plotly.express as px
+
+            # X = Total Yards, Y = Total Touches
+            fig = px.scatter(
+                chart_df,
+                x='total_yards',
+                y='total_touches',
+                hover_data=['player', 'team', 'yards_per_touch', 'total_tds', 'games'],
+                text='player',
+                color='yards_per_touch',
+                labels={
+                    'total_yards': 'Total Yards (Rush + Rec)',
+                    'total_touches': 'Total Touches (Carries + Receptions)',
+                    'yards_per_touch': 'Yards/Touch'
+                },
+                title=f"Skill Player Total Yards vs Touches ({season})",
+                color_continuous_scale='Viridis'
+            )
+            fig.update_traces(textposition='top center', marker=dict(size=12))
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Show data table
+            with st.expander("📋 View Skill Player Stats Table"):
+                display_df = chart_df[['player', 'team', 'games', 'total_rush_att', 'total_rush_yds',
+                                       'total_receptions', 'total_rec_yds', 'total_touches',
+                                       'total_yards', 'total_tds']].copy()
+                display_df.columns = ['Player', 'Team', 'Games', 'Carries', 'Rush Yds',
+                                     'Rec', 'Rec Yds', 'Total Touches', 'Total Yds', 'Total TDs']
+                display_df['Yds/Touch'] = (display_df['Total Yds'] / display_df['Total Touches']).round(2)
+                display_df['Yds/Game'] = (display_df['Total Yds'] / display_df['Games']).round(1)
+                st.dataframe(display_df.sort_values('Total Yds', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No skill player data available with at least {min_touches} touches.")
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")

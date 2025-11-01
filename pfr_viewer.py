@@ -3697,7 +3697,6 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
         [
             "Games Browser",
             "Charts",
-            "Analytics Chart",
             "Team Overview",
             "Team Comparison",
             "Power Rankings",
@@ -11961,7 +11960,9 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
             "RB Efficiency (Rush Yards vs TDs)",
-            "WR Efficiency (Targets vs Yards per Route Run)"
+            "WR Efficiency (Targets vs Yards per Route Run)",
+            "QB Passing TDs vs Interceptions",
+            "QB Passing Yards vs Attempts"
         ]
     )
 
@@ -11975,6 +11976,10 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_rb_efficiency_chart(season, week)
     elif chart_type == "WR Efficiency (Targets vs Yards per Route Run)":
         render_wr_efficiency_chart(season, week)
+    elif chart_type == "QB Passing TDs vs Interceptions":
+        render_qb_td_int_chart(season, week)
+    elif chart_type == "QB Passing Yards vs Attempts":
+        render_qb_yards_attempts_chart(season, week)
 
 
 def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[int]):
@@ -12483,13 +12488,13 @@ def render_wr_efficiency_chart(season: Optional[int], week: Optional[int]):
 
 
 # ============================================================================
-# Section: Analytics Chart (QB Passing Stats)
+# Section: QB Passing Charts
 # ============================================================================
 
-def render_analytics_chart(season: Optional[int], week: Optional[int]):
-    """Render QB passing analytics charts."""
-    st.header("📊 QB Analytics Charts")
-    st.markdown("Visual analytics for quarterback passing performance")
+def render_qb_td_int_chart(season: Optional[int], week: Optional[int]):
+    """Chart: QB Passing Touchdowns vs Interceptions (axes swapped)."""
+    st.subheader("🏈 QB Passing Touchdowns vs. Interceptions")
+    st.markdown("*Shows the TD-to-INT ratio for QBs. Top-right quadrant represents QBs with high TDs and low INTs.*")
 
     if not season:
         st.warning("No season data available.")
@@ -12524,64 +12529,109 @@ def render_analytics_chart(season: Optional[int], week: Optional[int]):
             st.info("No QB passing data available for the selected season/week.")
             return
 
-        # Chart 1: QB Passing Touchdowns vs. Interceptions
-        st.markdown("### QB Passing Touchdowns vs. Interceptions")
-        st.markdown("*Shows the TD-to-INT ratio for QBs. Top-left quadrant represents QBs with high TDs and low INTs.*")
-
         # Filter out QBs with 0 TDs and 0 INTs
         chart_df = df[(df['total_pass_tds'] > 0) | (df['total_interceptions'] > 0)].copy()
 
         if not chart_df.empty:
             import plotly.express as px
 
-            fig1 = px.scatter(
+            # Swapped: X = TDs, Y = INTs (was X = INTs, Y = TDs)
+            fig = px.scatter(
                 chart_df,
-                x='total_interceptions',
-                y='total_pass_tds',
+                x='total_pass_tds',
+                y='total_interceptions',
                 hover_data=['player', 'team', 'total_pass_yds', 'games'],
                 text='player',
                 labels={
-                    'total_interceptions': 'Interceptions',
-                    'total_pass_tds': 'Passing Touchdowns'
+                    'total_pass_tds': 'Passing Touchdowns',
+                    'total_interceptions': 'Interceptions'
                 },
                 title=f"QB Passing TDs vs Interceptions ({season})"
             )
-            fig1.update_traces(textposition='top center', marker=dict(size=12))
-            fig1.update_layout(height=600)
-            st.plotly_chart(fig1, use_container_width=True)
+            fig.update_traces(textposition='top center', marker=dict(size=12))
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Show data table
+            with st.expander("📋 View QB Stats Table"):
+                display_df = df[['player', 'team', 'games', 'total_pass_att', 'total_pass_yds',
+                                'total_pass_tds', 'total_interceptions']].copy()
+                display_df.columns = ['Player', 'Team', 'Games', 'Attempts', 'Yards', 'TDs', 'INTs']
+                display_df['Y/A'] = (display_df['Yards'] / display_df['Attempts']).round(2)
+                display_df['TD:INT'] = (display_df['TDs'] / display_df['INTs'].replace(0, 1)).round(2)
+                st.dataframe(display_df.sort_values('TDs', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.info("No QB data available with passing TDs or interceptions.")
 
-        st.markdown("---")
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
 
-        # Chart 2: QB Passing Yards vs. Attempts
-        st.markdown("### QB Passing Yards vs. Attempts")
-        st.markdown("*Shows passing efficiency. Steeper slopes indicate higher yards per attempt.*")
+
+def render_qb_yards_attempts_chart(season: Optional[int], week: Optional[int]):
+    """Chart: QB Passing Yards vs Attempts (axes swapped)."""
+    st.subheader("🎯 QB Passing Yards vs. Attempts")
+    st.markdown("*Shows passing efficiency. Steeper slopes indicate higher yards per attempt.*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Build query to get QB passing stats
+    week_filter = f"AND g.week <= {week}" if week else ""
+
+    sql_qb = f"""
+    SELECT
+        pb.player,
+        pb.team,
+        SUM(pb.pass_yds) as total_pass_yds,
+        SUM(pb.pass_td) as total_pass_tds,
+        SUM(pb.pass_int) as total_interceptions,
+        SUM(pb.pass_att) as total_pass_att,
+        COUNT(DISTINCT pb.game_id) as games
+    FROM player_box_score pb
+    JOIN games g ON pb.game_id = g.game_id
+    WHERE g.season = ?
+    {week_filter}
+    AND pb.pass_att > 0
+    GROUP BY pb.player, pb.team
+    HAVING total_pass_att >= 10
+    ORDER BY total_pass_yds DESC
+    """
+
+    try:
+        df = query(sql_qb, (season,))
+
+        if df.empty:
+            st.info("No QB passing data available for the selected season/week.")
+            return
 
         # Calculate yards per attempt for color coding
-        chart_df2 = df[df['total_pass_att'] >= 10].copy()
+        chart_df = df[df['total_pass_att'] >= 10].copy()
 
-        if not chart_df2.empty:
-            chart_df2['yards_per_attempt'] = (chart_df2['total_pass_yds'] / chart_df2['total_pass_att']).round(2)
+        if not chart_df.empty:
+            chart_df['yards_per_attempt'] = (chart_df['total_pass_yds'] / chart_df['total_pass_att']).round(2)
 
-            fig2 = px.scatter(
-                chart_df2,
-                x='total_pass_att',
-                y='total_pass_yds',
+            import plotly.express as px
+
+            # Swapped: X = Yards, Y = Attempts (was X = Attempts, Y = Yards)
+            fig = px.scatter(
+                chart_df,
+                x='total_pass_yds',
+                y='total_pass_att',
                 hover_data=['player', 'team', 'yards_per_attempt', 'total_pass_tds', 'games'],
                 text='player',
                 color='yards_per_attempt',
                 labels={
-                    'total_pass_att': 'Pass Attempts',
                     'total_pass_yds': 'Passing Yards',
+                    'total_pass_att': 'Pass Attempts',
                     'yards_per_attempt': 'Yards/Attempt'
                 },
                 title=f"QB Passing Yards vs Attempts ({season})",
                 color_continuous_scale='Viridis'
             )
-            fig2.update_traces(textposition='top center', marker=dict(size=12))
-            fig2.update_layout(height=600)
-            st.plotly_chart(fig2, use_container_width=True)
+            fig.update_traces(textposition='top center', marker=dict(size=12))
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
 
             # Show data table
             with st.expander("📋 View QB Stats Table"):
@@ -12595,7 +12645,7 @@ def render_analytics_chart(season: Optional[int], week: Optional[int]):
             st.info("No QB data available with sufficient pass attempts (minimum 10).")
 
     except Exception as e:
-        st.error(f"Error generating QB analytics charts: {e}")
+        st.error(f"Error generating chart: {e}")
 
 
 # ============================================================================
@@ -12629,9 +12679,6 @@ def main():
 
     elif view == "Charts":
         render_charts_view(season, week)
-
-    elif view == "Analytics Chart":
-        render_analytics_chart(season, week)
 
     elif view == "Team Overview":
         render_team_overview(season, week)

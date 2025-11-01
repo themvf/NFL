@@ -12291,8 +12291,8 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
 
         # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
-            x='avg_rush_yds_allowed',
-            y='avg_pass_yds_allowed',
+            x=df['avg_rush_yds_allowed'],
+            y=df['avg_pass_yds_allowed'],
             mode='markers',
             marker=dict(
                 size=1,

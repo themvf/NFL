@@ -11959,6 +11959,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         [
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
+            "Defense Yards Allowed (Pass vs Rush)",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
             "WR Efficiency (Targets vs Yards per Route Run)",
@@ -11973,6 +11974,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_offense_efficiency_chart(season, week)
     elif chart_type == "Team Balance (Points Scored vs Allowed)":
         render_team_balance_chart(season, week)
+    elif chart_type == "Defense Yards Allowed (Pass vs Rush)":
+        render_defense_yards_allowed_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
         render_rb_efficiency_chart(season, week)
     elif chart_type == "RB Yards per Carry":
@@ -12229,6 +12232,154 @@ def render_team_balance_chart(season: Optional[int], week: Optional[int]):
             display_df = df[['team_abbr', 'avg_points_scored', 'avg_points_allowed', 'dominance']].copy()
             display_df.columns = ['Team', 'PPG Scored', 'PPG Allowed', 'Point Diff']
             display_df = display_df.round(1).sort_values('Point Diff', ascending=False)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int]):
+    """Chart: Defense Yards Allowed (Passing vs Rushing)."""
+    st.subheader("🛡️ Defense Yards Allowed")
+    st.markdown("""
+    **Goal:** Identify defensive strengths and weaknesses.
+    - **Bottom-left quadrant:** Elite defense (low pass & rush yards allowed)
+    - **Bottom-right:** Weak against run, strong against pass
+    - **Top-left:** Weak against pass, strong against run
+    - **Top-right:** Struggling defense overall
+    """)
+
+    try:
+        week_filter = f"AND week <= {week}" if week else ""
+
+        # Get defensive stats - pass yards allowed (opponent's pass yards)
+        sql_pass_def = f"""
+        SELECT
+            t1.team_abbr,
+            AVG(t2.pass_yards) as avg_pass_yds_allowed
+        FROM team_game_summary t1
+        JOIN team_game_summary t2 ON t1.game_id = t2.game_id AND t1.team_abbr != t2.team_abbr
+        WHERE t1.season = ?
+        {week_filter}
+        GROUP BY t1.team_abbr
+        """
+
+        # Get defensive stats - rush yards allowed (opponent's rush yards)
+        sql_rush_def = f"""
+        SELECT
+            t1.team_abbr,
+            AVG(t2.rush_yards) as avg_rush_yds_allowed
+        FROM team_game_summary t1
+        JOIN team_game_summary t2 ON t1.game_id = t2.game_id AND t1.team_abbr != t2.team_abbr
+        WHERE t1.season = ?
+        {week_filter}
+        GROUP BY t1.team_abbr
+        """
+
+        df_pass = query(sql_pass_def, (season,))
+        df_rush = query(sql_rush_def, (season,))
+
+        # Merge datasets
+        df = df_pass.merge(df_rush, on='team_abbr')
+
+        if df.empty:
+            st.info("No defensive data available for selected filters")
+            return
+
+        # Calculate total yards allowed
+        df['total_yds_allowed'] = df['avg_pass_yds_allowed'] + df['avg_rush_yds_allowed']
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        fig.add_trace(go.Scatter(
+            x='avg_rush_yds_allowed',
+            y='avg_pass_yds_allowed',
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=df['total_yds_allowed'],
+                colorscale='RdYlGn_r',  # Reversed: red=bad (more yards), green=good (fewer yards)
+                showscale=True,
+                colorbar=dict(title="Total Yds"),
+                opacity=0
+            ),
+            text=df['team_abbr'],
+            customdata=df['total_yds_allowed'],
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Pass Yards Allowed/Game: %{y:.1f}<br>' +
+                         'Rush Yards Allowed/Game: %{x:.1f}<br>' +
+                         'Total Yards Allowed: %{customdata:.1f}<br>' +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_pass = df['avg_pass_yds_allowed'].mean()
+        avg_rush = df['avg_rush_yds_allowed'].mean()
+
+        fig.add_hline(y=avg_pass, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Pass", annotation_position="right")
+        fig.add_vline(x=avg_rush, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Rush", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=df['avg_rush_yds_allowed'].min() * 1.02, y=df['avg_pass_yds_allowed'].min() * 1.02,
+                          text="Elite Defense", showarrow=False, font=dict(size=14, color="green"))
+        fig.add_annotation(x=df['avg_rush_yds_allowed'].max() * 0.98, y=df['avg_pass_yds_allowed'].min() * 1.02,
+                          text="Run Defense Issue", showarrow=False, font=dict(size=14, color="orange"))
+        fig.add_annotation(x=df['avg_rush_yds_allowed'].min() * 1.02, y=df['avg_pass_yds_allowed'].max() * 0.98,
+                          text="Pass Defense Issue", showarrow=False, font=dict(size=14, color="orange"))
+        fig.add_annotation(x=df['avg_rush_yds_allowed'].max() * 0.98, y=df['avg_pass_yds_allowed'].max() * 0.98,
+                          text="Struggling", showarrow=False, font=dict(size=14, color="red"))
+
+        # Calculate dynamic sizing for team logos
+        x_range = df['avg_rush_yds_allowed'].max() - df['avg_rush_yds_allowed'].min()
+        y_range = df['avg_pass_yds_allowed'].max() - df['avg_pass_yds_allowed'].min()
+
+        logo_size_x = max(x_range * 0.06, 5)  # At least 5 yards wide
+        logo_size_y = max(y_range * 0.06, 5)  # At least 5 yards tall
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team_abbr']),
+                xref="x",
+                yref="y",
+                x=row['avg_rush_yds_allowed'],
+                y=row['avg_pass_yds_allowed'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Defense: Pass Yards vs Rush Yards Allowed ({season} Season)",
+            xaxis_title="Rush Yards Allowed per Game",
+            yaxis_title="Pass Yards Allowed per Game",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
+        # Reverse both axes so lower (better defense) is in bottom-left
+        fig.update_xaxes(autorange="reversed")
+        fig.update_yaxes(autorange="reversed")
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Defensive Stats Table"):
+            display_df = df[['team_abbr', 'avg_pass_yds_allowed', 'avg_rush_yds_allowed', 'total_yds_allowed']].copy()
+            display_df.columns = ['Team', 'Pass Yds/G', 'Rush Yds/G', 'Total Yds/G']
+            display_df = display_df.round(1).sort_values('Total Yds/G', ascending=True)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     except Exception as e:

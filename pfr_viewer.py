@@ -12947,23 +12947,26 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
         if not chart_df.empty:
             import plotly.express as px
 
-            # X = Total Yards, Y = Total Touches
+            # X = Total Yards, Y = Total Touches, Size = Total TDs
             fig = px.scatter(
                 chart_df,
                 x='total_yards',
                 y='total_touches',
+                size='total_tds',
                 hover_data=['player', 'team', 'yards_per_touch', 'total_tds', 'games'],
                 text='player',
                 color='yards_per_touch',
                 labels={
                     'total_yards': 'Total Yards (Rush + Rec)',
                     'total_touches': 'Total Touches (Carries + Receptions)',
-                    'yards_per_touch': 'Yards/Touch'
+                    'yards_per_touch': 'Yards/Touch',
+                    'total_tds': 'Total TDs'
                 },
                 title=f"Skill Player Total Yards vs Touches ({season})",
-                color_continuous_scale='Viridis'
+                color_continuous_scale='Viridis',
+                size_max=30
             )
-            fig.update_traces(textposition='top center', marker=dict(size=12))
+            fig.update_traces(textposition='top center')
             fig.update_layout(height=600)
             st.plotly_chart(fig, use_container_width=True)
 

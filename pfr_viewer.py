@@ -11960,6 +11960,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
             "RB Efficiency (Rush Yards vs TDs)",
+            "RB Yards per Carry",
             "WR Efficiency (Targets vs Yards per Route Run)",
             "QB Passing TDs vs Interceptions",
             "QB Passing Yards vs Attempts"
@@ -11974,6 +11975,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_balance_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
         render_rb_efficiency_chart(season, week)
+    elif chart_type == "RB Yards per Carry":
+        render_rb_yards_per_carry_chart(season, week)
     elif chart_type == "WR Efficiency (Targets vs Yards per Route Run)":
         render_wr_efficiency_chart(season, week)
     elif chart_type == "QB Passing TDs vs Interceptions":
@@ -12649,6 +12652,91 @@ def render_qb_yards_attempts_chart(season: Optional[int], week: Optional[int]):
                 st.dataframe(display_df.sort_values('Yards', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.info("No QB data available with sufficient pass attempts (minimum 10).")
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+# ============================================================================
+# Section: RB Rushing Charts
+# ============================================================================
+
+def render_rb_yards_per_carry_chart(season: Optional[int], week: Optional[int]):
+    """Chart: RB Rushing Yards vs Yards per Carry."""
+    st.subheader("🏃 RB Yards per Carry")
+    st.markdown("*Shows rushing efficiency. Higher Y/C indicates more efficient runners.*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Minimum carries filter
+    min_carries = st.slider("Minimum Rushing Attempts", 10, 200, 30, 10, key="rb_ypc_min_carries")
+
+    # Build query to get RB rushing stats
+    week_filter = f"AND g.week <= {week}" if week else ""
+
+    sql_rb = f"""
+    SELECT
+        pb.player,
+        pb.team,
+        SUM(pb.rush_att) as total_rush_att,
+        SUM(pb.rush_yds) as total_rush_yds,
+        SUM(pb.rush_td) as total_rush_tds,
+        COUNT(DISTINCT pb.game_id) as games
+    FROM player_box_score pb
+    JOIN games g ON pb.game_id = g.game_id
+    WHERE g.season = ?
+    {week_filter}
+    AND pb.rush_att > 0
+    GROUP BY pb.player, pb.team
+    HAVING total_rush_att >= ?
+    ORDER BY total_rush_yds DESC
+    """
+
+    try:
+        df = query(sql_rb, (season, min_carries))
+
+        if df.empty:
+            st.info(f"No RB rushing data available with at least {min_carries} carries.")
+            return
+
+        # Calculate yards per carry
+        chart_df = df.copy()
+        chart_df['yards_per_carry'] = (chart_df['total_rush_yds'] / chart_df['total_rush_att']).round(2)
+
+        if not chart_df.empty:
+            import plotly.express as px
+
+            # X = Yards, Y = Yards per Carry
+            fig = px.scatter(
+                chart_df,
+                x='total_rush_yds',
+                y='yards_per_carry',
+                hover_data=['player', 'team', 'total_rush_att', 'total_rush_tds', 'games'],
+                text='player',
+                color='total_rush_tds',
+                labels={
+                    'total_rush_yds': 'Rushing Yards',
+                    'yards_per_carry': 'Yards per Carry',
+                    'total_rush_tds': 'Rush TDs'
+                },
+                title=f"RB Rushing Yards vs Yards per Carry ({season})",
+                color_continuous_scale='Reds'
+            )
+            fig.update_traces(textposition='top center', marker=dict(size=12))
+            fig.update_layout(height=600)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Show data table
+            with st.expander("📋 View RB Stats Table"):
+                display_df = df[['player', 'team', 'games', 'total_rush_att', 'total_rush_yds', 'total_rush_tds']].copy()
+                display_df.columns = ['Player', 'Team', 'Games', 'Carries', 'Yards', 'TDs']
+                display_df['Y/C'] = (display_df['Yards'] / display_df['Carries']).round(2)
+                display_df['Yards/Game'] = (display_df['Yards'] / display_df['Games']).round(1)
+                st.dataframe(display_df.sort_values('Yards', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No RB data available with at least {min_carries} carries.")
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")

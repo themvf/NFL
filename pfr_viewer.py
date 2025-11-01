@@ -12250,37 +12250,34 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
     """)
 
     try:
-        week_filter = f"AND week <= {week}" if week else ""
+        week_filter = f"AND g.week <= {week}" if week else ""
 
-        # Get defensive stats - pass yards allowed (opponent's pass yards)
-        sql_pass_def = f"""
+        # Get defensive stats by aggregating opponent's player stats
+        # Pass yards allowed = sum of opponent QB pass yards against this team
+        sql_defense = f"""
         SELECT
-            t1.team_abbr,
-            AVG(t2.pass_yards) as avg_pass_yds_allowed
-        FROM team_game_summary t1
-        JOIN team_game_summary t2 ON t1.game_id = t2.game_id AND t1.team_abbr != t2.team_abbr
-        WHERE t1.season = ?
+            pb.team as defense_team,
+            COUNT(DISTINCT pb.game_id) as games,
+            SUM(CASE WHEN opp.pass_yds > 0 THEN opp.pass_yds ELSE 0 END) as total_pass_yds_allowed,
+            SUM(CASE WHEN opp.rush_yds > 0 THEN opp.rush_yds ELSE 0 END) as total_rush_yds_allowed
+        FROM player_box_score pb
+        JOIN games g ON pb.game_id = g.game_id
+        JOIN player_box_score opp ON pb.game_id = opp.game_id AND pb.team != opp.team
+        WHERE g.season = ?
         {week_filter}
-        GROUP BY t1.team_abbr
+        GROUP BY pb.team
         """
 
-        # Get defensive stats - rush yards allowed (opponent's rush yards)
-        sql_rush_def = f"""
-        SELECT
-            t1.team_abbr,
-            AVG(t2.rush_yards) as avg_rush_yds_allowed
-        FROM team_game_summary t1
-        JOIN team_game_summary t2 ON t1.game_id = t2.game_id AND t1.team_abbr != t2.team_abbr
-        WHERE t1.season = ?
-        {week_filter}
-        GROUP BY t1.team_abbr
-        """
+        df = query(sql_defense, (season,))
 
-        df_pass = query(sql_pass_def, (season,))
-        df_rush = query(sql_rush_def, (season,))
+        if df.empty:
+            st.info("No defensive data available for selected filters")
+            return
 
-        # Merge datasets
-        df = df_pass.merge(df_rush, on='team_abbr')
+        # Calculate per-game averages
+        df['avg_pass_yds_allowed'] = (df['total_pass_yds_allowed'] / df['games']).round(1)
+        df['avg_rush_yds_allowed'] = (df['total_rush_yds_allowed'] / df['games']).round(1)
+        df.rename(columns={'defense_team': 'team_abbr'}, inplace=True)
 
         if df.empty:
             st.info("No defensive data available for selected filters")

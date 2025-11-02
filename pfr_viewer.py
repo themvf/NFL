@@ -11960,6 +11960,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
             "Defense Yards Allowed (Pass vs Rush)",
+            "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
             "Skill Player Total Yards vs Touches",
@@ -11977,6 +11978,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_balance_chart(season, week)
     elif chart_type == "Defense Yards Allowed (Pass vs Rush)":
         render_defense_yards_allowed_chart(season, week)
+    elif chart_type == "Power Rating vs Offensive Yards":
+        render_power_rating_yards_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
         render_rb_efficiency_chart(season, week)
     elif chart_type == "RB Yards per Carry":
@@ -12384,6 +12387,172 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")
+
+
+def render_power_rating_yards_chart(season: Optional[int], week: Optional[int]):
+    """Chart: Power Rating vs Offensive Yards per Game."""
+    st.subheader("⚡ Power Rating vs Offensive Yards")
+    st.markdown("""
+    **Goal:** Identify teams that produce yards and their overall team strength.
+    - **Top-right quadrant:** Elite teams (high power rating, high offensive yards)
+    - **Top-left:** Strong overall but lower offensive production
+    - **Bottom-right:** High offensive yards but lower overall team strength
+    - **Bottom-left:** Struggling teams overall
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Get all teams
+        teams_query = f"SELECT DISTINCT home_team_abbr as team FROM games WHERE season={season} ORDER BY home_team_abbr"
+        teams_df = query(teams_query)
+
+        if teams_df.empty:
+            st.warning("No teams found for this season.")
+            return
+
+        all_teams = teams_df['team'].unique()
+
+        # Calculate power ratings for each team
+        st.info(f"Calculating power ratings for {len(all_teams)} teams...")
+
+        # Calculate league statistics
+        league_stats = calculate_league_statistics(season, week, list(all_teams))
+
+        # Calculate baseline power ratings for all teams
+        all_team_powers = {}
+        for team in all_teams:
+            try:
+                power = calculate_team_power_rating(team, season, week, all_team_powers=None, league_stats=league_stats)
+                all_team_powers[team] = power
+            except:
+                all_team_powers[team] = 0.0
+
+        # Get offensive yards for each team
+        week_filter = f"AND week <= {week}" if week else ""
+
+        sql_yards = f"""
+        SELECT
+            team_abbr,
+            COUNT(DISTINCT game_id) as games,
+            AVG(yards_total) as avg_yards,
+            SUM(yards_total) as total_yards
+        FROM team_game_summary
+        WHERE season = ?
+        {week_filter}
+        GROUP BY team_abbr
+        """
+
+        df_yards = query(sql_yards, (season,))
+
+        if df_yards.empty:
+            st.info("No offensive data available for selected filters")
+            return
+
+        # Combine power ratings with yards
+        chart_data = []
+        for team in all_teams:
+            power_rating = all_team_powers.get(team, 50.0)
+            yards_row = df_yards[df_yards['team_abbr'] == team]
+
+            if not yards_row.empty:
+                avg_yards = yards_row['avg_yards'].iloc[0]
+                chart_data.append({
+                    'team_abbr': team,
+                    'power_rating': power_rating,
+                    'avg_yards': avg_yards
+                })
+
+        df = pd.DataFrame(chart_data)
+
+        if df.empty:
+            st.info("No data available to display")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        fig.add_trace(go.Scatter(
+            x=df['avg_yards'],
+            y=df['power_rating'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=df['power_rating'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Power Rating"),
+                opacity=0
+            ),
+            text=df['team_abbr'],
+            customdata=df[['power_rating', 'avg_yards']],
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Power Rating: %{customdata[0]:.1f}<br>' +
+                         'Offensive Yards/Game: %{customdata[1]:.1f}<br>' +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_power = df['power_rating'].mean()
+        avg_yards = df['avg_yards'].mean()
+
+        fig.add_hline(y=avg_power, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Power", annotation_position="right")
+        fig.add_vline(x=avg_yards, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="League Avg Yards", annotation_position="top")
+
+        # Calculate dynamic sizing for team logos
+        x_range = df['avg_yards'].max() - df['avg_yards'].min()
+        y_range = df['power_rating'].max() - df['power_rating'].min()
+
+        logo_size_x = max(x_range * 0.06, 10)  # At least 10 yards wide
+        logo_size_y = max(y_range * 0.06, 3)   # At least 3 rating points tall
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team_abbr']),
+                xref="x",
+                yref="y",
+                x=row['avg_yards'],
+                y=row['power_rating'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Power Rating vs Offensive Yards per Game ({season} Season)",
+            xaxis_title="Offensive Yards per Game",
+            yaxis_title="Power Rating (1-100 scale, 50 = average)",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Power Rating & Yards Table"):
+            display_df = df[['team_abbr', 'power_rating', 'avg_yards']].copy()
+            display_df.columns = ['Team', 'Power Rating', 'Yards/Game']
+            display_df = display_df.round(1).sort_values('Power Rating', ascending=False)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
 
 
 def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):

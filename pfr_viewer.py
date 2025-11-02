@@ -13303,30 +13303,37 @@ def render_team_plays_ppg_chart(season: Optional[int], week: Optional[int]):
         # Calculate efficiency score (points per play)
         df['points_per_play'] = df['avg_points'] / df['avg_plays']
 
-        import plotly.express as px
+        # Create scatter plot with invisible markers for hover functionality
+        fig = go.Figure()
 
-        # X = Plays per Game, Y = Points per Game
-        fig = px.scatter(
-            df,
-            x='avg_plays',
-            y='avg_points',
-            hover_data=['team_abbr', 'games', 'points_per_play'],
-            text='team_abbr',
-            labels={
-                'avg_plays': 'Plays per Game',
-                'avg_points': 'Points per Game',
-                'points_per_play': 'Points per Play'
-            },
-            title=f"Team Plays per Game vs Points per Game ({season})",
-            color='points_per_play',
-            color_continuous_scale='RdYlGn'
-        )
+        # Add invisible markers for hover functionality
+        fig.add_trace(go.Scatter(
+            x=df['avg_plays'],
+            y=df['avg_points'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=df['points_per_play'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Points/Play"),
+                opacity=0
+            ),
+            text=df['team_abbr'],
+            customdata=df[['team_abbr', 'games', 'points_per_play']],
+            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                         'Plays/Game: %{x:.1f}<br>' +
+                         'Points/Game: %{y:.1f}<br>' +
+                         'Points/Play: %{customdata[2]:.3f}<br>' +
+                         'Games: %{customdata[1]}<br>' +
+                         '<extra></extra>',
+            showlegend=False
+        ))
 
         # Add league average lines
         avg_plays = df['avg_plays'].mean()
         avg_points = df['avg_points'].mean()
 
-        import plotly.graph_objects as go
         fig.add_hline(
             y=avg_points,
             line_dash="dash",
@@ -13344,8 +13351,34 @@ def render_team_plays_ppg_chart(season: Optional[int], week: Optional[int]):
             annotation_position="top"
         )
 
-        fig.update_traces(textposition='top center', marker=dict(size=12))
-        fig.update_layout(height=600)
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team_abbr']),
+                xref="x",
+                yref="y",
+                x=row['avg_plays'],
+                y=row['avg_points'],
+                sizex=2.5,  # 2.5 plays wide
+                sizey=2.5,  # 2.5 points tall
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Plays per Game vs Points per Game ({season} Season)",
+            xaxis_title="Plays per Game",
+            yaxis_title="Points per Game",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
         st.plotly_chart(fig, use_container_width=True)
 
         # Show data table

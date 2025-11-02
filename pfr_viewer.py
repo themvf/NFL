@@ -13217,27 +13217,33 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
         # Calculate difference for color coding
         pivot_df['home_advantage'] = pivot_df['home'] - pivot_df['away']
 
-        import plotly.express as px
+        # Create scatter plot with invisible markers for hover functionality
+        fig = go.Figure()
 
-        # X = Away PPG, Y = Home PPG
-        fig = px.scatter(
-            pivot_df,
-            x='away',
-            y='home',
-            hover_data=['team', 'home_advantage'],
-            text='team',
-            labels={
-                'away': 'PPG Away',
-                'home': 'PPG Home',
-                'home_advantage': 'Home Advantage'
-            },
-            title=f"Team Points Per Game: Home vs Away ({season})",
-            color='home_advantage',
-            color_continuous_scale='RdYlGn'
-        )
+        # Add invisible markers for hover functionality
+        fig.add_trace(go.Scatter(
+            x=pivot_df['away'],
+            y=pivot_df['home'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=pivot_df['home_advantage'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Home Adv"),
+                opacity=0
+            ),
+            text=pivot_df['team'],
+            customdata=pivot_df[['team', 'home_advantage']],
+            hovertemplate='<b>%{customdata[0]}</b><br>' +
+                         'PPG Away: %{x:.1f}<br>' +
+                         'PPG Home: %{y:.1f}<br>' +
+                         'Home Advantage: %{customdata[1]:.1f}<br>' +
+                         '<extra></extra>',
+            showlegend=False
+        ))
 
         # Add diagonal line (equal performance)
-        import plotly.graph_objects as go
         max_ppg = max(pivot_df['home'].max(), pivot_df['away'].max())
         min_ppg = min(pivot_df['home'].min(), pivot_df['away'].min())
         fig.add_trace(go.Scatter(
@@ -13249,8 +13255,34 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
             name='Equal Performance'
         ))
 
-        fig.update_traces(textposition='top center', marker=dict(size=12), selector=dict(mode='markers'))
-        fig.update_layout(height=600)
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in pivot_df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team']),
+                xref="x",
+                yref="y",
+                x=row['away'],
+                y=row['home'],
+                sizex=2.0,  # 2.0 PPG wide
+                sizey=2.0,  # 2.0 PPG tall
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Team Points Per Game: Home vs Away ({season} Season)",
+            xaxis_title="PPG Away",
+            yaxis_title="PPG Home",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
         st.plotly_chart(fig, use_container_width=True)
 
         # Show data table

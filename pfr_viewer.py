@@ -12394,10 +12394,10 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
     st.subheader("🛡️ Defense Yards Allowed")
     st.markdown("""
     **Goal:** Identify defensive strengths and weaknesses.
-    - **Bottom-left quadrant:** Elite defense (low pass & rush yards allowed)
+    - **Bottom-left quadrant:** Elite defense (low rush & pass yards allowed)
     - **Bottom-right:** Weak against run, strong against pass
-    - **Top-left:** Weak against pass, strong against run
-    - **Top-right:** Struggling defense overall
+    - **Top-left:** Strong against run, weak against pass
+    - **Top-right:** Struggling defense overall (high yards allowed)
     """)
 
     try:
@@ -12516,10 +12516,6 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
             paper_bgcolor='rgba(0,0,0,0)',
             images=layout_images
         )
-
-        # Reverse both axes so lower (better defense) is in bottom-left
-        fig.update_xaxes(autorange="reversed")
-        fig.update_yaxes(autorange="reversed")
 
         st.plotly_chart(fig, use_container_width=True)
 

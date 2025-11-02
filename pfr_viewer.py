@@ -12446,20 +12446,55 @@ def render_power_rating_yards_chart(season: Optional[int], week: Optional[int]):
 
         all_teams = teams_df['team'].unique()
 
-        # Calculate power ratings for each team
+        # Calculate power ratings for each team using the same method as Power Rankings view
         st.info(f"Calculating power ratings for {len(all_teams)} teams...")
 
-        # Calculate league statistics
-        league_stats = calculate_league_statistics(season, week, list(all_teams))
+        # Determine the week to use for calculation
+        if week:
+            calc_week = week
+        else:
+            max_week_query = f"SELECT MAX(week) as max_week FROM games WHERE season={season}"
+            max_week_df = query(max_week_query)
+            calc_week = int(max_week_df['max_week'].iloc[0]) if not max_week_df.empty else 1
 
-        # Calculate baseline power ratings for all teams
+        # Step 1: Calculate league statistics
+        league_stats = calculate_league_statistics(season, calc_week, list(all_teams))
+
+        # Step 2: Calculate baseline power ratings for all teams (for SOS calculation)
         all_team_powers = {}
         for team in all_teams:
             try:
-                power = calculate_team_power_rating(team, season, week, all_team_powers=None, league_stats=league_stats)
+                power = calculate_team_power_rating(team, season, calc_week, all_team_powers=None, league_stats=league_stats)
                 all_team_powers[team] = power
             except:
                 all_team_powers[team] = 0.0
+
+        # Step 3: Calculate quality margin-adjusted league stats
+        quality_margins = []
+        for team in all_teams:
+            try:
+                qm = calculate_quality_victory_margin(team, season, calc_week, all_team_powers)
+                quality_margins.append(qm.get('quality_margin_per_game', 0))
+            except:
+                quality_margins.append(0)
+
+        if len(quality_margins) > 1:
+            import statistics
+            league_stats['quality_margin'] = {
+                'mean': statistics.mean(quality_margins),
+                'std': statistics.stdev(quality_margins) if len(quality_margins) > 1 else 1.0
+            }
+
+        # Step 4: Calculate final power ratings with quality margin adjustments
+        final_team_powers = {}
+        for team in all_teams:
+            try:
+                final_power = calculate_team_power_rating(team, season, calc_week, all_team_powers, league_stats)
+                final_team_powers[team] = final_power
+            except:
+                final_team_powers[team] = 0.0
+
+        all_team_powers = final_team_powers
 
         # Get offensive yards for each team
         week_filter = f"AND week <= {week}" if week else ""

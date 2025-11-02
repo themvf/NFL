@@ -1568,10 +1568,12 @@ def calculate_defensive_stats(season, max_week):
         defensive_stats = {}
 
         for team in teams:
-            # Pass yards allowed (opponent QBs)
+            # Pass yards and TDs allowed (opponent QBs)
             # Join with games to find players who played AGAINST this team
             pass_query = """
-                SELECT AVG(p.pass_yds) as avg_pass_allowed
+                SELECT
+                    AVG(p.pass_yds) as avg_pass_allowed,
+                    SUM(p.pass_td) as total_pass_td_allowed
                 FROM player_box_score p
                 JOIN games g ON p.season = g.season AND p.week = g.week
                 WHERE p.season = ? AND p.week < ? AND p.pass_att > 10
@@ -1639,6 +1641,7 @@ def calculate_defensive_stats(season, max_week):
 
             defensive_stats[team] = {
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
+                'pass_td_allowed': pass_df['total_pass_td_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['total_pass_td_allowed'].iloc[0]) else 0,
                 'rush_allowed': rush_df['avg_rush_allowed'].iloc[0] if not rush_df.empty and not pd.isna(rush_df['avg_rush_allowed'].iloc[0]) else 80,
                 'rec_to_rb': rec_rb_df['avg_rec_to_rb'].iloc[0] if not rec_rb_df.empty and not pd.isna(rec_rb_df['avg_rec_to_rb'].iloc[0]) else 20,
                 'rec_to_wr': rec_wr_df['avg_rec_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['avg_rec_to_wr'].iloc[0]) else 60,
@@ -1789,6 +1792,14 @@ def generate_player_projections(season, week, teams_playing):
         # Calculate defensive stats
         defensive_stats = calculate_defensive_stats(season, week)
 
+        # Calculate defensive rankings for passing yards allowed
+        # Lower yards = better defense = higher rank (1 = best)
+        def_pass_ranking = {}
+        if defensive_stats:
+            sorted_defenses = sorted(defensive_stats.items(), key=lambda x: x[1]['pass_allowed'])
+            for rank, (team, _) in enumerate(sorted_defenses, 1):
+                def_pass_ranking[team] = rank
+
         # Calculate league averages for normalization
         league_avg = {
             'pass': sum([d['pass_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 240,
@@ -1864,6 +1875,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': int(player['total_rush_td']),
                     'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
+                    'Def Pass TDs': int(opponent_def['pass_td_allowed']),
+                    'Def Pass Rank': def_pass_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),
                     'Games': round(float(player['games_played']), 1)

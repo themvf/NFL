@@ -1719,6 +1719,8 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'avg_pass_yds': group['pass_yds'].mean(),
                     'median_pass_yds': group['pass_yds'].median(),
                     'median_pass_td': group['pass_td'].median(),
+                    'median_rush_td': group['rush_td'].median(),
+                    'median_rush_yds': group['rush_yds'].median(),
                     'median_pass_cmp_pct': (group['pass_cmp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
                 })
 
@@ -1731,6 +1733,8 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rec_yds': group['rec_yds'].median(),
                     'median_total_yds': (group['rush_yds'] + group['rec_yds']).median(),
                     'median_total_td': (group['rush_td'] + group['rec_td']).median(),
+                    'median_rush_td': group['rush_td'].median(),
+                    'median_rec_td': group['rec_td'].median(),
                     'median_targets': group['targets'].median()
                 })
 
@@ -1742,6 +1746,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rec_yds': group['rec_yds'].median(),
                     'median_targets': group['targets'].median(),
                     'median_rec_td': group['rec_td'].median(),
+                    'median_rush_td': group['rush_td'].median(),
                     'median_rec': group['rec'].median()
                 })
 
@@ -1848,6 +1853,9 @@ def generate_player_projections(season, week, teams_playing):
                     'Opponent': opponent,
                     'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
+                    'Pass TDs': round(player['median_pass_td'], 1),
+                    'Rush TDs': round(player['median_rush_td'], 1),
+                    'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
@@ -1864,6 +1872,9 @@ def generate_player_projections(season, week, teams_playing):
 
                 avg_mult = (rush_mult + rec_mult) / 2
 
+                # Calculate combined median total yards
+                combined_median = player['median_rush_yds'] + player['median_rec_yds']
+
                 projections['RB'].append({
                     'Player': player['player'],
                     'Team': player['team'],
@@ -1871,6 +1882,9 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush': round(player['median_rush_yds'], 1),
                     'Median Rec': round(player['median_rec_yds'], 1),
+                    'Total Median': round(combined_median, 1),
+                    'Rush TDs': round(player['median_rush_td'], 1),
+                    'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Total': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 2),
                     'Games': player['games_played']
@@ -1882,6 +1896,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Opponent': opponent,
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Yds': round(player['median_total_yds'], 1),
+                    'Rush TDs': round(player['median_rush_td'], 1),
+                    'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 2),
                     'Games': player['games_played']
@@ -1898,6 +1914,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
+                    'Rush TDs': round(player['median_rush_td'], 1),
+                    'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
                     'Games': player['games_played']
@@ -1909,6 +1927,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Opponent': opponent,
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
+                    'Rush TDs': round(player['median_rush_td'], 1),
+                    'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 2),
                     'Games': player['games_played']
@@ -11733,6 +11753,20 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
         # Format primetime column
         df['Primetime'] = df['Primetime'].apply(lambda x: '⭐' if x == 1 else '')
 
+        # Calculate power rankings for each team
+        # Use the selected season and the week before the first game for power rating calculation
+        power_rating_week = df['Week'].min() if selected_week == "All Weeks" else selected_week
+
+        def get_power_ranking(team, week):
+            try:
+                return round(calculate_team_power_rating(team, selected_season, week), 1)
+            except:
+                return 0.0
+
+        # Add power ranking columns
+        df['Home Power'] = df.apply(lambda row: get_power_ranking(row['Home Team'], row['Week']), axis=1)
+        df['Away Power'] = df.apply(lambda row: get_power_ranking(row['Away Team'], row['Week']), axis=1)
+
         # Create matchup column with location info
         def format_matchup(row):
             matchup = f"{row['Away Team']} @ {row['Home Team']}"
@@ -11765,7 +11799,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                 with st.expander(f"Week {week_num} ({len(week_games)} games)", expanded=(week_num == weeks_for_season[0])):
                     # Display games for this week
-                    display_df = week_games[['Date', 'Day', 'Matchup', 'Primetime']].copy()
+                    display_df = week_games[['Date', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power', 'Primetime']].copy()
 
                     st.dataframe(
                         display_df,
@@ -11773,8 +11807,11 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         hide_index=True,
                         column_config={
                             "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
-                            "Day": st.column_config.TextColumn("Day"),
-                            "Matchup": st.column_config.TextColumn("Matchup", width="medium"),
+                            "Day": st.column_config.TextColumn("Day", width="small"),
+                            "Home Team": st.column_config.TextColumn("Home", width="small"),
+                            "Home Power": st.column_config.NumberColumn("Home Pwr", width="small", format="%.1f"),
+                            "Away Team": st.column_config.TextColumn("Away", width="small"),
+                            "Away Power": st.column_config.NumberColumn("Away Pwr", width="small", format="%.1f"),
                             "Primetime": st.column_config.TextColumn("Prime", width="small")
                         }
                     )
@@ -11782,7 +11819,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             # Display single week
             st.subheader(f"Week {selected_week} Schedule")
 
-            display_df = df[['Date', 'Day', 'Matchup', 'Primetime']].copy()
+            display_df = df[['Date', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power', 'Primetime']].copy()
 
             st.dataframe(
                 display_df,
@@ -11790,8 +11827,11 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 hide_index=True,
                 column_config={
                     "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
-                    "Day": st.column_config.TextColumn("Day"),
-                    "Matchup": st.column_config.TextColumn("Matchup", width="medium"),
+                    "Day": st.column_config.TextColumn("Day", width="small"),
+                    "Home Team": st.column_config.TextColumn("Home", width="small"),
+                    "Home Power": st.column_config.NumberColumn("Home Pwr", width="small", format="%.1f"),
+                    "Away Team": st.column_config.TextColumn("Away", width="small"),
+                    "Away Power": st.column_config.NumberColumn("Away Pwr", width="small", format="%.1f"),
                     "Primetime": st.column_config.TextColumn("Prime", width="small")
                 }
             )
@@ -11808,15 +11848,15 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 projections = generate_player_projections(selected_season, selected_week, teams_playing)
 
             if projections and any(not proj_df.empty for proj_df in projections.values()):
-                # Create tabs for each position
-                proj_tabs = st.tabs(["🎯 Top QBs", "🏃 Top RBs", "🙌 Top WRs", "💪 Top TEs", "⭐ Top Skill Players"])
+                # Create tabs for each position (removed TEs)
+                proj_tabs = st.tabs(["🎯 Top QBs", "🏃 Top RBs", "🙌 Top WRs", "⭐ Top Skill Players"])
 
                 # QB Tab
                 with proj_tabs[0]:
                     if not projections.get('QB', pd.DataFrame()).empty:
                         st.markdown("##### Quarterbacks - Matchup-Adjusted Passing Yard Projections")
 
-                        qb_df = projections['QB'].head(20).copy()
+                        qb_df = projections['QB'].head(30).copy()
 
                         # Add matchup rating column
                         qb_df['Matchup'] = qb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
@@ -11841,7 +11881,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('RB', pd.DataFrame()).empty:
                         st.markdown("##### Running Backs - Matchup-Adjusted Total Yard Projections")
 
-                        rb_df = projections['RB'].head(20).copy()
+                        rb_df = projections['RB'].head(30).copy()
                         rb_df['Matchup'] = rb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -11863,7 +11903,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('WR', pd.DataFrame()).empty:
                         st.markdown("##### Wide Receivers - Matchup-Adjusted Receiving Yard Projections")
 
-                        wr_df = projections['WR'].head(20).copy()
+                        wr_df = projections['WR'].head(30).copy()
                         wr_df['Matchup'] = wr_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -11880,34 +11920,12 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     else:
                         st.info("No WR data available for this week")
 
-                # TE Tab
-                with proj_tabs[3]:
-                    if not projections.get('TE', pd.DataFrame()).empty:
-                        st.markdown("##### Tight Ends - Matchup-Adjusted Receiving Yard Projections")
-
-                        te_df = projections['TE'].head(20).copy()
-                        te_df['Matchup'] = te_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
-
-                        def style_matchup(row):
-                            _, color = get_matchup_rating(row['Multiplier'])
-                            return [color] * len(row) if color else [''] * len(row)
-
-                        styled_df = te_df.style.apply(style_matchup, axis=1)
-
-                        st.dataframe(
-                            styled_df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                    else:
-                        st.info("No TE data available for this week")
-
                 # Skill Players Combined Tab
-                with proj_tabs[4]:
+                with proj_tabs[3]:
                     if not projections.get('SKILL', pd.DataFrame()).empty:
-                        st.markdown("##### Top Skill Position Players (RB/WR/TE) - All Positions Combined")
+                        st.markdown("##### Top Skill Position Players (RB/WR) - All Positions Combined")
 
-                        skill_df = projections['SKILL'].head(20).copy()
+                        skill_df = projections['SKILL'].head(30).copy()
                         skill_df['Matchup'] = skill_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):

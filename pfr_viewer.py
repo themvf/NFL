@@ -11999,7 +11999,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('RB', pd.DataFrame()).empty:
                         st.markdown("##### Running Backs - Matchup-Adjusted Total Yard Projections")
 
-                        rb_df = projections['RB'].head(30).copy()
+                        rb_df = projections['RB'].head(50).copy()
                         rb_df['Matchup'] = rb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -12021,7 +12021,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('WR', pd.DataFrame()).empty:
                         st.markdown("##### Wide Receivers - Matchup-Adjusted Receiving Yard Projections")
 
-                        wr_df = projections['WR'].head(30).copy()
+                        wr_df = projections['WR'].head(50).copy()
                         wr_df['Matchup'] = wr_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):
@@ -12043,7 +12043,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     if not projections.get('SKILL', pd.DataFrame()).empty:
                         st.markdown("##### Top Skill Position Players (RB/WR) - All Positions Combined")
 
-                        skill_df = projections['SKILL'].head(30).copy()
+                        skill_df = projections['SKILL'].head(75).copy()
                         skill_df['Matchup'] = skill_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
 
                         def style_matchup(row):

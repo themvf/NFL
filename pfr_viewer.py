@@ -1858,8 +1858,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(multiplier, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
             elif position == 'RB':
@@ -1886,8 +1886,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': round(player['median_rush_td'], 1),
                     'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Total': round(proj_total, 1),
-                    'Multiplier': round(avg_mult, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(avg_mult, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
                 projections['SKILL'].append({
@@ -1899,8 +1899,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': round(player['median_rush_td'], 1),
                     'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(proj_total, 1),
-                    'Multiplier': round(avg_mult, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(avg_mult, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
             elif position == 'WR':
@@ -1917,8 +1917,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': round(player['median_rush_td'], 1),
                     'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(multiplier, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
                 projections['SKILL'].append({
@@ -1930,8 +1930,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': round(player['median_rush_td'], 1),
                     'Rec TDs': round(player['median_rec_td'], 1),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(multiplier, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
             elif position == 'TE':
@@ -1946,8 +1946,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(multiplier, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
                 projections['SKILL'].append({
@@ -1957,8 +1957,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 2),
-                    'Games': player['games_played']
+                    'Multiplier': round(multiplier, 1),
+                    'Games': round(float(player['games_played']), 1)
                 })
 
         # Convert to DataFrames and sort

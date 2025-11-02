@@ -11760,15 +11760,52 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
         # Format primetime column
         df['Primetime'] = df['Primetime'].apply(lambda x: '⭐' if x == 1 else '')
 
-        # Calculate power rankings for each team
+        # Calculate power rankings for each team using the same 4-step process as Power Rankings view
         # Use the selected season and the week before the first game for power rating calculation
         power_rating_week = df['Week'].min() if selected_week == "All Weeks" else selected_week
 
-        def get_power_ranking(team, week):
+        # Get all unique teams in the schedule
+        all_teams = set(df['Home Team'].tolist() + df['Away Team'].tolist())
+
+        # Step 1: Calculate league statistics
+        league_stats = calculate_league_statistics(selected_season, power_rating_week, list(all_teams))
+
+        # Step 2: Calculate baseline power ratings for all teams (for SOS calculation)
+        all_team_powers = {}
+        for team in all_teams:
             try:
-                return round(calculate_team_power_rating(team, selected_season, week), 1)
+                power = calculate_team_power_rating(team, selected_season, power_rating_week, all_team_powers=None, league_stats=league_stats)
+                all_team_powers[team] = power
             except:
-                return 0.0
+                all_team_powers[team] = 0.0
+
+        # Step 3: Calculate quality margin-adjusted league stats
+        quality_margins = []
+        for team in all_teams:
+            try:
+                qm = calculate_quality_victory_margin(team, selected_season, power_rating_week, all_team_powers)
+                quality_margins.append(qm.get('quality_margin_per_game', 0))
+            except:
+                quality_margins.append(0)
+
+        if len(quality_margins) > 1:
+            import statistics
+            league_stats['quality_margin'] = {
+                'mean': statistics.mean(quality_margins),
+                'std': statistics.stdev(quality_margins) if len(quality_margins) > 1 else 1.0
+            }
+
+        # Step 4: Calculate final power ratings with quality margin adjustments
+        final_team_powers = {}
+        for team in all_teams:
+            try:
+                final_power = calculate_team_power_rating(team, selected_season, power_rating_week, all_team_powers, league_stats)
+                final_team_powers[team] = final_power
+            except:
+                final_team_powers[team] = 0.0
+
+        def get_power_ranking(team, week):
+            return round(final_team_powers.get(team, 0.0), 1)
 
         # Add power ranking columns
         df['Home Power'] = df.apply(lambda row: get_power_ranking(row['Home Team'], row['Week']), axis=1)

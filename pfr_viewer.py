@@ -12022,6 +12022,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
             "Team PPG Home vs Away",
+            "Team Plays per Game vs Points per Game",
             "Defense Yards Allowed (Pass vs Rush)",
             "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
@@ -12042,6 +12043,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_balance_chart(season, week)
     elif chart_type == "Team PPG Home vs Away":
         render_team_ppg_home_away_chart(season, week)
+    elif chart_type == "Team Plays per Game vs Points per Game":
+        render_team_plays_ppg_chart(season, week)
     elif chart_type == "Defense Yards Allowed (Pass vs Rush)":
         render_defense_yards_allowed_chart(season, week)
     elif chart_type == "Power Rating vs Offensive Yards":
@@ -13256,6 +13259,103 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
             display_df.columns = ['Team', 'PPG Home', 'PPG Away', 'Home Advantage']
             display_df = display_df.round(1)
             st.dataframe(display_df.sort_values('Home Advantage', ascending=False), use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_team_plays_ppg_chart(season: Optional[int], week: Optional[int]):
+    """Chart: Team Plays per Game vs Points per Game - Offensive Efficiency."""
+    st.subheader("🏈 Team Plays per Game vs Points per Game")
+    st.markdown("*Shows offensive efficiency. Teams higher and to the left score more points with fewer plays (more efficient).*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Build query with week filter
+    week_filter = f"AND week <= {week}" if week else ""
+
+    sql_query = f"""
+    SELECT
+        team_abbr,
+        COUNT(DISTINCT game_id) as games,
+        AVG(pass_att + rush_att) as avg_plays,
+        AVG(points) as avg_points,
+        SUM(points) as total_points
+    FROM team_game_summary
+    WHERE season = ?
+    {week_filter}
+    AND pass_att IS NOT NULL
+    AND rush_att IS NOT NULL
+    GROUP BY team_abbr
+    HAVING games > 0
+    ORDER BY avg_points DESC
+    """
+
+    try:
+        df = query(sql_query, (season,))
+
+        if df.empty:
+            st.info("No team data available.")
+            return
+
+        # Calculate efficiency score (points per play)
+        df['points_per_play'] = df['avg_points'] / df['avg_plays']
+
+        import plotly.express as px
+
+        # X = Plays per Game, Y = Points per Game
+        fig = px.scatter(
+            df,
+            x='avg_plays',
+            y='avg_points',
+            hover_data=['team_abbr', 'games', 'points_per_play'],
+            text='team_abbr',
+            labels={
+                'avg_plays': 'Plays per Game',
+                'avg_points': 'Points per Game',
+                'points_per_play': 'Points per Play'
+            },
+            title=f"Team Plays per Game vs Points per Game ({season})",
+            color='points_per_play',
+            color_continuous_scale='RdYlGn'
+        )
+
+        # Add league average lines
+        avg_plays = df['avg_plays'].mean()
+        avg_points = df['avg_points'].mean()
+
+        import plotly.graph_objects as go
+        fig.add_hline(
+            y=avg_points,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5,
+            annotation_text=f"League Avg PPG: {avg_points:.1f}",
+            annotation_position="right"
+        )
+        fig.add_vline(
+            x=avg_plays,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5,
+            annotation_text=f"League Avg Plays: {avg_plays:.1f}",
+            annotation_position="top"
+        )
+
+        fig.update_traces(textposition='top center', marker=dict(size=12))
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Team Stats Table"):
+            display_df = df[['team_abbr', 'games', 'avg_plays', 'avg_points', 'points_per_play']].copy()
+            display_df.columns = ['Team', 'Games', 'Plays/Game', 'PPG', 'Points/Play']
+            display_df['Plays/Game'] = display_df['Plays/Game'].round(1)
+            display_df['PPG'] = display_df['PPG'].round(1)
+            display_df['Points/Play'] = display_df['Points/Play'].round(3)
+            st.dataframe(display_df.sort_values('Points/Play', ascending=False), use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")

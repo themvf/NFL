@@ -11796,16 +11796,43 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             }
 
         # Step 4: Calculate final power ratings with quality margin adjustments
-        final_team_powers = {}
+        week_teams_data = []
         for team in all_teams:
             try:
                 final_power = calculate_team_power_rating(team, selected_season, power_rating_week, all_team_powers, league_stats)
-                final_team_powers[team] = final_power
+                team_record = calculate_win_loss_record(team, selected_season, power_rating_week)
+                wins = team_record.get('wins', 0)
+                losses = team_record.get('losses', 0)
+
+                week_teams_data.append({
+                    'team': team,
+                    'power': final_power,
+                    'wins': wins,
+                    'losses': losses
+                })
             except:
-                final_team_powers[team] = 0.0
+                week_teams_data.append({
+                    'team': team,
+                    'power': 0.0,
+                    'wins': 0,
+                    'losses': 0
+                })
+
+        # Sort by record first, then by power rating (same as Power Rankings view)
+        week_teams_data.sort(key=lambda x: (-x['wins'], x['losses'], -x['power']))
+
+        # Normalize power ratings to 1-100 scale based on rank position
+        final_team_powers = {}
+        if len(week_teams_data) > 0:
+            for rank_idx, team_data in enumerate(week_teams_data):
+                # Percentile based on position in sorted list (wins-dominant ranking)
+                rank_pct = (rank_idx / len(week_teams_data)) * 100
+                # Invert so best team (rank_idx=0) gets ~100, worst gets ~1
+                normalized_power = max(1, min(100, 100 - rank_pct))
+                final_team_powers[team_data['team']] = normalized_power
 
         def get_power_ranking(team, week):
-            return round(final_team_powers.get(team, 0.0), 1)
+            return round(final_team_powers.get(team, 50.0), 1)
 
         # Add power ranking columns
         df['Home Power'] = df.apply(lambda row: get_power_ranking(row['Home Team'], row['Week']), axis=1)

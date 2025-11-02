@@ -1584,9 +1584,11 @@ def calculate_defensive_stats(season, max_week):
             """
             pass_df = pd.read_sql_query(pass_query, conn, params=(season, max_week, team, team))
 
-            # Rush yards allowed (opponent RBs)
+            # Rush yards and TDs allowed (opponent RBs)
             rush_query = """
-                SELECT AVG(p.rush_yds) as avg_rush_allowed
+                SELECT
+                    AVG(p.rush_yds) as avg_rush_allowed,
+                    SUM(p.rush_td) as total_rush_td_allowed
                 FROM player_box_score p
                 JOIN games g ON p.season = g.season AND p.week = g.week
                 WHERE p.season = ? AND p.week < ? AND p.rush_att >= 5
@@ -1611,9 +1613,11 @@ def calculate_defensive_stats(season, max_week):
             """
             rec_rb_df = pd.read_sql_query(rec_rb_query, conn, params=(season, max_week, team, team))
 
-            # Receiving yards allowed to WRs
+            # Receiving yards and TDs allowed to WRs
             rec_wr_query = """
-                SELECT AVG(p.rec_yds) as avg_rec_to_wr
+                SELECT
+                    AVG(p.rec_yds) as avg_rec_to_wr,
+                    SUM(p.rec_td) as total_rec_td_to_wr
                 FROM player_box_score p
                 JOIN games g ON p.season = g.season AND p.week = g.week
                 WHERE p.season = ? AND p.week < ?
@@ -1643,8 +1647,10 @@ def calculate_defensive_stats(season, max_week):
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
                 'pass_td_allowed': pass_df['total_pass_td_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['total_pass_td_allowed'].iloc[0]) else 0,
                 'rush_allowed': rush_df['avg_rush_allowed'].iloc[0] if not rush_df.empty and not pd.isna(rush_df['avg_rush_allowed'].iloc[0]) else 80,
+                'rush_td_allowed': rush_df['total_rush_td_allowed'].iloc[0] if not rush_df.empty and not pd.isna(rush_df['total_rush_td_allowed'].iloc[0]) else 0,
                 'rec_to_rb': rec_rb_df['avg_rec_to_rb'].iloc[0] if not rec_rb_df.empty and not pd.isna(rec_rb_df['avg_rec_to_rb'].iloc[0]) else 20,
                 'rec_to_wr': rec_wr_df['avg_rec_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['avg_rec_to_wr'].iloc[0]) else 60,
+                'rec_td_to_wr': rec_wr_df['total_rec_td_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['total_rec_td_to_wr'].iloc[0]) else 0,
                 'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40
             }
 
@@ -1792,13 +1798,33 @@ def generate_player_projections(season, week, teams_playing):
         # Calculate defensive stats
         defensive_stats = calculate_defensive_stats(season, week)
 
-        # Calculate defensive rankings for passing yards allowed
-        # Lower yards = better defense = higher rank (1 = best)
+        # Calculate defensive rankings for yards allowed by position
+        # Lower yards = better defense = lower rank number (1 = best, 32 = worst)
         def_pass_ranking = {}
+        def_rush_ranking = {}
+        def_rec_ranking = {}
+        def_total_ranking = {}  # For skill players (rush + rec combined)
+
         if defensive_stats:
-            sorted_defenses = sorted(defensive_stats.items(), key=lambda x: x[1]['pass_allowed'])
-            for rank, (team, _) in enumerate(sorted_defenses, 1):
+            # Pass defense ranking
+            sorted_pass = sorted(defensive_stats.items(), key=lambda x: x[1]['pass_allowed'])
+            for rank, (team, _) in enumerate(sorted_pass, 1):
                 def_pass_ranking[team] = rank
+
+            # Rush defense ranking
+            sorted_rush = sorted(defensive_stats.items(), key=lambda x: x[1]['rush_allowed'])
+            for rank, (team, _) in enumerate(sorted_rush, 1):
+                def_rush_ranking[team] = rank
+
+            # Receiving defense ranking (WRs)
+            sorted_rec = sorted(defensive_stats.items(), key=lambda x: x[1]['rec_to_wr'])
+            for rank, (team, _) in enumerate(sorted_rec, 1):
+                def_rec_ranking[team] = rank
+
+            # Total yards ranking for skill players (rush + rec combined)
+            sorted_total = sorted(defensive_stats.items(), key=lambda x: x[1]['rush_allowed'] + x[1]['rec_to_wr'])
+            for rank, (team, _) in enumerate(sorted_total, 1):
+                def_total_ranking[team] = rank
 
         # Calculate league averages for normalization
         league_avg = {
@@ -1905,6 +1931,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Total Median': round(combined_median, 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
+                    'Def Rush TDs': int(opponent_def['rush_td_allowed']),
+                    'Def Rush Rank': def_rush_ranking.get(opponent, 16),
                     'Projected Total': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 1),
                     'Games': round(float(player['games_played']), 1)
@@ -1918,6 +1946,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Median Yds': round(player['median_total_yds'], 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
+                    'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),
+                    'Def Total Rank': def_total_ranking.get(opponent, 16),
                     'Projected Yds': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 1),
                     'Games': round(float(player['games_played']), 1)
@@ -1936,6 +1966,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Median Tgts': round(player['median_targets'], 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
+                    'Def Rec TDs': int(opponent_def['rec_td_to_wr']),
+                    'Def Rec Rank': def_rec_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),
                     'Games': round(float(player['games_played']), 1)
@@ -1949,6 +1981,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Median Yds': round(player['median_rec_yds'], 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
+                    'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),
+                    'Def Total Rank': def_total_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),
                     'Games': round(float(player['games_played']), 1)

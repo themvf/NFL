@@ -11571,7 +11571,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
 
                         with col_actions:
                             if st.button("🗑️ Remove", key=f"delete_inj_{inj['injury_id']}"):
-                                if remove_persistent_injury(inj['injury_id']):
+                                if remove_persistent_injury(inj['player_name'], inj['team_abbr'], inj['season']):
                                     st.success("Injury removed!")
                                     st.rerun()
             else:

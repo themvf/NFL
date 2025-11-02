@@ -11984,6 +11984,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         [
             "Team Offense Efficiency (Yards vs Points)",
             "Team Balance (Points Scored vs Allowed)",
+            "Team PPG Home vs Away",
             "Defense Yards Allowed (Pass vs Rush)",
             "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
@@ -11991,7 +11992,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Skill Player Total Yards vs Touches",
             "WR Efficiency (Targets vs Yards per Route Run)",
             "QB Passing TDs vs Interceptions",
-            "QB Passing Yards vs Attempts"
+            "QB Passing Yards vs Attempts",
+            "QB Rush Yards vs Pass Yards"
         ]
     )
 
@@ -12001,6 +12003,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_offense_efficiency_chart(season, week)
     elif chart_type == "Team Balance (Points Scored vs Allowed)":
         render_team_balance_chart(season, week)
+    elif chart_type == "Team PPG Home vs Away":
+        render_team_ppg_home_away_chart(season, week)
     elif chart_type == "Defense Yards Allowed (Pass vs Rush)":
         render_defense_yards_allowed_chart(season, week)
     elif chart_type == "Power Rating vs Offensive Yards":
@@ -12017,6 +12021,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_qb_td_int_chart(season, week)
     elif chart_type == "QB Passing Yards vs Attempts":
         render_qb_yards_attempts_chart(season, week)
+    elif chart_type == "QB Rush Yards vs Pass Yards":
+        render_qb_rush_vs_pass_yards_chart(season, week)
 
 
 def render_team_offense_efficiency_chart(season: Optional[int], week: Optional[int]):
@@ -12997,6 +13003,187 @@ def render_qb_yards_attempts_chart(season: Optional[int], week: Optional[int]):
                 st.dataframe(display_df.sort_values('Yards', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.info("No QB data available with sufficient pass attempts (minimum 10).")
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_qb_rush_vs_pass_yards_chart(season: Optional[int], week: Optional[int]):
+    """Chart: QB Median Rush Yards vs Median Pass Yards."""
+    st.subheader("🏃 QB Rush Yards vs Pass Yards (Medians)")
+    st.markdown("*Shows QB dual-threat capability. Higher rush yards indicate mobile QBs.*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Minimum attempts filter
+    min_attempts = st.slider("Minimum Pass Attempts", 10, 300, 50, 10, key="qb_rush_pass_min_att")
+
+    # Build query to get QB stats
+    week_filter = f"AND g.week <= {week}" if week else ""
+
+    sql_qb = f"""
+    SELECT
+        pb.player,
+        pb.team,
+        pb.pass_yds,
+        pb.rush_yds,
+        pb.pass_att
+    FROM player_box_score pb
+    JOIN games g ON pb.game_id = g.game_id
+    WHERE g.season = ?
+    {week_filter}
+    AND pb.pass_att > 0
+    """
+
+    try:
+        df = query(sql_qb, (season,))
+
+        if df.empty:
+            st.info("No QB data available.")
+            return
+
+        # Calculate medians per QB
+        qb_medians = df.groupby(['player', 'team']).agg({
+            'pass_yds': 'median',
+            'rush_yds': 'median',
+            'pass_att': ['sum', 'count']
+        }).reset_index()
+
+        qb_medians.columns = ['player', 'team', 'median_pass_yds', 'median_rush_yds', 'total_pass_att', 'games']
+
+        # Filter by minimum attempts
+        qb_medians = qb_medians[qb_medians['total_pass_att'] >= min_attempts]
+
+        if qb_medians.empty:
+            st.info(f"No QB data available with at least {min_attempts} attempts.")
+            return
+
+        import plotly.express as px
+
+        # X = Median Pass Yards, Y = Median Rush Yards
+        fig = px.scatter(
+            qb_medians,
+            x='median_pass_yds',
+            y='median_rush_yds',
+            hover_data=['player', 'team', 'games'],
+            text='player',
+            labels={
+                'median_pass_yds': 'Median Passing Yards',
+                'median_rush_yds': 'Median Rushing Yards'
+            },
+            title=f"QB Median Rush Yards vs Median Pass Yards ({season})",
+            color='median_rush_yds',
+            color_continuous_scale='Reds'
+        )
+        fig.update_traces(textposition='top center', marker=dict(size=12))
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View QB Stats Table"):
+            display_df = qb_medians[['player', 'team', 'games', 'median_pass_yds', 'median_rush_yds', 'total_pass_att']].copy()
+            display_df.columns = ['Player', 'Team', 'Games', 'Med Pass Yds', 'Med Rush Yds', 'Total Pass Att']
+            st.dataframe(display_df.sort_values('Med Rush Yds', ascending=False), use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+
+
+def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
+    """Chart: NFL Teams PPG at Home vs PPG Away."""
+    st.subheader("🏠 Team PPG Home vs Away")
+    st.markdown("*Shows team performance based on location. Teams above the diagonal perform better at home.*")
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    # Build query to get team scoring by location
+    week_filter = f"AND week <= {week}" if week else ""
+
+    sql_teams = f"""
+    SELECT
+        team,
+        CASE
+            WHEN team = home_team THEN 'home'
+            ELSE 'away'
+        END as location,
+        AVG(team_score) as avg_ppg
+    FROM games
+    WHERE season = ?
+    {week_filter}
+    AND team_score IS NOT NULL
+    GROUP BY team, location
+    """
+
+    try:
+        df = query(sql_teams, (season,))
+
+        if df.empty:
+            st.info("No team scoring data available.")
+            return
+
+        # Pivot to get home and away PPG for each team
+        pivot_df = df.pivot(index='team', columns='location', values='avg_ppg').reset_index()
+
+        # Ensure both home and away columns exist
+        if 'home' not in pivot_df.columns or 'away' not in pivot_df.columns:
+            st.info("Insufficient home/away data for teams.")
+            return
+
+        pivot_df = pivot_df.dropna()
+
+        if pivot_df.empty:
+            st.info("No complete home/away data available.")
+            return
+
+        # Calculate difference for color coding
+        pivot_df['home_advantage'] = pivot_df['home'] - pivot_df['away']
+
+        import plotly.express as px
+
+        # X = Away PPG, Y = Home PPG
+        fig = px.scatter(
+            pivot_df,
+            x='away',
+            y='home',
+            hover_data=['team', 'home_advantage'],
+            text='team',
+            labels={
+                'away': 'PPG Away',
+                'home': 'PPG Home',
+                'home_advantage': 'Home Advantage'
+            },
+            title=f"Team Points Per Game: Home vs Away ({season})",
+            color='home_advantage',
+            color_continuous_scale='RdYlGn'
+        )
+
+        # Add diagonal line (equal performance)
+        import plotly.graph_objects as go
+        max_ppg = max(pivot_df['home'].max(), pivot_df['away'].max())
+        min_ppg = min(pivot_df['home'].min(), pivot_df['away'].min())
+        fig.add_trace(go.Scatter(
+            x=[min_ppg, max_ppg],
+            y=[min_ppg, max_ppg],
+            mode='lines',
+            line=dict(dash='dash', color='gray'),
+            showlegend=False,
+            name='Equal Performance'
+        ))
+
+        fig.update_traces(textposition='top center', marker=dict(size=12), selector=dict(mode='markers'))
+        fig.update_layout(height=600)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show data table
+        with st.expander("📋 View Team Stats Table"):
+            display_df = pivot_df[['team', 'home', 'away', 'home_advantage']].copy()
+            display_df.columns = ['Team', 'PPG Home', 'PPG Away', 'Home Advantage']
+            display_df = display_df.round(1)
+            st.dataframe(display_df.sort_values('Home Advantage', ascending=False), use_container_width=True, hide_index=True)
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")

@@ -333,6 +333,56 @@ def init_upcoming_games_table():
         st.error(f"Error initializing upcoming games table: {e}")
 
 
+def init_projection_accuracy_table():
+    """Initialize projection_accuracy table if it doesn't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS projection_accuracy (
+                projection_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                player_name TEXT NOT NULL,
+                team_abbr TEXT NOT NULL,
+                opponent_abbr TEXT NOT NULL,
+                season INTEGER NOT NULL,
+                week INTEGER NOT NULL,
+                position TEXT NOT NULL,
+                projected_yds REAL NOT NULL,
+                actual_yds REAL,
+                multiplier REAL,
+                matchup_rating TEXT,
+                avg_yds_game REAL,
+                median_yds REAL,
+                games_played REAL,
+                variance REAL,
+                abs_error REAL,
+                pct_error REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(player_name, team_abbr, season, week, position)
+            )
+        """)
+
+        # Create indexes for better query performance
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_projection_season_week
+            ON projection_accuracy(season, week)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_projection_player
+            ON projection_accuracy(player_name)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_projection_position
+            ON projection_accuracy(position)
+        """)
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        st.error(f"Error initializing projection accuracy table: {e}")
+
+
 def extract_tags(note_text):
     """
     Extract hashtags from note text and categorize them.
@@ -2044,6 +2094,338 @@ def get_matchup_rating(multiplier):
         return '⚠️ Tough', 'background-color: #FFD3D3'
     else:
         return '🛑 Brutal', 'background-color: #FF9090'
+
+
+# ============================================================================
+# Projection Accuracy Tracking Functions
+# ============================================================================
+
+def save_projections_for_week(season, week):
+    """
+    Save current projections to database before games start.
+    Returns count of projections saved.
+    """
+    try:
+        # Initialize table if needed
+        init_projection_accuracy_table()
+
+        # Get upcoming games for this week
+        conn = sqlite3.connect(DB_PATH)
+        query_str = """
+            SELECT DISTINCT home_team, away_team
+            FROM upcoming_games
+            WHERE season = ? AND week = ?
+        """
+        games_df = pd.read_sql_query(query_str, conn, params=(season, week))
+        conn.close()
+
+        if games_df.empty:
+            return 0
+
+        # Get teams playing this week
+        teams_playing = list(set(games_df['home_team'].tolist() + games_df['away_team'].tolist()))
+
+        # Generate projections
+        projections = generate_player_projections(season, week, teams_playing)
+
+        # Save projections to database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        count = 0
+
+        # Process each position
+        for position in ['QB', 'RB', 'WR', 'TE']:
+            if position not in projections or projections[position].empty:
+                continue
+
+            df = projections[position]
+
+            for _, row in df.iterrows():
+                try:
+                    # Get matchup rating
+                    matchup_rating, _ = get_matchup_rating(row.get('Multiplier', 1.0))
+
+                    # Determine projected yards based on position
+                    if position == 'QB':
+                        projected_yds = row['Projected Yds']
+                        avg_yds = row.get('Avg Yds/Game', 0)
+                        median_yds = row.get('Median Pass Yds', 0)
+                    elif position == 'RB':
+                        projected_yds = row['Projected Total']
+                        avg_yds = row.get('Avg Yds/Game', 0)
+                        median_yds = row.get('Total Median', 0)
+                    else:  # WR, TE
+                        projected_yds = row['Projected Yds']
+                        avg_yds = row.get('Avg Yds/Game', 0)
+                        median_yds = row.get('Median Rec Yds', 0) if position == 'WR' else row.get('Median Rec Yds', 0)
+
+                    # Insert or replace projection
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO projection_accuracy (
+                            player_name, team_abbr, opponent_abbr, season, week,
+                            position, projected_yds, multiplier, matchup_rating,
+                            avg_yds_game, median_yds, games_played
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        row['Player'],
+                        row['Team'],
+                        row['Opponent'],
+                        season,
+                        week,
+                        position,
+                        float(projected_yds),
+                        float(row.get('Multiplier', 1.0)),
+                        matchup_rating,
+                        float(avg_yds),
+                        float(median_yds),
+                        float(row.get('Games', 0))
+                    ))
+                    count += 1
+                except Exception as e:
+                    logging.error(f"Error saving projection for {row.get('Player', 'Unknown')}: {e}")
+                    continue
+
+        conn.commit()
+        conn.close()
+
+        # Upload to GCS
+        upload_db_to_gcs()
+
+        return count
+
+    except Exception as e:
+        logging.error(f"Error in save_projections_for_week: {e}")
+        return 0
+
+
+def update_projection_actuals(season, week):
+    """
+    Update projections with actual results after games complete.
+    Returns count of projections updated.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Get projections that need updating
+        cursor.execute("""
+            SELECT projection_id, player_name, team_abbr, season, week, position, projected_yds
+            FROM projection_accuracy
+            WHERE season = ? AND week = ? AND actual_yds IS NULL
+        """, (season, week))
+
+        projections = cursor.fetchall()
+        count = 0
+
+        for proj in projections:
+            proj_id, player_name, team_abbr, seas, wk, position, projected_yds = proj
+
+            try:
+                # Query actual performance based on position
+                if position == 'QB':
+                    query_str = """
+                        SELECT COALESCE(SUM(pass_yds), 0) as actual_yds
+                        FROM player_box_score
+                        WHERE player = ? AND team = ? AND season = ? AND week = ?
+                    """
+                elif position == 'RB':
+                    query_str = """
+                        SELECT COALESCE(SUM(rush_yds), 0) + COALESCE(SUM(rec_yds), 0) as actual_yds
+                        FROM player_box_score
+                        WHERE player = ? AND team = ? AND season = ? AND week = ?
+                    """
+                elif position in ['WR', 'TE']:
+                    query_str = """
+                        SELECT COALESCE(SUM(rec_yds), 0) as actual_yds
+                        FROM player_box_score
+                        WHERE player = ? AND team = ? AND season = ? AND week = ?
+                    """
+                else:
+                    continue
+
+                cursor.execute(query_str, (player_name, team_abbr, seas, wk))
+                result = cursor.fetchone()
+
+                if result and result[0] is not None:
+                    actual_yds = float(result[0])
+
+                    # Calculate accuracy metrics
+                    variance = actual_yds - projected_yds
+                    abs_error = abs(variance)
+                    pct_error = (variance / actual_yds * 100) if actual_yds > 0 else 0
+
+                    # Update the projection
+                    cursor.execute("""
+                        UPDATE projection_accuracy
+                        SET actual_yds = ?,
+                            variance = ?,
+                            abs_error = ?,
+                            pct_error = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE projection_id = ?
+                    """, (actual_yds, variance, abs_error, pct_error, proj_id))
+
+                    count += 1
+
+            except Exception as e:
+                logging.error(f"Error updating actual for {player_name}: {e}")
+                continue
+
+        conn.commit()
+        conn.close()
+
+        # Upload to GCS
+        upload_db_to_gcs()
+
+        return count
+
+    except Exception as e:
+        logging.error(f"Error in update_projection_actuals: {e}")
+        return 0
+
+
+def get_projection_accuracy_data(season=None, week=None, position=None):
+    """
+    Query projection_accuracy table with filters.
+    Returns DataFrame for display and visualization.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build query with filters
+        where_clauses = ["actual_yds IS NOT NULL"]
+        params = []
+
+        if season:
+            where_clauses.append("season = ?")
+            params.append(season)
+        if week:
+            where_clauses.append("week = ?")
+            params.append(week)
+        if position:
+            where_clauses.append("position = ?")
+            params.append(position)
+
+        where_str = " AND ".join(where_clauses)
+
+        query_str = f"""
+            SELECT
+                player_name, team_abbr, opponent_abbr, season, week, position,
+                projected_yds, actual_yds, multiplier, matchup_rating,
+                avg_yds_game, median_yds, games_played,
+                variance, abs_error, pct_error,
+                created_at, updated_at
+            FROM projection_accuracy
+            WHERE {where_str}
+            ORDER BY season DESC, week DESC, abs_error ASC
+        """
+
+        df = pd.read_sql_query(query_str, conn, params=params)
+        conn.close()
+
+        return df
+
+    except Exception as e:
+        logging.error(f"Error in get_projection_accuracy_data: {e}")
+        return pd.DataFrame()
+
+
+def get_accuracy_metrics(season=None, week=None, position=None, matchup_rating=None):
+    """
+    Calculate aggregate accuracy statistics with filters.
+    Returns dict with MAE, RMSE, bias, hit rates, etc.
+    """
+    try:
+        df = get_projection_accuracy_data(season, week, position)
+
+        if matchup_rating:
+            df = df[df['matchup_rating'] == matchup_rating]
+
+        if df.empty:
+            return {}
+
+        # Calculate metrics
+        mae = df['abs_error'].mean()
+        rmse = np.sqrt((df['variance'] ** 2).mean())
+        bias = df['variance'].mean()
+
+        # Hit rates
+        hit_10 = (df['abs_error'] <= 10).sum() / len(df) * 100
+        hit_20 = (df['abs_error'] <= 20).sum() / len(df) * 100
+        hit_30 = (df['abs_error'] <= 30).sum() / len(df) * 100
+
+        # Over/Under
+        over = (df['variance'] > 0).sum()
+        under = (df['variance'] < 0).sum()
+
+        # Correlation
+        correlation = df['projected_yds'].corr(df['actual_yds'])
+
+        return {
+            'count': len(df),
+            'mae': mae,
+            'rmse': rmse,
+            'bias': bias,
+            'hit_rate_10': hit_10,
+            'hit_rate_20': hit_20,
+            'hit_rate_30': hit_30,
+            'over_count': over,
+            'under_count': under,
+            'correlation': correlation,
+            'avg_projected': df['projected_yds'].mean(),
+            'avg_actual': df['actual_yds'].mean()
+        }
+
+    except Exception as e:
+        logging.error(f"Error in get_accuracy_metrics: {e}")
+        return {}
+
+
+def get_player_accuracy_leaderboard(position=None, min_projections=5):
+    """
+    Rank players by projection accuracy.
+    Returns DataFrame sorted by lowest MAE.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        where_clause = "WHERE actual_yds IS NOT NULL"
+        params = []
+
+        if position:
+            where_clause += " AND position = ?"
+            params.append(position)
+
+        query_str = f"""
+            SELECT
+                player_name,
+                position,
+                COUNT(*) as projection_count,
+                AVG(projected_yds) as avg_projected,
+                AVG(actual_yds) as avg_actual,
+                AVG(abs_error) as mae,
+                AVG(CASE WHEN variance > 0 THEN 1 ELSE 0 END) * 100 as over_pct
+            FROM projection_accuracy
+            {where_clause}
+            GROUP BY player_name, position
+            HAVING projection_count >= ?
+            ORDER BY mae ASC
+        """
+
+        params.append(min_projections)
+        df = pd.read_sql_query(query_str, conn, params=params)
+        conn.close()
+
+        # Calculate accuracy percentage
+        if not df.empty:
+            df['accuracy_pct'] = 100 - (df['mae'] / df['avg_actual'] * 100)
+            df['accuracy_pct'] = df['accuracy_pct'].clip(lower=0, upper=100)
+
+        return df
+
+    except Exception as e:
+        logging.error(f"Error in get_player_accuracy_leaderboard: {e}")
+        return pd.DataFrame()
 
 
 # ============================================================================
@@ -3788,6 +4170,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Play-by-Play Viewer",
             "Game Detail",
             "Notes Manager",
+            "Projection Analytics",
             "Transaction Manager"
         ],
         index=0
@@ -11078,6 +11461,365 @@ def render_notes_manager(season: Optional[int], week: Optional[int]):
 
 
 # ============================================================================
+# Section: Projection Analytics
+# ============================================================================
+
+def render_projection_analytics(season: Optional[int], week: Optional[int]):
+    """Display projection accuracy tracking and analytics."""
+    st.header("📊 Projection Analytics")
+    st.markdown("Track and analyze the accuracy of player yardage projections")
+
+    # Initialize table
+    init_projection_accuracy_table()
+
+    # Create tabs
+    tabs = st.tabs([
+        "💾 Save Projections",
+        "🔄 Update Results",
+        "📊 Accuracy Dashboard",
+        "🏆 Player Leaderboard",
+        "📈 Projected vs Actual"
+    ])
+
+    # Tab 1: Save Projections
+    with tabs[0]:
+        st.subheader("💾 Save Projections")
+        st.markdown("Save current week's projections before games start")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            save_season = st.selectbox("Season", options=get_seasons(), key="save_season", index=0)
+        with col2:
+            save_week = st.selectbox("Week", options=list(range(1, 19)), key="save_week")
+
+        # Check if projections already exist
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            existing_count = pd.read_sql_query(
+                "SELECT COUNT(*) as count FROM projection_accuracy WHERE season = ? AND week = ?",
+                conn, params=(save_season, save_week)
+            )['count'].iloc[0]
+            conn.close()
+
+            if existing_count > 0:
+                st.info(f"ℹ️ {existing_count} projections already saved for Week {save_week}. Saving again will overwrite them.")
+        except:
+            existing_count = 0
+
+        col_btn1, col_btn2 = st.columns(2)
+
+        with col_btn1:
+            if st.button("💾 Save Projections", type="primary", use_container_width=True):
+                with st.spinner("Saving projections..."):
+                    count = save_projections_for_week(save_season, save_week)
+                    if count > 0:
+                        st.success(f"✅ Successfully saved {count} projections for Week {save_week}")
+                        st.rerun()
+                    else:
+                        st.error("❌ No projections found. Make sure games are scheduled for this week.")
+
+        # Show coverage status
+        st.divider()
+        st.markdown("### 📋 Projection Coverage")
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            coverage_df = pd.read_sql_query("""
+                SELECT
+                    season,
+                    week,
+                    COUNT(DISTINCT player_name) as players,
+                    COUNT(*) as projections,
+                    MAX(created_at) as saved_at
+                FROM projection_accuracy
+                GROUP BY season, week
+                ORDER BY season DESC, week DESC
+                LIMIT 10
+            """, conn)
+            conn.close()
+
+            if not coverage_df.empty:
+                coverage_df.columns = ['Season', 'Week', 'Players', 'Projections', 'Saved At']
+                st.dataframe(coverage_df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No projections saved yet")
+        except Exception as e:
+            st.error(f"Error loading coverage: {e}")
+
+    # Tab 2: Update Results
+    with tabs[1]:
+        st.subheader("🔄 Update Actual Results")
+        st.markdown("Update projections with actual game performance")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            update_season = st.selectbox("Season", options=get_seasons(), key="update_season", index=0)
+        with col2:
+            update_week = st.selectbox("Week", options=list(range(1, 19)), key="update_week")
+
+        # Check status
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            status_df = pd.read_sql_query("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN actual_yds IS NULL THEN 1 ELSE 0 END) as pending,
+                    SUM(CASE WHEN actual_yds IS NOT NULL THEN 1 ELSE 0 END) as completed
+                FROM projection_accuracy
+                WHERE season = ? AND week = ?
+            """, conn, params=(update_season, update_week))
+            conn.close()
+
+            if status_df['total'].iloc[0] > 0:
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("Total Projections", int(status_df['total'].iloc[0]))
+                col_m2.metric("Pending Update", int(status_df['pending'].iloc[0]))
+                col_m3.metric("Completed", int(status_df['completed'].iloc[0]))
+            else:
+                st.warning(f"⚠️ No projections saved for Week {update_week}")
+        except:
+            st.warning("⚠️ No projections found")
+
+        if st.button("🔄 Update Actual Results", type="primary", use_container_width=True):
+            with st.spinner("Updating actuals..."):
+                count = update_projection_actuals(update_season, update_week)
+                if count > 0:
+                    st.success(f"✅ Successfully updated {count} projections")
+                    st.rerun()
+                elif count == 0:
+                    st.info("ℹ️ No new results to update. Games may not be completed yet.")
+                else:
+                    st.error("❌ Error updating results")
+
+    # Tab 3: Accuracy Dashboard
+    with tabs[2]:
+        st.subheader("📊 Accuracy Dashboard")
+
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            dash_season = st.selectbox("Season", options=[None] + get_seasons(), key="dash_season", format_func=lambda x: "All Seasons" if x is None else str(x))
+        with col2:
+            dash_week = st.selectbox("Week", options=[None] + list(range(1, 19)), key="dash_week", format_func=lambda x: "All Weeks" if x is None else f"Week {x}")
+        with col3:
+            dash_position = st.selectbox("Position", options=[None, "QB", "RB", "WR", "TE"], key="dash_position", format_func=lambda x: "All Positions" if x is None else x)
+
+        # Get metrics
+        metrics = get_accuracy_metrics(dash_season, dash_week, dash_position)
+
+        if metrics:
+            # Key Metrics
+            st.markdown("### 🎯 Key Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Projections", metrics['count'])
+            col2.metric("MAE (Yards)", f"{metrics['mae']:.1f}")
+            col3.metric("RMSE", f"{metrics['rmse']:.1f}")
+            col4.metric("Bias", f"{metrics['bias']:.1f}", help="Positive = over-projected, Negative = under-projected")
+
+            # Hit Rates
+            st.markdown("### 🎲 Accuracy Rates")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Within ±10 yards", f"{metrics['hit_rate_10']:.1f}%")
+            col2.metric("Within ±20 yards", f"{metrics['hit_rate_20']:.1f}%")
+            col3.metric("Within ±30 yards", f"{metrics['hit_rate_30']:.1f}%")
+
+            # Over/Under
+            st.markdown("### ⚖️ Projection Tendency")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Over-Projected", metrics['over_count'])
+            col2.metric("Under-Projected", metrics['under_count'])
+            col3.metric("Correlation", f"{metrics['correlation']:.3f}")
+
+            # Visualizations
+            st.divider()
+            st.markdown("### 📈 Visualizations")
+
+            df = get_projection_accuracy_data(dash_season, dash_week, dash_position)
+
+            if not df.empty:
+                viz_col1, viz_col2 = st.columns(2)
+
+                with viz_col1:
+                    # Scatter: Projected vs Actual
+                    fig1 = go.Figure()
+                    fig1.add_trace(go.Scatter(
+                        x=df['projected_yds'],
+                        y=df['actual_yds'],
+                        mode='markers',
+                        marker=dict(
+                            size=8,
+                            color=df['abs_error'],
+                            colorscale='RdYlGn_r',
+                            showscale=True,
+                            colorbar=dict(title="Error")
+                        ),
+                        text=df['player_name'],
+                        hovertemplate='<b>%{text}</b><br>Projected: %{x:.0f}<br>Actual: %{y:.0f}<extra></extra>'
+                    ))
+                    # Add trend line
+                    fig1.add_trace(go.Scatter(
+                        x=[df['projected_yds'].min(), df['projected_yds'].max()],
+                        y=[df['projected_yds'].min(), df['projected_yds'].max()],
+                        mode='lines',
+                        line=dict(dash='dash', color='gray'),
+                        showlegend=False
+                    ))
+                    fig1.update_layout(
+                        title="Projected vs Actual Yards",
+                        xaxis_title="Projected Yards",
+                        yaxis_title="Actual Yards",
+                        height=400
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
+
+                with viz_col2:
+                    # Histogram: Error Distribution
+                    fig2 = go.Figure()
+                    fig2.add_trace(go.Histogram(
+                        x=df['variance'],
+                        nbinsx=30,
+                        marker=dict(color='steelblue')
+                    ))
+                    fig2.update_layout(
+                        title="Error Distribution",
+                        xaxis_title="Variance (Actual - Projected)",
+                        yaxis_title="Count",
+                        height=400
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                # Accuracy by Position
+                if dash_position is None:
+                    st.markdown("### 📊 Accuracy by Position")
+                    pos_metrics = []
+                    for pos in ['QB', 'RB', 'WR', 'TE']:
+                        pos_m = get_accuracy_metrics(dash_season, dash_week, pos)
+                        if pos_m:
+                            pos_metrics.append({
+                                'Position': pos,
+                                'Count': pos_m['count'],
+                                'MAE': pos_m['mae'],
+                                'RMSE': pos_m['rmse'],
+                                'Hit Rate (±20)': pos_m['hit_rate_20']
+                            })
+
+                    if pos_metrics:
+                        pos_df = pd.DataFrame(pos_metrics)
+                        st.dataframe(pos_df, use_container_width=True, hide_index=True)
+
+            # Advanced Stats (Expandable)
+            with st.expander("📊 Advanced Statistics"):
+                st.markdown(f"""
+                **Detailed Metrics:**
+                - Mean Absolute Error (MAE): {metrics['mae']:.2f} yards
+                - Root Mean Square Error (RMSE): {metrics['rmse']:.2f} yards
+                - Average Bias: {metrics['bias']:.2f} yards
+                - Correlation Coefficient: {metrics['correlation']:.3f}
+                - Average Projected: {metrics['avg_projected']:.1f} yards
+                - Average Actual: {metrics['avg_actual']:.1f} yards
+                - Over-Projection Rate: {(metrics['over_count']/metrics['count']*100):.1f}%
+                """)
+        else:
+            st.info("No projection data available for the selected filters")
+
+    # Tab 4: Player Leaderboard
+    with tabs[3]:
+        st.subheader("🏆 Player Accuracy Leaderboard")
+        st.markdown("Players ranked by projection accuracy (lowest MAE)")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            lb_position = st.selectbox("Position", options=[None, "QB", "RB", "WR", "TE"], key="lb_position", format_func=lambda x: "All Positions" if x is None else x)
+        with col2:
+            min_proj = st.number_input("Min Projections", min_value=1, max_value=20, value=5)
+
+        leaderboard_df = get_player_accuracy_leaderboard(lb_position, min_proj)
+
+        if not leaderboard_df.empty:
+            # Format dataframe
+            display_df = leaderboard_df.copy()
+            display_df.columns = ['Player', 'Pos', 'Projections', 'Avg Projected', 'Avg Actual', 'MAE', 'Over %', 'Accuracy %']
+            display_df['Avg Projected'] = display_df['Avg Projected'].round(1)
+            display_df['Avg Actual'] = display_df['Avg Actual'].round(1)
+            display_df['MAE'] = display_df['MAE'].round(1)
+            display_df['Over %'] = display_df['Over %'].round(1)
+            display_df['Accuracy %'] = display_df['Accuracy %'].round(1)
+
+            # Color-code by accuracy
+            def color_accuracy(row):
+                acc = row['Accuracy %']
+                if acc >= 85:
+                    return ['background-color: #90EE90'] * len(row)
+                elif acc >= 75:
+                    return ['background-color: #D3FFD3'] * len(row)
+                elif acc <= 60:
+                    return ['background-color: #FFD3D3'] * len(row)
+                return [''] * len(row)
+
+            styled_df = display_df.style.apply(color_accuracy, axis=1)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No players with at least {min_proj} projections")
+
+    # Tab 5: Projected vs Actual
+    with tabs[4]:
+        st.subheader("📈 Projected vs Actual Details")
+        st.markdown("View all projections with actual results")
+
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            detail_season = st.selectbox("Season", options=[None] + get_seasons(), key="detail_season", format_func=lambda x: "All" if x is None else str(x))
+        with col2:
+            detail_week = st.selectbox("Week", options=[None] + list(range(1, 19)), key="detail_week", format_func=lambda x: "All" if x is None else f"Week {x}")
+        with col3:
+            detail_position = st.selectbox("Position", options=[None, "QB", "RB", "WR", "TE"], key="detail_position", format_func=lambda x: "All" if x is None else x)
+
+        # Get data
+        detail_df = get_projection_accuracy_data(detail_season, detail_week, detail_position)
+
+        if not detail_df.empty:
+            # Format and display
+            display_df = detail_df[['player_name', 'team_abbr', 'opponent_abbr', 'position',
+                                    'week', 'projected_yds', 'actual_yds', 'variance',
+                                    'abs_error', 'pct_error', 'matchup_rating']].copy()
+            display_df.columns = ['Player', 'Team', 'Opp', 'Pos', 'Week',
+                                  'Projected', 'Actual', 'Diff', 'Error', '% Error', 'Matchup']
+
+            # Round numeric columns
+            for col in ['Projected', 'Actual', 'Diff', 'Error']:
+                display_df[col] = display_df[col].round(1)
+            display_df['% Error'] = display_df['% Error'].round(1)
+
+            # Color-code by error
+            def color_error(row):
+                error = abs(row['Error'])
+                if error <= 10:
+                    return ['background-color: #90EE90'] * len(row)
+                elif error <= 20:
+                    return ['background-color: #D3FFD3'] * len(row)
+                elif error >= 40:
+                    return ['background-color: #FFD3D3'] * len(row)
+                return [''] * len(row)
+
+            styled_df = display_df.style.apply(color_error, axis=1)
+            st.dataframe(styled_df, use_container_width=True, hide_index=True, height=600)
+
+            # Export button
+            csv = display_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name=f"projection_accuracy_{detail_season}_{detail_week}.csv",
+                mime="text/csv"
+            )
+        else:
+            st.info("No data available for the selected filters")
+
+
+# ============================================================================
 # Section: Transaction Manager
 # ============================================================================
 
@@ -13763,6 +14505,9 @@ def main():
 
     elif view == "Notes Manager":
         render_notes_manager(season, week)
+
+    elif view == "Projection Analytics":
+        render_projection_analytics(season, week)
 
     elif view == "Transaction Manager":
         render_transaction_manager(season, week)

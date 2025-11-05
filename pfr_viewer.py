@@ -12475,24 +12475,26 @@ Upload a CSV file with the following columns:
 # ============================================================================
 
 def render_upcoming_matches(season: Optional[int], week: Optional[int]):
-    """Display upcoming games schedule with week filter."""
+    """Display upcoming games schedule with week filter using NFLverse schedules table."""
     st.header("📅 Upcoming Matches")
 
-    # Get all available weeks from upcoming_games table
+    # Get all available weeks from schedules table (NFLverse data)
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # Get all unique weeks and seasons
+        # Get all unique weeks and seasons from schedules where games haven't been played yet
+        # (games without scores are future games)
         cursor.execute("""
             SELECT DISTINCT season, week
-            FROM upcoming_games
+            FROM schedules
+            WHERE game_type = 'REG'
             ORDER BY season DESC, week ASC
         """)
         available_data = cursor.fetchall()
 
         if not available_data:
-            st.info("No upcoming games schedule uploaded yet. Upload schedule via Transaction Manager → Upcoming Games.")
+            st.info("No schedule data available.")
             conn.close()
             return
 
@@ -12520,20 +12522,56 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 key="upcoming_week_select"
             )
 
-        # Build query
+        # Build query - get schedule with new NFLverse data
         if selected_week == "All Weeks":
             cursor.execute("""
-                SELECT date, week, home_team, away_team, day_of_week, primetime, location
-                FROM upcoming_games
-                WHERE season = ?
-                ORDER BY week ASC, date ASC
+                SELECT
+                    gameday,
+                    week,
+                    home_team,
+                    away_team,
+                    weekday,
+                    gametime,
+                    stadium,
+                    roof,
+                    surface,
+                    temp,
+                    wind,
+                    spread_line,
+                    total_line,
+                    home_score,
+                    away_score,
+                    div_game,
+                    away_rest,
+                    home_rest
+                FROM schedules
+                WHERE season = ? AND game_type = 'REG'
+                ORDER BY week ASC, gameday ASC
             """, (selected_season,))
         else:
             cursor.execute("""
-                SELECT date, week, home_team, away_team, day_of_week, primetime, location
-                FROM upcoming_games
-                WHERE season = ? AND week = ?
-                ORDER BY date ASC
+                SELECT
+                    gameday,
+                    week,
+                    home_team,
+                    away_team,
+                    weekday,
+                    gametime,
+                    stadium,
+                    roof,
+                    surface,
+                    temp,
+                    wind,
+                    spread_line,
+                    total_line,
+                    home_score,
+                    away_score,
+                    div_game,
+                    away_rest,
+                    home_rest
+                FROM schedules
+                WHERE season = ? AND week = ? AND game_type = 'REG'
+                ORDER BY gameday ASC
             """, (selected_season, selected_week))
 
         games = cursor.fetchall()
@@ -12543,11 +12581,16 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             st.warning(f"No games found for the selected filter.")
             return
 
-        # Convert to DataFrame
-        df = pd.DataFrame(games, columns=['Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Primetime', 'Location'])
+        # Convert to DataFrame with new NFLverse columns
+        df = pd.DataFrame(games, columns=[
+            'Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Time',
+            'Stadium', 'Roof', 'Surface', 'Temp', 'Wind',
+            'Spread', 'Total', 'Home Score', 'Away Score', 'Div Game',
+            'Away Rest', 'Home Rest'
+        ])
 
-        # Format primetime column
-        df['Primetime'] = df['Primetime'].apply(lambda x: '⭐' if x == 1 else '')
+        # Determine if game is completed or upcoming
+        df['Status'] = df.apply(lambda row: 'Final' if pd.notna(row['Home Score']) else 'Scheduled', axis=1)
 
         # Calculate power rankings for each team using the same 4-step process as Power Rankings view
         # Use the selected season and the week before the first game for power rating calculation
@@ -12638,17 +12681,20 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
         # Display summary metrics
         st.divider()
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.metric("Total Games", len(df))
         with col2:
             st.metric("Weeks", df['Week'].nunique())
         with col3:
-            primetime_count = (df['Primetime'] == '⭐').sum()
-            st.metric("Primetime Games", primetime_count)
+            completed = (df['Status'] == 'Final').sum()
+            st.metric("Completed", completed)
         with col4:
-            teams = set(df['Home Team'].tolist() + df['Away Team'].tolist())
-            st.metric("Teams", len(teams))
+            upcoming = (df['Status'] == 'Scheduled').sum()
+            st.metric("Upcoming", upcoming)
+        with col5:
+            div_games = (df['Div Game'] == 1).sum() if 'Div Game' in df.columns else 0
+            st.metric("Division Games", div_games)
 
         st.divider()
 
@@ -12658,28 +12704,39 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 week_games = df[df['Week'] == week_num].copy()
 
                 with st.expander(f"Week {week_num} ({len(week_games)} games)", expanded=(week_num == weeks_for_season[0])):
-                    # Display games for this week
-                    display_df = week_games[['Date', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power', 'Primetime']].copy()
+                    # Display games for this week with enhanced data
+                    display_df = week_games[[
+                        'Date', 'Time', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power',
+                        'Status', 'Spread', 'Stadium', 'Roof', 'Temp'
+                    ]].copy()
 
                     st.dataframe(
                         display_df,
                         use_container_width=True,
                         hide_index=True,
                         column_config={
-                            "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
+                            "Date": st.column_config.DateColumn("Date", format="MMM DD"),
+                            "Time": st.column_config.TextColumn("Time", width="small"),
                             "Day": st.column_config.TextColumn("Day", width="small"),
                             "Home Team": st.column_config.TextColumn("Home", width="small"),
-                            "Home Power": st.column_config.NumberColumn("Home Pwr", width="small", format="%.1f"),
+                            "Home Power": st.column_config.NumberColumn("Pwr", width="small", format="%.1f"),
                             "Away Team": st.column_config.TextColumn("Away", width="small"),
-                            "Away Power": st.column_config.NumberColumn("Away Pwr", width="small", format="%.1f"),
-                            "Primetime": st.column_config.TextColumn("Prime", width="small")
+                            "Away Power": st.column_config.NumberColumn("Pwr", width="small", format="%.1f"),
+                            "Status": st.column_config.TextColumn("Status", width="small"),
+                            "Spread": st.column_config.NumberColumn("Spread", width="small", format="%.1f"),
+                            "Stadium": st.column_config.TextColumn("Stadium", width="medium"),
+                            "Roof": st.column_config.TextColumn("Roof", width="small"),
+                            "Temp": st.column_config.NumberColumn("Temp", width="small", format="%.0f°")
                         }
                     )
         else:
-            # Display single week
+            # Display single week with enhanced data
             st.subheader(f"Week {selected_week} Schedule")
 
-            display_df = df[['Date', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power', 'Primetime']].copy()
+            display_df = df[[
+                'Date', 'Time', 'Day', 'Home Team', 'Home Power', 'Away Team', 'Away Power',
+                'Status', 'Spread', 'Total', 'Stadium', 'Roof', 'Surface', 'Temp', 'Wind'
+            ]].copy()
 
             st.dataframe(
                 display_df,
@@ -12687,12 +12744,20 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 hide_index=True,
                 column_config={
                     "Date": st.column_config.DateColumn("Date", format="MMM DD, YYYY"),
+                    "Time": st.column_config.TextColumn("Time", width="small"),
                     "Day": st.column_config.TextColumn("Day", width="small"),
                     "Home Team": st.column_config.TextColumn("Home", width="small"),
                     "Home Power": st.column_config.NumberColumn("Home Pwr", width="small", format="%.1f"),
                     "Away Team": st.column_config.TextColumn("Away", width="small"),
                     "Away Power": st.column_config.NumberColumn("Away Pwr", width="small", format="%.1f"),
-                    "Primetime": st.column_config.TextColumn("Prime", width="small")
+                    "Status": st.column_config.TextColumn("Status", width="small"),
+                    "Spread": st.column_config.NumberColumn("Spread", width="small", format="%.1f"),
+                    "Total": st.column_config.NumberColumn("O/U", width="small", format="%.1f"),
+                    "Stadium": st.column_config.TextColumn("Stadium", width="medium"),
+                    "Roof": st.column_config.TextColumn("Roof", width="small"),
+                    "Surface": st.column_config.TextColumn("Surface", width="small"),
+                    "Temp": st.column_config.NumberColumn("Temp", width="small", format="%.0f°"),
+                    "Wind": st.column_config.NumberColumn("Wind", width="small", format="%.0f mph")
                 }
             )
 

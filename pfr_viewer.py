@@ -14364,9 +14364,9 @@ def render_rb_yards_per_carry_chart(season: Optional[int], week: Optional[int]):
 
 
 def render_skill_player_yards_touches_chart(season: Optional[int], week: Optional[int]):
-    """Chart: Skill Player Total Yards (Rush + Rec) vs Total Touches (Carries + Receptions)."""
-    st.subheader("💨 Skill Player Total Yards vs Touches")
-    st.markdown("*Shows offensive involvement and production. X-axis = Total Yards (Rush + Rec), Y-axis = Total Touches (Carries + Receptions).*")
+    """Chart: Skill Player Avg Yards (Rush + Rec) vs Avg Touches (Carries + Receptions) per Game."""
+    st.subheader("💨 Skill Player Yards vs Touches per Game")
+    st.markdown("*Shows offensive involvement and production per game (normalized for games played). X-axis = Avg Yards/Game (Rush + Rec), Y-axis = Avg Touches/Game (Carries + Receptions).*")
 
     if not season:
         st.warning("No season data available.")
@@ -14411,6 +14411,11 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
         df['total_yards'] = df['total_rush_yds'] + df['total_rec_yds']
         df['total_tds'] = df['total_rush_tds'] + df['total_rec_tds']
 
+        # Calculate per-game averages
+        df['avg_touches_per_game'] = (df['total_touches'] / df['games']).round(1)
+        df['avg_yards_per_game'] = (df['total_yards'] / df['games']).round(1)
+        df['avg_tds_per_game'] = (df['total_tds'] / df['games']).round(2)
+
         # Avoid division by zero
         df['yards_per_touch'] = df.apply(
             lambda row: round(row['total_yards'] / row['total_touches'], 2) if row['total_touches'] > 0 else 0,
@@ -14423,22 +14428,22 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
         if not chart_df.empty:
             import plotly.express as px
 
-            # X = Total Yards, Y = Total Touches, Size = Total TDs
+            # X = Avg Yards/Game, Y = Avg Touches/Game, Size = Avg TDs/Game
             fig = px.scatter(
                 chart_df,
-                x='total_yards',
-                y='total_touches',
-                size='total_tds',
-                hover_data=['player', 'team', 'yards_per_touch', 'total_tds', 'games'],
+                x='avg_yards_per_game',
+                y='avg_touches_per_game',
+                size='avg_tds_per_game',
+                hover_data=['player', 'team', 'yards_per_touch', 'games', 'total_yards', 'total_touches', 'total_tds'],
                 text='player',
                 color='yards_per_touch',
                 labels={
-                    'total_yards': 'Total Yards (Rush + Rec)',
-                    'total_touches': 'Total Touches (Carries + Receptions)',
+                    'avg_yards_per_game': 'Avg Yards/Game (Rush + Rec)',
+                    'avg_touches_per_game': 'Avg Touches/Game (Carries + Receptions)',
                     'yards_per_touch': 'Yards/Touch',
-                    'total_tds': 'Total TDs'
+                    'avg_tds_per_game': 'Avg TDs/Game'
                 },
-                title=f"Skill Player Total Yards vs Touches ({season})",
+                title=f"Skill Player Yards vs Touches per Game ({season})",
                 color_continuous_scale='Viridis',
                 size_max=30
             )
@@ -14448,14 +14453,12 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
 
             # Show data table
             with st.expander("📋 View Skill Player Stats Table"):
-                display_df = chart_df[['player', 'team', 'games', 'total_rush_att', 'total_rush_yds',
-                                       'total_receptions', 'total_rec_yds', 'total_touches',
+                display_df = chart_df[['player', 'team', 'games', 'avg_touches_per_game', 'avg_yards_per_game',
+                                       'avg_tds_per_game', 'yards_per_touch', 'total_touches',
                                        'total_yards', 'total_tds']].copy()
-                display_df.columns = ['Player', 'Team', 'Games', 'Carries', 'Rush Yds',
-                                     'Rec', 'Rec Yds', 'Total Touches', 'Total Yds', 'Total TDs']
-                display_df['Yds/Touch'] = (display_df['Total Yds'] / display_df['Total Touches']).round(2)
-                display_df['Yds/Game'] = (display_df['Total Yds'] / display_df['Games']).round(1)
-                st.dataframe(display_df.sort_values('Total Yds', ascending=False), use_container_width=True, hide_index=True)
+                display_df.columns = ['Player', 'Team', 'Games', 'Touches/G', 'Yards/G',
+                                     'TDs/G', 'Yds/Touch', 'Total Touches', 'Total Yds', 'Total TDs']
+                st.dataframe(display_df.sort_values('Yards/G', ascending=False), use_container_width=True, hide_index=True)
         else:
             st.info(f"No skill player data available with at least {min_touches} touches.")
 

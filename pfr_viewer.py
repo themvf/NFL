@@ -13145,23 +13145,45 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
     try:
         week_filter = f"AND g.week <= {week}" if week else ""
 
-        # Get defensive stats by aggregating opponent's player stats
-        # Pass yards allowed = sum of opponent QB pass yards against this team
+        # Get defensive stats by aggregating opponent offensive yards
+        # For each game, calculate what each team allowed
         sql_defense = f"""
         SELECT
-            pb.team as defense_team,
-            COUNT(DISTINCT pb.game_id) as games,
-            SUM(CASE WHEN opp.pass_yds > 0 THEN opp.pass_yds ELSE 0 END) as total_pass_yds_allowed,
-            SUM(CASE WHEN opp.rush_yds > 0 THEN opp.rush_yds ELSE 0 END) as total_rush_yds_allowed
-        FROM player_box_score pb
-        JOIN games g ON pb.game_id = g.game_id
-        JOIN player_box_score opp ON pb.game_id = opp.game_id AND pb.team != opp.team
-        WHERE g.season = ?
-        {week_filter}
-        GROUP BY pb.team
+            defense_team,
+            COUNT(DISTINCT game_id) as games,
+            SUM(pass_yds_allowed) as total_pass_yds_allowed,
+            SUM(rush_yds_allowed) as total_rush_yds_allowed
+        FROM (
+            -- Home team defense (allowed away team offense)
+            SELECT
+                g.game_id,
+                g.home_team as defense_team,
+                SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
+                SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
+            FROM games g
+            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.away_team
+            WHERE g.season = ?
+            {week_filter}
+            GROUP BY g.game_id, g.home_team
+
+            UNION ALL
+
+            -- Away team defense (allowed home team offense)
+            SELECT
+                g.game_id,
+                g.away_team as defense_team,
+                SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
+                SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
+            FROM games g
+            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.home_team
+            WHERE g.season = ?
+            {week_filter}
+            GROUP BY g.game_id, g.away_team
+        )
+        GROUP BY defense_team
         """
 
-        df = query(sql_defense, (season,))
+        df = query(sql_defense, (season, season))
 
         if df.empty:
             st.info("No defensive data available for selected filters")

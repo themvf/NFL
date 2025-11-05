@@ -26,7 +26,7 @@ logging.basicConfig(
 )
 
 # Database configuration - relative path for deployment
-DB_PATH = Path(__file__).parent / "data" / "pfr.db"
+DB_PATH = Path(__file__).parent / "data" / "nfl_merged.db"
 
 # Page configuration (must be first st command)
 st.set_page_config(
@@ -151,12 +151,12 @@ def get_team_logo_url(team_abbr: str) -> str:
     TEAM_LOGO_MAP = {
         'ARI': 'ari', 'ATL': 'atl', 'BAL': 'bal', 'BUF': 'buf',
         'CAR': 'car', 'CHI': 'chi', 'CIN': 'cin', 'CLE': 'cle',
-        'DAL': 'dal', 'DEN': 'den', 'DET': 'det', 'GNB': 'gb',
-        'HOU': 'hou', 'IND': 'ind', 'JAX': 'jax', 'KAN': 'kc',
-        'LAC': 'lac', 'LAR': 'lar', 'LVR': 'lv', 'MIA': 'mia',
-        'MIN': 'min', 'NOR': 'no', 'NWE': 'ne', 'NYG': 'nyg',
+        'DAL': 'dal', 'DEN': 'den', 'DET': 'det', 'GB': 'gb',
+        'HOU': 'hou', 'IND': 'ind', 'JAX': 'jax', 'KC': 'kc',
+        'LAC': 'lac', 'LA': 'lar', 'LV': 'lv', 'MIA': 'mia',
+        'MIN': 'min', 'NO': 'no', 'NE': 'ne', 'NYG': 'nyg',
         'NYJ': 'nyj', 'PHI': 'phi', 'PIT': 'pit', 'SEA': 'sea',
-        'SFO': 'sf', 'TAM': 'tb', 'TEN': 'ten', 'WAS': 'wsh'
+        'SF': 'sf', 'TB': 'tb', 'TEN': 'ten', 'WAS': 'wsh'
     }
 
     espn_abbr = TEAM_LOGO_MAP.get(team_abbr, team_abbr.lower())
@@ -440,7 +440,7 @@ def get_notes(team_filter=None, tag_filter=None, season_filter=None, week_filter
     Retrieve notes with optional filtering.
 
     Parameters:
-    - team_filter: Filter by team abbreviation (e.g., 'NWE')
+    - team_filter: Filter by team abbreviation (e.g., 'NE')
     - tag_filter: Filter by custom tag
     - season_filter: Filter by season
     - week_filter: Filter by week
@@ -12453,7 +12453,7 @@ Upload a CSV file with the following columns:
 
             example_csv = pd.DataFrame([
                 {"Week": 1, "Away": "DAL", "Home": "PHI", "Day": "Thursday", "Primetime": "Yes", "Location": "PHI"},
-                {"Week": 1, "Away": "KAN", "Home": "LAC", "Day": "Friday", "Primetime": "Yes", "Location": "Brazil"},
+                {"Week": 1, "Away": "KC", "Home": "LAC", "Day": "Friday", "Primetime": "Yes", "Location": "Brazil"},
                 {"Week": 1, "Away": "PIT", "Home": "NYJ", "Day": "Sunday", "Primetime": "", "Location": "NYJ"},
                 {"Week": 5, "Away": "MIN", "Home": "CLE", "Day": "Sunday", "Primetime": "", "Location": "London"},
                 {"Week": 8, "Away": "PHI", "Home": "DAL", "Day": "Sunday", "Primetime": "Yes", "Location": "DAL"}

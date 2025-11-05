@@ -13157,28 +13157,28 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
             -- Home team defense (allowed away team offense)
             SELECT
                 g.game_id,
-                g.home_team as defense_team,
+                g.home_team_abbr as defense_team,
                 SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
                 SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
             FROM games g
-            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.away_team
+            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.away_team_abbr
             WHERE g.season = ?
             {week_filter}
-            GROUP BY g.game_id, g.home_team
+            GROUP BY g.game_id, g.home_team_abbr
 
             UNION ALL
 
             -- Away team defense (allowed home team offense)
             SELECT
                 g.game_id,
-                g.away_team as defense_team,
+                g.away_team_abbr as defense_team,
                 SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
                 SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
             FROM games g
-            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.home_team
+            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.home_team_abbr
             WHERE g.season = ?
             {week_filter}
-            GROUP BY g.game_id, g.away_team
+            GROUP BY g.game_id, g.away_team_abbr
         )
         GROUP BY defense_team
         """
@@ -14023,7 +14023,7 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
         AVG(avg_ppg) as avg_ppg
     FROM (
         SELECT
-            home_team as team,
+            home_team_abbr as team,
             'home' as location,
             home_score as avg_ppg
         FROM games
@@ -14034,7 +14034,7 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
         UNION ALL
 
         SELECT
-            away_team as team,
+            away_team_abbr as team,
             'away' as location,
             away_score as avg_ppg
         FROM games

@@ -30,6 +30,8 @@ Thumbs.db
 
 # Data (databases stored in GCS, not Git)
 data/*.db
+# Exception: Allow merged database (required for app)
+!data/nfl_merged.db
 
 # Artifacts
 artifacts/

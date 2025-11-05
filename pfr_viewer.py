@@ -13520,6 +13520,7 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
             SUM(pb.rush_td) as total_tds,
             COUNT(DISTINCT pb.game_id) as games,
             AVG(pb.rush_yds) as avg_yards_per_game,
+            AVG(pb.rush_td) as avg_tds_per_game,
             CAST(SUM(pb.rush_yds) AS FLOAT) / NULLIF(SUM(pb.rush_att), 0) as yards_per_carry
         FROM player_box_score pb
         JOIN games g ON pb.game_id = g.game_id
@@ -13528,7 +13529,7 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
         AND pb.rush_att > 0
         GROUP BY pb.player, pb.team
         HAVING total_attempts >= ?
-        ORDER BY total_yards DESC
+        ORDER BY avg_yards_per_game DESC
         """
 
         df = query(sql_rb, (season, min_touches))
@@ -13542,8 +13543,8 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
 
         # Add invisible markers for hover functionality
         fig.add_trace(go.Scatter(
-            x=df['total_yards'],
-            y=df['total_tds'],
+            x=df['avg_yards_per_game'],
+            y=df['avg_tds_per_game'],
             mode='markers',
             marker=dict(
                 size=1,
@@ -13554,10 +13555,13 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
                 opacity=0
             ),
             text=df['player'],
-            customdata=df[['player', 'team', 'total_attempts', 'yards_per_carry']],
+            customdata=df[['player', 'team', 'total_attempts', 'yards_per_carry', 'games', 'total_yards', 'total_tds']],
             hovertemplate='<b>%{customdata[0]}</b> (%{customdata[1]})<br>' +
-                         'Rush Yards: %{x}<br>' +
-                         'Rush TDs: %{y}<br>' +
+                         'Avg Rush Yards/Game: %{x:.1f}<br>' +
+                         'Avg Rush TDs/Game: %{y:.2f}<br>' +
+                         'Games Played: %{customdata[4]}<br>' +
+                         'Total Yards: %{customdata[5]}<br>' +
+                         'Total TDs: %{customdata[6]}<br>' +
                          'Attempts: %{customdata[2]}<br>' +
                          'Yards/Carry: %{customdata[3]:.2f}<br>' +
                          '<extra></extra>',
@@ -13565,12 +13569,12 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
         ))
 
         # Calculate dynamic sizing based on data ranges
-        x_range = df['total_yards'].max() - df['total_yards'].min()
-        y_range = df['total_tds'].max() - df['total_tds'].min()
+        x_range = df['avg_yards_per_game'].max() - df['avg_yards_per_game'].min()
+        y_range = df['avg_tds_per_game'].max() - df['avg_tds_per_game'].min()
 
-        # Use fixed size that works well for player headshots
-        headshot_size_x = max(x_range * 0.04, 20)  # At least 20 yards wide
-        headshot_size_y = max(y_range * 0.15, 0.5)  # At least 0.5 TDs tall
+        # Use fixed size that works well for player headshots (adjusted for per-game stats)
+        headshot_size_x = max(x_range * 0.04, 3)  # Smaller since using per-game yards
+        headshot_size_y = max(y_range * 0.15, 0.05)  # Smaller since using per-game TDs
 
         # Build layout with player headshot images
         layout_images = []
@@ -13579,8 +13583,8 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
                 source=get_player_headshot_url(row['player'], row['team']),
                 xref="x",
                 yref="y",
-                x=row['total_yards'],
-                y=row['total_tds'],
+                x=row['avg_yards_per_game'],
+                y=row['avg_tds_per_game'],
                 sizex=headshot_size_x,
                 sizey=headshot_size_y,
                 xanchor="center",
@@ -13590,9 +13594,9 @@ def render_rb_efficiency_chart(season: Optional[int], week: Optional[int]):
             ))
 
         fig.update_layout(
-            title=f"Rushing Yards vs Touchdowns ({season} Season)",
-            xaxis_title="Total Rushing Yards",
-            yaxis_title="Total Rushing Touchdowns",
+            title=f"Rushing Yards vs Touchdowns per Game ({season} Season)",
+            xaxis_title="Avg Rushing Yards per Game",
+            yaxis_title="Avg Rushing Touchdowns per Game",
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',

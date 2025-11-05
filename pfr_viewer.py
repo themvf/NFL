@@ -13993,20 +13993,34 @@ def render_team_ppg_home_away_chart(season: Optional[int], week: Optional[int]):
     sql_teams = f"""
     SELECT
         team,
-        CASE
-            WHEN team = home_team THEN 'home'
-            ELSE 'away'
-        END as location,
-        AVG(team_score) as avg_ppg
-    FROM games
-    WHERE season = ?
-    {week_filter}
-    AND team_score IS NOT NULL
+        location,
+        AVG(avg_ppg) as avg_ppg
+    FROM (
+        SELECT
+            home_team as team,
+            'home' as location,
+            home_score as avg_ppg
+        FROM games
+        WHERE season = ?
+        {week_filter}
+        AND home_score IS NOT NULL
+
+        UNION ALL
+
+        SELECT
+            away_team as team,
+            'away' as location,
+            away_score as avg_ppg
+        FROM games
+        WHERE season = ?
+        {week_filter}
+        AND away_score IS NOT NULL
+    )
     GROUP BY team, location
     """
 
     try:
-        df = query(sql_teams, (season,))
+        df = query(sql_teams, (season, season))
 
         if df.empty:
             st.info("No team scoring data available.")

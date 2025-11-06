@@ -229,6 +229,70 @@ def create_projection_accuracy_table(conn):
     conn.commit()
     print("  ✓ Created projection_accuracy table and indexes")
 
+def create_games_view(conn):
+    """
+    Create games VIEW as compatibility layer.
+    Maps schedules table to old games table schema for backward compatibility.
+    """
+    print("\nCreating games view...")
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE VIEW IF NOT EXISTS games AS
+        SELECT
+            game_id,
+            gameday as game_date,
+            season as season_year,
+            home_team,
+            away_team,
+            home_score,
+            away_score,
+            week,
+            game_type,
+            weekday,
+            gametime,
+            stadium,
+            roof,
+            surface,
+            temp,
+            wind,
+            home_rest,
+            away_rest,
+            div_game
+        FROM schedules
+    """)
+
+    conn.commit()
+
+    # Verify view was created
+    cursor.execute("SELECT COUNT(*) FROM games")
+    count = cursor.fetchone()[0]
+    print(f"  ✓ Created games view - {count} games available")
+
+def create_merge_metadata_table(conn):
+    """
+    Create merge_metadata table to track refresh history.
+    """
+    print("\nCreating merge_metadata table...")
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS merge_metadata (
+            last_refresh_timestamp TEXT,
+            refresh_source TEXT,
+            rows_updated INTEGER
+        )
+    """)
+
+    # Insert initial metadata
+    from datetime import datetime
+    cursor.execute("""
+        INSERT INTO merge_metadata VALUES (?, ?, ?)
+    """, (datetime.now().isoformat(), 'initial-merge', 0))
+
+    conn.commit()
+    print("  ✓ Created merge_metadata table with initial record")
+
 def verify_data_integrity(conn):
     """Verify merged database integrity"""
     print("\n" + "="*60)
@@ -335,10 +399,16 @@ def main():
         # Step 4: Create game_id mapping view
         create_game_id_mapping_view(merged_conn)
 
-        # Step 5: Create projection_accuracy table
+        # Step 5: Create games view (compatibility layer)
+        create_games_view(merged_conn)
+
+        # Step 6: Create projection_accuracy table
         create_projection_accuracy_table(merged_conn)
 
-        # Step 6: Verify data integrity
+        # Step 7: Create merge_metadata table
+        create_merge_metadata_table(merged_conn)
+
+        # Step 8: Verify data integrity
         verify_data_integrity(merged_conn)
 
         print("\n" + "="*60)

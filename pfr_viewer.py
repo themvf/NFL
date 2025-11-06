@@ -4171,6 +4171,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Game Detail",
             "Notes Manager",
             "Projection Analytics",
+            "Database Manager",
             "Transaction Manager"
         ],
         index=0
@@ -11820,6 +11821,313 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
 
 
 # ============================================================================
+# Section: Database Manager
+# ============================================================================
+
+def render_database_manager():
+    """Display database management interface with refresh, info, backup, and validation tools."""
+    import refresh_merged_db
+    from datetime import datetime
+    from pathlib import Path
+
+    st.header("🗄️ Database Manager")
+    st.markdown("Manage the merged NFL database, including NFLverse data refresh, backups, and integrity checks.")
+
+    # Create tabs for different management functions
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔄 Refresh NFLverse Data",
+        "📊 Database Info",
+        "💾 Backup Management",
+        "✅ Validation"
+    ])
+
+    # Tab 1: Refresh NFLverse Data
+    with tab1:
+        st.subheader("Refresh NFLverse Tables")
+        st.markdown("""
+        Update schedules, rosters, injuries, and advanced statistics from the NFLverse database
+        while preserving play-by-play data and custom user notes.
+        """)
+
+        # Get current database status
+        try:
+            status = refresh_merged_db.get_database_status()
+
+            # Display status summary
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                if status['nflverse_exists']:
+                    st.metric("NFLverse Database", "✅ Available")
+                    if status['nflverse_modified']:
+                        st.caption(f"Modified: {status['nflverse_modified'].strftime('%Y-%m-%d %H:%M')}")
+                else:
+                    st.metric("NFLverse Database", "❌ Missing")
+
+            with col2:
+                if status['merged_exists']:
+                    st.metric("Merged Database", "✅ Available")
+                    if status['merged_modified']:
+                        st.caption(f"Modified: {status['merged_modified'].strftime('%Y-%m-%d %H:%M')}")
+                else:
+                    st.metric("Merged Database", "❌ Missing")
+
+            with col3:
+                if status['needs_refresh']:
+                    st.metric("Refresh Status", "⚠️ Outdated")
+                    st.caption("NFLverse has newer data")
+                else:
+                    st.metric("Refresh Status", "✅ Up-to-date")
+                    st.caption("Data is current")
+
+            st.divider()
+
+            # Refresh controls
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                season_input = st.number_input(
+                    "Season to refresh",
+                    min_value=2020,
+                    max_value=2030,
+                    value=2025,
+                    help="Only data for this season will be refreshed"
+                )
+
+            with col2:
+                st.write("")  # Spacing
+                st.write("")  # Spacing
+                refresh_button = st.button("🔄 Refresh Now", type="primary", use_container_width=True)
+
+            # Execute refresh
+            if refresh_button:
+                if not status['nflverse_exists']:
+                    st.error("❌ NFLverse database not found. Please ensure it exists at the expected location.")
+                elif not status['merged_exists']:
+                    st.error("❌ Merged database not found. Please run merge_databases.py first.")
+                else:
+                    # Create progress tracking
+                    progress_placeholder = st.empty()
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    # Progress callback
+                    def show_progress(table, rows, total_tables, current):
+                        progress = current / total_tables
+                        progress_bar.progress(progress)
+                        status_text.text(f"[{current}/{total_tables}] {table}: {rows:,} rows updated")
+
+                    # Execute refresh
+                    with st.spinner("Creating backup..."):
+                        results = refresh_merged_db.refresh_nflverse_tables(
+                            season=season_input,
+                            progress_callback=show_progress
+                        )
+
+                    # Display results
+                    progress_bar.empty()
+                    status_text.empty()
+
+                    if results['success']:
+                        st.success(f"✅ Refresh completed successfully!")
+                        st.info(f"**Total rows updated:** {results['total_rows_updated']:,}")
+                        st.info(f"**Duration:** {results['duration_seconds']:.1f} seconds")
+                        st.info(f"**Backup saved:** {results['backup_path'].name}")
+
+                        # Show detailed table updates
+                        with st.expander("📋 View Detailed Updates"):
+                            for table, count in results['tables_updated'].items():
+                                if isinstance(count, int):
+                                    st.write(f"• {table}: {count:,} rows")
+                                else:
+                                    st.write(f"• {table}: {count}")
+
+                        st.divider()
+                        st.markdown("### Next Steps")
+                        st.code("""
+git add data/nfl_merged.db
+git commit -m "chore: refresh NFLverse data"
+git push
+                        """)
+                    else:
+                        st.error(f"❌ Refresh failed: {results['error']}")
+                        if results['backup_path']:
+                            st.warning(f"Backup available at: {results['backup_path']}")
+                            st.info("The database was not modified due to the error.")
+
+        except Exception as e:
+            st.error(f"Error accessing database status: {e}")
+
+    # Tab 2: Database Info
+    with tab2:
+        st.subheader("Database Information")
+
+        try:
+            status = refresh_merged_db.get_database_status()
+
+            # Database file info
+            st.markdown("### Database Files")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**NFLverse Database**")
+                if status['nflverse_exists']:
+                    st.write(f"📁 Size: {status.get('nflverse_size_mb', 0):.2f} MB")
+                    st.write(f"📅 Modified: {status['nflverse_modified'].strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    st.write("❌ Not found")
+
+            with col2:
+                st.markdown("**Merged Database**")
+                if status['merged_exists']:
+                    st.write(f"📁 Size: {status.get('merged_size_mb', 0):.2f} MB")
+                    st.write(f"📅 Modified: {status['merged_modified'].strftime('%Y-%m-%d %H:%M:%S')}")
+                    if status.get('last_refresh'):
+                        st.write(f"🔄 Last Refresh: {status['last_refresh']}")
+                else:
+                    st.write("❌ Not found")
+
+            # Table row counts
+            if status['merged_exists'] and status['table_counts']:
+                st.divider()
+                st.markdown("### Table Row Counts")
+
+                # Separate tables into categories
+                nflverse_tables = [t for t in refresh_merged_db.NFLVERSE_TABLES if t in status['table_counts']]
+                pfr_tables = [t for t in refresh_merged_db.PRESERVED_TABLES if t in status['table_counts']]
+                other_tables = [t for t in status['table_counts'] if t not in nflverse_tables and t not in pfr_tables]
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.markdown("**NFLverse Tables** *(Refreshable)*")
+                    for table in sorted(nflverse_tables):
+                        count = status['table_counts'][table]
+                        if isinstance(count, int):
+                            st.write(f"• {table}: {count:,}")
+                        else:
+                            st.write(f"• {table}: {count}")
+
+                with col2:
+                    st.markdown("**PFR Tables** *(Preserved)*")
+                    for table in sorted(pfr_tables):
+                        count = status['table_counts'][table]
+                        if isinstance(count, int):
+                            st.write(f"• {table}: {count:,}")
+                        else:
+                            st.write(f"• {table}: {count}")
+
+                with col3:
+                    st.markdown("**Other Tables**")
+                    for table in sorted(other_tables):
+                        count = status['table_counts'][table]
+                        if isinstance(count, int):
+                            st.write(f"• {table}: {count:,}")
+                        else:
+                            st.write(f"• {table}: {count}")
+
+        except Exception as e:
+            st.error(f"Error retrieving database information: {e}")
+
+    # Tab 3: Backup Management
+    with tab3:
+        st.subheader("Backup Management")
+
+        try:
+            # Find all backup files
+            data_dir = Path(__file__).parent / "data"
+            backup_files = sorted(
+                data_dir.glob("nfl_merged.db.backup*"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+
+            if backup_files:
+                st.markdown(f"Found **{len(backup_files)}** backup file(s)")
+                st.divider()
+
+                # Display backups
+                for backup in backup_files:
+                    with st.expander(f"📦 {backup.name}"):
+                        stat = backup.stat()
+                        modified = datetime.fromtimestamp(stat.st_mtime)
+                        size_mb = stat.st_size / (1024 * 1024)
+
+                        col1, col2, col3 = st.columns([2, 2, 1])
+
+                        with col1:
+                            st.write(f"**Size:** {size_mb:.2f} MB")
+                        with col2:
+                            st.write(f"**Created:** {modified.strftime('%Y-%m-%d %H:%M:%S')}")
+                        with col3:
+                            restore_key = f"restore_{backup.name}"
+                            if st.button("↩️ Restore", key=restore_key):
+                                try:
+                                    with st.spinner("Restoring backup..."):
+                                        refresh_merged_db.restore_from_backup(backup)
+                                    st.success(f"✅ Restored from {backup.name}")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Restore failed: {e}")
+            else:
+                st.info("No backup files found.")
+
+            st.divider()
+
+            # Manual backup creation
+            st.markdown("### Create Manual Backup")
+            if st.button("💾 Create Backup Now", type="secondary"):
+                try:
+                    with st.spinner("Creating backup..."):
+                        backup_path = refresh_merged_db.backup_database()
+                    st.success(f"✅ Backup created: {backup_path.name}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Backup failed: {e}")
+
+        except Exception as e:
+            st.error(f"Error managing backups: {e}")
+
+    # Tab 4: Validation
+    with tab4:
+        st.subheader("Database Validation")
+        st.markdown("Verify the integrity and completeness of the merged database.")
+
+        if st.button("🔍 Run Validation", type="primary"):
+            try:
+                with st.spinner("Validating database..."):
+                    results = refresh_merged_db.verify_database_integrity()
+
+                st.divider()
+
+                # Overall status
+                if results['valid']:
+                    st.success("✅ Database validation passed!")
+                else:
+                    st.error("❌ Database validation failed!")
+
+                # Individual checks
+                st.markdown("### Validation Checks")
+
+                for check_name, passed in results['checks'].items():
+                    if passed:
+                        st.write(f"✅ {check_name.replace('_', ' ').title()}")
+                    else:
+                        st.write(f"❌ {check_name.replace('_', ' ').title()}")
+
+                # Errors
+                if results['errors']:
+                    st.divider()
+                    st.markdown("### Errors Detected")
+                    for error in results['errors']:
+                        st.error(error)
+
+            except Exception as e:
+                st.error(f"Validation error: {e}")
+
+
+# ============================================================================
 # Section: Transaction Manager
 # ============================================================================
 
@@ -14616,6 +14924,9 @@ def main():
 
     elif view == "Projection Analytics":
         render_projection_analytics(season, week)
+
+    elif view == "Database Manager":
+        render_database_manager()
 
     elif view == "Transaction Manager":
         render_transaction_manager(season, week)

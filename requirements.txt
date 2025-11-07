@@ -4,3 +4,7 @@ pandas>=2.0.0
 plotly>=5.17.0
 google-cloud-storage>=2.10.0
 
+# NFLverse direct API refresh
+nflreadpy>=0.1.4
+polars>=1.30.0
+

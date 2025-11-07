@@ -11827,6 +11827,7 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
 def render_database_manager():
     """Display database management interface with refresh, info, backup, and validation tools."""
     import refresh_merged_db
+    import nflverse_direct_refresh
     from datetime import datetime
     from pathlib import Path
 
@@ -11843,120 +11844,120 @@ def render_database_manager():
 
     # Tab 1: Refresh NFLverse Data
     with tab1:
-        st.subheader("Refresh NFLverse Tables")
+        st.subheader("🌐 Refresh NFLverse Data from API")
         st.markdown("""
-        Update schedules, rosters, injuries, and advanced statistics from the NFLverse database
-        while preserving play-by-play data and custom user notes.
+        Fetch fresh data directly from NFLverse API and update the merged database.
+        This works on both local and Streamlit Cloud environments.
+
+        **Data updated:**
+        - Schedules (games, scores, betting lines)
+        - Rosters (player lists with IDs)
+        - Injuries (official injury reports)
+        - Team statistics (offensive & defensive)
+        - Advanced statistics (passing, rushing, receiving, defensive)
+
+        **Data preserved:**
+        - Play-by-play data
+        - User notes and custom tracking
         """)
 
-        # Get current database status
-        try:
-            status = refresh_merged_db.get_database_status()
+        st.divider()
 
-            # Display status summary
-            col1, col2, col3 = st.columns(3)
+        # Refresh controls
+        col1, col2 = st.columns([3, 1])
 
-            with col1:
-                if status['nflverse_exists']:
-                    st.metric("NFLverse Database", "✅ Available")
-                    if status['nflverse_modified']:
-                        st.caption(f"Modified: {status['nflverse_modified'].strftime('%Y-%m-%d %H:%M')}")
-                else:
-                    st.metric("NFLverse Database", "❌ Missing")
+        with col1:
+            season_input = st.number_input(
+                "Season to refresh",
+                min_value=2020,
+                max_value=2030,
+                value=2025,
+                help="Fetch and update data for this season from NFLverse API"
+            )
 
-            with col2:
-                if status['merged_exists']:
-                    st.metric("Merged Database", "✅ Available")
-                    if status['merged_modified']:
-                        st.caption(f"Modified: {status['merged_modified'].strftime('%Y-%m-%d %H:%M')}")
-                else:
-                    st.metric("Merged Database", "❌ Missing")
+        with col2:
+            st.write("")  # Spacing
+            st.write("")  # Spacing
+            refresh_button = st.button("🔄 Refresh from API", type="primary", use_container_width=True)
 
-            with col3:
-                if status['needs_refresh']:
-                    st.metric("Refresh Status", "⚠️ Outdated")
-                    st.caption("NFLverse has newer data")
-                else:
-                    st.metric("Refresh Status", "✅ Up-to-date")
-                    st.caption("Data is current")
+        # Execute refresh
+        if refresh_button:
+            st.info("🌐 Fetching data directly from NFLverse API... This may take 30-60 seconds.")
 
-            st.divider()
+            # Create progress tracking
+            progress_bar = st.progress(0)
+            status_text = st.empty()
 
-            # Refresh controls
-            col1, col2 = st.columns([3, 1])
+            # Progress callback
+            def show_progress(table, rows, total_tables, current):
+                progress = current / total_tables
+                progress_bar.progress(progress)
+                status_text.text(f"[{current}/{total_tables}] {table}: {rows:,} rows updated")
 
-            with col1:
-                season_input = st.number_input(
-                    "Season to refresh",
-                    min_value=2020,
-                    max_value=2030,
-                    value=2025,
-                    help="Only data for this season will be refreshed"
+            # Execute refresh using direct API
+            with st.spinner("Creating backup and fetching data..."):
+                results = nflverse_direct_refresh.refresh_nflverse_tables_direct(
+                    season=season_input,
+                    progress_callback=show_progress
                 )
 
-            with col2:
-                st.write("")  # Spacing
-                st.write("")  # Spacing
-                refresh_button = st.button("🔄 Refresh Now", type="primary", use_container_width=True)
+            # Display results
+            progress_bar.empty()
+            status_text.empty()
 
-            # Execute refresh
-            if refresh_button:
-                if not status['nflverse_exists']:
-                    st.error("❌ NFLverse database not found. Please ensure it exists at the expected location.")
-                elif not status['merged_exists']:
-                    st.error("❌ Merged database not found. Please run merge_databases.py first.")
-                else:
-                    # Create progress tracking
-                    progress_placeholder = st.empty()
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+            if results['success']:
+                st.success(f"✅ Refresh completed successfully!")
 
-                    # Progress callback
-                    def show_progress(table, rows, total_tables, current):
-                        progress = current / total_tables
-                        progress_bar.progress(progress)
-                        status_text.text(f"[{current}/{total_tables}] {table}: {rows:,} rows updated")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Total Rows Updated", f"{results['total_rows_updated']:,}")
+                with col2:
+                    st.metric("Duration", f"{results['duration_seconds']:.1f}s")
 
-                    # Execute refresh
-                    with st.spinner("Creating backup..."):
-                        results = refresh_merged_db.refresh_nflverse_tables(
-                            season=season_input,
-                            progress_callback=show_progress
-                        )
+                st.info(f"**Backup saved:** {results['backup_path'].name}")
 
-                    # Display results
-                    progress_bar.empty()
-                    status_text.empty()
+                # Show detailed table updates
+                with st.expander("📋 View Detailed Updates"):
+                    for table, count in results['tables_updated'].items():
+                        if isinstance(count, int):
+                            st.write(f"• {table}: {count:,} rows")
+                        else:
+                            st.write(f"• {table}: {count}")
 
-                    if results['success']:
-                        st.success(f"✅ Refresh completed successfully!")
-                        st.info(f"**Total rows updated:** {results['total_rows_updated']:,}")
-                        st.info(f"**Duration:** {results['duration_seconds']:.1f} seconds")
-                        st.info(f"**Backup saved:** {results['backup_path'].name}")
-
-                        # Show detailed table updates
-                        with st.expander("📋 View Detailed Updates"):
-                            for table, count in results['tables_updated'].items():
-                                if isinstance(count, int):
-                                    st.write(f"• {table}: {count:,} rows")
-                                else:
-                                    st.write(f"• {table}: {count}")
-
-                        st.divider()
-                        st.markdown("### Next Steps")
-                        st.code("""
+                st.divider()
+                st.markdown("### 📤 Next Steps (Local Only)")
+                st.info("""
+                If running locally, commit the updated database to Git:
+                """)
+                st.code("""
 git add data/nfl_merged.db
-git commit -m "chore: refresh NFLverse data"
+git commit -m "chore: refresh NFLverse data from API"
 git push
-                        """)
-                    else:
-                        st.error(f"❌ Refresh failed: {results['error']}")
-                        if results['backup_path']:
-                            st.warning(f"Backup available at: {results['backup_path']}")
-                            st.info("The database was not modified due to the error.")
+                """, language="bash")
+                st.caption("💡 On Streamlit Cloud, data refreshes automatically on next deployment")
 
-        except Exception as e:
-            st.error(f"Error accessing database status: {e}")
+            else:
+                st.error(f"❌ Refresh failed: {results['error']}")
+                if results['backup_path']:
+                    st.warning(f"Backup available at: {results['backup_path']}")
+                    st.info("The database was not modified due to the error.")
+
+                st.divider()
+                st.markdown("### 🔧 Troubleshooting")
+                with st.expander("Common Issues"):
+                    st.markdown("""
+                    **Connection Error:**
+                    - Check internet connection
+                    - NFLverse API may be temporarily unavailable
+
+                    **Missing Data:**
+                    - Some data may not be available for all seasons
+                    - Recent seasons (current year) have most complete data
+
+                    **Database Locked:**
+                    - Close any other applications accessing the database
+                    - Wait a moment and try again
+                    """)
 
     # Tab 2: Database Info
     with tab2:

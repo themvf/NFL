@@ -2795,8 +2795,22 @@ def calculate_recent_form(team_abbr: str, season: int, week: Optional[int] = Non
         is_home = game['home_team_abbr'] == team_abbr
         team_score = game['home_score'] if is_home else game['away_score']
         opp_score = game['away_score'] if is_home else game['home_score']
-        margin = team_score - opp_score
+
+        # Skip games without scores (not yet played)
+        if team_score is None or opp_score is None or pd.isna(team_score) or pd.isna(opp_score):
+            continue
+
+        margin = int(team_score) - int(opp_score)
         margins.append(margin)
+
+    # If we don't have enough completed games after filtering, return default
+    if len(margins) < 3:
+        return {
+            'recent_form_score': 0.0,
+            'weighted_margin': 0.0,
+            'last_3_margins': margins,
+            'games_available': len(margins)
+        }
 
     # Calculate weighted margin
     weighted_margin = sum(m * w for m, w in zip(margins, weights))
@@ -2808,7 +2822,7 @@ def calculate_recent_form(team_abbr: str, season: int, week: Optional[int] = Non
         'recent_form_score': recent_form_score,
         'weighted_margin': weighted_margin,
         'last_3_margins': margins,
-        'games_available': 3
+        'games_available': len(margins)
     }
 
 

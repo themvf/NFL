@@ -12814,8 +12814,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 key="upcoming_season_select"
             )
 
-        # Get weeks for selected season
-        weeks_for_season = sorted([row[1] for row in available_data if row[0] == selected_season])
+        # Get weeks for selected season (convert to int to avoid float type issues)
+        weeks_for_season = sorted([int(row[1]) for row in available_data if row[0] == selected_season])
 
         with col2:
             selected_week = st.selectbox(
@@ -12893,6 +12893,9 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             'Spread', 'Total', 'Home Score', 'Away Score', 'Div Game',
             'Away Rest', 'Home Rest', 'Location'
         ])
+
+        # Convert Week column to int to prevent float type issues with Streamlit widgets
+        df['Week'] = df['Week'].astype(int)
 
         # Determine if game is completed or upcoming
         df['Status'] = df.apply(lambda row: 'Final' if pd.notna(row['Home Score']) else 'Scheduled', axis=1)
@@ -13006,7 +13009,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
         # Group by week if showing all weeks
         if selected_week == "All Weeks":
-            for week_num in sorted(df['Week'].unique()):
+            # df['Week'] already converted to int, but ensure unique() returns ints not floats
+            for week_num in sorted(int(w) for w in df['Week'].unique()):
                 week_games = df[df['Week'] == week_num].copy()
 
                 with st.expander(f"Week {week_num} ({len(week_games)} games)", expanded=(week_num == weeks_for_season[0])):

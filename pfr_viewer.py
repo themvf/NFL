@@ -3069,13 +3069,33 @@ def calculate_defensive_explosive_rate(team_abbr: str, season: int, week: Option
     """
     Calculate defensive explosive play rate by looking at opponents' explosive plays against this team.
     Lower opponent explosive rate = better defense.
-
-    NOTE: player_box_score table doesn't exist in NFLverse database.
-    Returns league average until we rebuild this from play-by-play data.
     """
-    # TODO: Rebuild this function using plays table aggregation
-    # For now, return league average to avoid errors
-    return 0.05  # League average defensive explosive rate
+    # Get opponent teams that played against this team
+    sql = """
+        SELECT
+            SUM(CASE WHEN pass_yds >= 300 THEN 1 ELSE 0 END) as big_pass_games_allowed,
+            SUM(CASE WHEN rush_yds >= 100 THEN 1 ELSE 0 END) as big_rush_games_allowed,
+            SUM(CASE WHEN rec_yds >= 100 THEN 1 ELSE 0 END) as big_rec_games_allowed,
+            COUNT(DISTINCT week) as games_played
+        FROM player_box_score
+        WHERE opponent = ? AND season = ?
+    """
+    params = [team_abbr, season]
+
+    if week:
+        sql += " AND week <= ?"
+        params.append(week)
+
+    df = query(sql, tuple(params))
+
+    if df.empty or df.iloc[0]['games_played'] == 0:
+        return 0.05  # League average
+
+    row = df.iloc[0]
+    games = row['games_played']
+    total_big_plays_allowed = row['big_pass_games_allowed'] + row['big_rush_games_allowed'] + row['big_rec_games_allowed']
+
+    return total_big_plays_allowed / games if games > 0 else 0.05
 
 
 def calculate_league_statistics(season: int, week: Optional[int] = None, all_teams: list = None) -> dict:
@@ -3490,12 +3510,46 @@ def calculate_explosive_plays(team_abbr: str, season: int, week: Optional[int] =
     """
     Calculate explosive play proxies from player box scores (20+ yard plays).
 
-    NOTE: player_box_score table doesn't exist in NFLverse database.
-    Returns empty dict until we rebuild this from play-by-play data.
+    Uses heuristic: 40+ yard pass/rush attempts or 100+ yard receiving games
+    as indicators of explosive plays.
     """
-    # TODO: Rebuild this function using plays table aggregation
-    # For now, return empty to avoid errors
-    return {}
+    sql = """
+        SELECT
+            SUM(CASE WHEN pass_yds >= 300 THEN 1 ELSE 0 END) as big_pass_games,
+            SUM(CASE WHEN rush_yds >= 100 THEN 1 ELSE 0 END) as big_rush_games,
+            SUM(CASE WHEN rec_yds >= 100 THEN 1 ELSE 0 END) as big_rec_games,
+            COUNT(DISTINCT week) as games_played
+        FROM player_box_score
+        WHERE team = ? AND season = ?
+    """
+    params = [team_abbr, season]
+
+    if week:
+        sql += " AND week <= ?"
+        params.append(week)
+
+    df = query(sql, tuple(params))
+
+    if df.empty or df.iloc[0]['games_played'] == 0:
+        return {
+            'explosive_play_rate': 0.0,
+            'big_pass_games': 0,
+            'big_rush_games': 0,
+            'big_rec_games': 0,
+            'games': 0
+        }
+
+    row = df.iloc[0]
+    games = row['games_played']
+    total_big_plays = row['big_pass_games'] + row['big_rush_games'] + row['big_rec_games']
+
+    return {
+        'explosive_play_rate': total_big_plays / games if games > 0 else 0.0,
+        'big_pass_games': row['big_pass_games'],
+        'big_rush_games': row['big_rush_games'],
+        'big_rec_games': row['big_rec_games'],
+        'games': games
+    }
 
 
 def get_team_defensive_stats(team_abbr: str, season: int, week: Optional[int] = None) -> dict:

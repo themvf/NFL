@@ -39,6 +39,7 @@ NFLVERSE_TABLES = [
     'injuries',
     'team_stats',
     'team_stats_week',
+    'player_stats',
     'pfr_advstats_pass_week',
     'pfr_advstats_rush_week',
     'pfr_advstats_rec_week',
@@ -99,7 +100,7 @@ def fetch_nflverse_data(season, progress_callback=None):
 
     # Fetch schedules
     if progress_callback:
-        progress_callback("schedules", 0, 9, 1)
+        progress_callback("schedules", 0, 10, 1)
     try:
         df = nfl.load_schedules(season)
         if hasattr(df, 'to_pandas'):  # Polars DataFrame
@@ -111,7 +112,7 @@ def fetch_nflverse_data(season, progress_callback=None):
 
     # Fetch rosters
     if progress_callback:
-        progress_callback("rosters", 0, 9, 2)
+        progress_callback("rosters", 0, 10, 2)
     try:
         df = nfl.load_rosters(season)
         if hasattr(df, 'to_pandas'):
@@ -123,7 +124,7 @@ def fetch_nflverse_data(season, progress_callback=None):
 
     # Fetch injuries
     if progress_callback:
-        progress_callback("injuries", 0, 9, 3)
+        progress_callback("injuries", 0, 10, 3)
     try:
         df = nfl.load_injuries(season)
         if hasattr(df, 'to_pandas'):
@@ -135,7 +136,7 @@ def fetch_nflverse_data(season, progress_callback=None):
 
     # Fetch team stats (season-level)
     if progress_callback:
-        progress_callback("team_stats", 0, 9, 4)
+        progress_callback("team_stats", 0, 10, 4)
     try:
         df = nfl.load_team_stats(season, summary_level='reg')
         if hasattr(df, 'to_pandas'):
@@ -147,7 +148,7 @@ def fetch_nflverse_data(season, progress_callback=None):
 
     # Fetch team stats (weekly)
     if progress_callback:
-        progress_callback("team_stats_week", 0, 9, 5)
+        progress_callback("team_stats_week", 0, 10, 5)
     try:
         df = nfl.load_team_stats(season, summary_level='week')
         if hasattr(df, 'to_pandas'):
@@ -157,6 +158,18 @@ def fetch_nflverse_data(season, progress_callback=None):
     except Exception as e:
         print(f"  ⚠ Error fetching team_stats_week: {e}")
 
+    # Fetch player stats (weekly)
+    if progress_callback:
+        progress_callback("player_stats", 0, 10, 6)
+    try:
+        df = nfl.load_player_stats(season)
+        if hasattr(df, 'to_pandas'):
+            df = df.to_pandas()
+        data['player_stats'] = df
+        print(f"  ✓ Fetched player_stats: {len(df)} player-game records")
+    except Exception as e:
+        print(f"  ⚠ Error fetching player_stats: {e}")
+
     # Fetch advanced stats
     adv_stats = [
         ('pfr_advstats_pass_week', 'pass'),
@@ -165,9 +178,9 @@ def fetch_nflverse_data(season, progress_callback=None):
         ('pfr_advstats_def_week', 'def'),
     ]
 
-    for idx, (table_name, stat_type) in enumerate(adv_stats, 6):
+    for idx, (table_name, stat_type) in enumerate(adv_stats, 7):
         if progress_callback:
-            progress_callback(table_name, 0, 9, idx)
+            progress_callback(table_name, 0, 10, idx)
         try:
             df = nfl.load_pfr_advstats(season, stat_type=stat_type, summary_level='week')
             if hasattr(df, 'to_pandas'):

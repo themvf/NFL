@@ -231,35 +231,66 @@ def create_projection_accuracy_table(conn):
 
 def create_games_view(conn):
     """
-    Create games VIEW as compatibility layer.
-    Maps schedules table to old games table schema for backward compatibility.
+    Create ENHANCED games VIEW as compatibility layer.
+    Maps schedules table to old games table schema with additional columns
+    including stat columns from team_game_summary for defensive rankings.
     """
-    print("\nCreating games view...")
+    print("\nCreating enhanced games view...")
 
     cursor = conn.cursor()
+
+    # Drop existing view if it exists
+    cursor.execute("DROP VIEW IF EXISTS games")
+
     cursor.execute("""
-        CREATE VIEW IF NOT EXISTS games AS
+        CREATE VIEW games AS
         SELECT
-            game_id,
-            gameday as game_date,
-            season as season_year,
-            home_team,
-            away_team,
-            home_score,
-            away_score,
-            week,
-            game_type,
-            weekday,
-            gametime,
-            stadium,
-            roof,
-            surface,
-            temp,
-            wind,
-            home_rest,
-            away_rest,
-            div_game
-        FROM schedules
+            -- Core game identifiers
+            s.game_id,
+            s.season as season_year,
+            s.week,
+            s.gameday as game_date,
+            s.home_team,
+            s.away_team,
+            CAST(s.home_score AS INTEGER) as home_score,
+            CAST(s.away_score AS INTEGER) as away_score,
+
+            -- Game details from schedules
+            s.location,
+            s.game_type,
+            s.overtime,
+            s.total,
+            s.stadium,
+            s.roof,
+            s.surface,
+            s.temp,
+            s.wind,
+            s.div_game,
+            s.weekday,
+            s.gametime,
+
+            -- Betting odds
+            s.spread_line,
+            s.total_line,
+            s.home_moneyline,
+            s.away_moneyline,
+            s.home_rest,
+            s.away_rest,
+
+            -- Team stats from team_game_summary (for defensive rankings)
+            (SELECT rush_yds FROM team_game_summary
+             WHERE game_id = s.game_id AND team_abbr = s.home_team LIMIT 1) as home_rushing_yds,
+            (SELECT rush_yds FROM team_game_summary
+             WHERE game_id = s.game_id AND team_abbr = s.away_team LIMIT 1) as away_rushing_yds,
+            (SELECT pass_yds FROM team_game_summary
+             WHERE game_id = s.game_id AND team_abbr = s.home_team LIMIT 1) as home_passing_yds,
+            (SELECT pass_yds FROM team_game_summary
+             WHERE game_id = s.game_id AND team_abbr = s.away_team LIMIT 1) as away_passing_yds,
+
+            -- Legacy columns
+            NULL as source_url,
+            NULL as last_updated
+        FROM schedules s
     """)
 
     conn.commit()
@@ -267,7 +298,7 @@ def create_games_view(conn):
     # Verify view was created
     cursor.execute("SELECT COUNT(*) FROM games")
     count = cursor.fetchone()[0]
-    print(f"  ✓ Created games view - {count} games available")
+    print(f"  ✓ Created enhanced games view - {count} games with 30+ columns")
 
 def create_merge_metadata_table(conn):
     """
@@ -466,6 +497,203 @@ def create_player_box_score_view(conn):
     print(f"  ✓ Created player_box_score view - {count} player-game records")
 
 
+def create_season_leader_views(conn):
+    """Create all season leader aggregation views from player_box_score."""
+    print("\nCreating season leader views...")
+    cursor = conn.cursor()
+
+    # Rushing leaders
+    cursor.execute("DROP VIEW IF EXISTS rushing_leaders")
+    cursor.execute("""
+        CREATE VIEW rushing_leaders AS
+        SELECT
+            player, team, season,
+            COUNT(DISTINCT week) as games_played,
+            SUM(rush_att) as total_rush_att,
+            SUM(rush_yds) as total_rush_yds,
+            SUM(rush_td) as total_rush_td,
+            ROUND(SUM(rush_yds) * 1.0 / NULLIF(SUM(rush_att), 0), 1) as avg_yds_per_carry,
+            ROUND(SUM(rush_yds) * 1.0 / NULLIF(COUNT(DISTINCT week), 0), 1) as yds_per_game
+        FROM player_box_score
+        WHERE rush_att > 0
+        GROUP BY player, team, season
+    """)
+
+    # Receiving leaders
+    cursor.execute("DROP VIEW IF EXISTS receiving_leaders")
+    cursor.execute("""
+        CREATE VIEW receiving_leaders AS
+        SELECT
+            player, team, season,
+            COUNT(DISTINCT week) as games_played,
+            SUM(rec) as total_rec,
+            SUM(targets) as total_targets,
+            SUM(rec_yds) as total_rec_yds,
+            SUM(rec_td) as total_rec_td,
+            ROUND(SUM(rec_yds) * 1.0 / NULLIF(SUM(rec), 0), 1) as avg_yds_per_rec,
+            ROUND(SUM(rec_yds) * 1.0 / NULLIF(COUNT(DISTINCT week), 0), 1) as yds_per_game,
+            ROUND(SUM(rec) * 100.0 / NULLIF(SUM(targets), 0), 1) as catch_pct
+        FROM player_box_score
+        WHERE targets > 0 OR rec > 0
+        GROUP BY player, team, season
+    """)
+
+    # Passing leaders
+    cursor.execute("DROP VIEW IF EXISTS passing_leaders")
+    cursor.execute("""
+        CREATE VIEW passing_leaders AS
+        SELECT
+            player, team, season,
+            COUNT(DISTINCT week) as games_played,
+            SUM(pass_att) as total_pass_att,
+            SUM(pass_comp) as total_pass_comp,
+            SUM(pass_yds) as total_pass_yds,
+            SUM(pass_td) as total_pass_td,
+            SUM(pass_int) as total_pass_int,
+            ROUND(SUM(pass_comp) * 100.0 / NULLIF(SUM(pass_att), 0), 1) as comp_pct,
+            ROUND(SUM(pass_yds) * 1.0 / NULLIF(SUM(pass_att), 0), 1) as yds_per_att,
+            ROUND(SUM(pass_yds) * 1.0 / NULLIF(COUNT(DISTINCT week), 0), 1) as yds_per_game
+        FROM player_box_score
+        WHERE pass_att > 0
+        GROUP BY player, team, season
+    """)
+
+    # Touchdown leaders
+    cursor.execute("DROP VIEW IF EXISTS touchdown_leaders")
+    cursor.execute("""
+        CREATE VIEW touchdown_leaders AS
+        SELECT
+            player, team, season,
+            COUNT(DISTINCT week) as games_played,
+            SUM(rush_td) as rush_tds,
+            SUM(rec_td) as rec_tds,
+            SUM(pass_td) as pass_tds,
+            SUM(st_td) as st_tds,
+            SUM(rush_td + rec_td + pass_td + st_td) as total_touchdowns,
+            ROUND(SUM(rush_td + rec_td + pass_td + st_td) * 1.0 / NULLIF(COUNT(DISTINCT week), 0), 2) as tds_per_game
+        FROM player_box_score
+        WHERE (rush_td + rec_td + pass_td + st_td) > 0
+        GROUP BY player, team, season
+    """)
+
+    conn.commit()
+
+    # Verify views
+    cursor.execute("SELECT COUNT(*) FROM rushing_leaders")
+    rush_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM receiving_leaders")
+    rec_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM passing_leaders")
+    pass_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM touchdown_leaders")
+    td_count = cursor.fetchone()[0]
+
+    print(f"  ✓ Created rushing_leaders - {rush_count} records")
+    print(f"  ✓ Created receiving_leaders - {rec_count} records")
+    print(f"  ✓ Created passing_leaders - {pass_count} records")
+    print(f"  ✓ Created touchdown_leaders - {td_count} records")
+
+
+def create_touchdown_scorers_view(conn):
+    """Create touchdown_scorers view for TD analysis."""
+    print("\nCreating touchdown_scorers view...")
+    cursor = conn.cursor()
+
+    cursor.execute("DROP VIEW IF EXISTS touchdown_scorers")
+    cursor.execute("""
+        CREATE VIEW touchdown_scorers AS
+        SELECT
+            player_id || '_' || season || '_W' || week || '_rush' as td_id,
+            COALESCE(
+                (SELECT game_id FROM schedules
+                 WHERE season = pbs.season AND week = pbs.week
+                 AND (home_team = pbs.team OR away_team = pbs.team) LIMIT 1),
+                season || '_W' || week || '_' || team
+            ) as game_id,
+            player, team, season, week,
+            'Rushing' as touchdown_type,
+            rush_td as td_count,
+            0 as first_td_game, 0 as first_td_for_team
+        FROM player_box_score pbs
+        WHERE rush_td > 0
+        UNION ALL
+        SELECT
+            player_id || '_' || season || '_W' || week || '_rec' as td_id,
+            COALESCE(
+                (SELECT game_id FROM schedules
+                 WHERE season = pbs.season AND week = pbs.week
+                 AND (home_team = pbs.team OR away_team = pbs.team) LIMIT 1),
+                season || '_W' || week || '_' || team
+            ) as game_id,
+            player, team, season, week,
+            'Receiving' as touchdown_type,
+            rec_td as td_count,
+            0 as first_td_game, 0 as first_td_for_team
+        FROM player_box_score pbs
+        WHERE rec_td > 0
+        UNION ALL
+        SELECT
+            player_id || '_' || season || '_W' || week || '_pass' as td_id,
+            COALESCE(
+                (SELECT game_id FROM schedules
+                 WHERE season = pbs.season AND week = pbs.week
+                 AND (home_team = pbs.team OR away_team = pbs.team) LIMIT 1),
+                season || '_W' || week || '_' || team
+            ) as game_id,
+            player, team, season, week,
+            'Passing' as touchdown_type,
+            pass_td as td_count,
+            0 as first_td_game, 0 as first_td_for_team
+        FROM player_box_score pbs
+        WHERE pass_td > 0
+    """)
+
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM touchdown_scorers")
+    count = cursor.fetchone()[0]
+    print(f"  ✓ Created touchdown_scorers view - {count} TD events")
+
+
+def create_first_td_game_leaders_view(conn):
+    """Create first_td_game_leaders placeholder view."""
+    print("\nCreating first_td_game_leaders view (placeholder)...")
+    cursor = conn.cursor()
+
+    cursor.execute("DROP VIEW IF EXISTS first_td_game_leaders")
+    cursor.execute("""
+        CREATE VIEW first_td_game_leaders AS
+        SELECT
+            player, team, season,
+            0 as first_td_count,
+            'Requires play-by-play parsing' as notes
+        FROM player_box_score
+        WHERE (rush_td + rec_td + pass_td) > 0
+        GROUP BY player, team, season
+    """)
+
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM first_td_game_leaders")
+    count = cursor.fetchone()[0]
+    print(f"  ✓ Created first_td_game_leaders view (placeholder) - {count} records")
+
+
+def create_box_score_summary_view(conn):
+    """Create box_score_summary as alias to team_game_summary."""
+    print("\nCreating box_score_summary view (alias)...")
+    cursor = conn.cursor()
+
+    cursor.execute("DROP VIEW IF EXISTS box_score_summary")
+    cursor.execute("CREATE VIEW box_score_summary AS SELECT * FROM team_game_summary")
+
+    conn.commit()
+
+    cursor.execute("SELECT COUNT(*) FROM box_score_summary")
+    count = cursor.fetchone()[0]
+    print(f"  ✓ Created box_score_summary view (alias) - {count} records")
+
+
 def verify_data_integrity(conn):
     """Verify merged database integrity"""
     print("\n" + "="*60)
@@ -533,8 +761,8 @@ def verify_data_integrity(conn):
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='plays'")
     if cursor.fetchone():
         cursor.execute("""
-            SELECT DISTINCT posteam FROM plays
-            WHERE posteam IN (?, ?, ?, ?, ?, ?, ?, ?)
+            SELECT DISTINCT posteam_abbr FROM plays
+            WHERE posteam_abbr IN (?, ?, ?, ?, ?, ?, ?, ?)
         """, old_abbrs)
         remaining_old = [row[0] for row in cursor.fetchall()]
         if remaining_old:
@@ -587,18 +815,38 @@ def main():
         # Step 9: Create player_box_score compatibility view
         create_player_box_score_view(merged_conn)
 
-        # Step 10: Verify data integrity
+        # Step 10: Create season leader views (rushing, receiving, passing, touchdown)
+        create_season_leader_views(merged_conn)
+
+        # Step 11: Create touchdown_scorers view for TD analysis
+        create_touchdown_scorers_view(merged_conn)
+
+        # Step 12: Create first_td_game_leaders view (placeholder)
+        create_first_td_game_leaders_view(merged_conn)
+
+        # Step 13: Create box_score_summary view (alias to team_game_summary)
+        create_box_score_summary_view(merged_conn)
+
+        # Step 14: Verify data integrity
         verify_data_integrity(merged_conn)
 
         print("\n" + "="*60)
         print("✓ DATABASE MERGE COMPLETE!")
         print("="*60)
         print(f"\nMerged database created at: {MERGED_DB}")
+        print("\nCompatibility Views Created:")
+        print("  ✅ Enhanced games view (30+ columns)")
+        print("  ✅ team_game_summary (team stats)")
+        print("  ✅ player_box_score (player stats)")
+        print("  ✅ rushing_leaders, receiving_leaders, passing_leaders")
+        print("  ✅ touchdown_leaders, touchdown_scorers")
+        print("  ✅ first_td_game_leaders (placeholder)")
+        print("  ✅ box_score_summary (alias)")
         print("\nNext steps:")
-        print("1. Update pfr_viewer.py to use nfl_merged.db")
-        print("2. Convert all team abbreviations in queries")
-        print("3. Test existing features")
-        print("4. Add new advanced stats visualizations")
+        print("1. Test Season Leaders page")
+        print("2. Test Touchdown Analysis features")
+        print("3. Test Upcoming Matches page")
+        print("4. Commit and push to Git")
 
     except Exception as e:
         print(f"\n❌ ERROR during merge: {e}")

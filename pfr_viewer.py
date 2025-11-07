@@ -3160,15 +3160,16 @@ def calculate_league_statistics(season: int, week: Optional[int] = None, all_tea
             continue
 
     # Calculate mean and std for each metric
-    import statistics
+    import numpy as np
     league_stats = {}
 
     for metric_name, values in metrics.items():
         if len(values) > 1:
             # Convert all values to float to avoid 'float has no numerator' errors
-            float_values = [float(v) for v in values]
-            mean_val = statistics.mean(float_values)
-            std_val = statistics.stdev(float_values) if len(float_values) > 1 else 1.0
+            # Use numpy to avoid Python statistics module issues with float types
+            float_values = np.array(values, dtype=np.float64)
+            mean_val = float(np.mean(float_values))
+            std_val = float(np.std(float_values, ddof=1)) if len(float_values) > 1 else 1.0
 
             # CRITICAL FIX: Ensure minimum std to prevent extreme z-scores
             # If std is too small, z-scores become unreasonably large

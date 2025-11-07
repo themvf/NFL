@@ -293,6 +293,86 @@ def create_merge_metadata_table(conn):
     conn.commit()
     print("  ✓ Created merge_metadata table with initial record")
 
+def create_team_game_summary_view(conn):
+    """
+    Create team_game_summary VIEW as compatibility layer.
+    Maps team_stats_week to old team_game_summary schema for backward compatibility.
+    """
+    print("\nCreating team_game_summary view...")
+
+    cursor = conn.cursor()
+
+    # Drop view if exists
+    cursor.execute("DROP VIEW IF EXISTS team_game_summary")
+
+    # Create compatibility view mapping NFLverse to old schema
+    cursor.execute("""
+        CREATE VIEW team_game_summary AS
+        SELECT
+            s.game_id,
+            ts.season,
+            ts.week,
+            ts.team as team_abbr,
+            ts.opponent_team as opponent_abbr,
+            ts.completions as pass_comp,
+            ts.attempts as pass_att,
+            ts.passing_yards as pass_yds,
+            ts.passing_tds as pass_td,
+            ts.passing_interceptions as pass_int,
+            ts.sacks_suffered as sacks,
+            ts.sack_yards_lost as sack_yds,
+            ts.carries as rush_att,
+            ts.rushing_yards as rush_yds,
+            ts.rushing_tds as rush_td,
+            ts.receptions as rec,
+            ts.receiving_yards as rec_yds,
+            ts.receiving_tds as rec_td,
+            (ts.passing_yards + ts.rushing_yards) as yards_total,
+            (ts.passing_yards + ts.rushing_yards + ts.receiving_yards) /
+                NULLIF(ts.attempts + ts.carries, 0) as yards_per_play,
+            CASE
+                WHEN ts.team = s.home_team AND s.home_score IS NOT NULL
+                    THEN s.home_score
+                WHEN ts.team = s.away_team AND s.away_score IS NOT NULL
+                    THEN s.away_score
+                ELSE (ts.passing_tds + ts.rushing_tds + ts.receiving_tds + ts.special_teams_tds + ts.def_tds) * 7
+                    + ts.fg_made * 3
+                    + ts.pat_made
+            END as points,
+            ts.def_sacks as def_sack,
+            ts.def_interceptions as def_int,
+            ts.def_fumbles as def_fum,
+            ts.def_tds as def_td,
+            ts.penalties as pen,
+            ts.penalty_yards as pen_yds,
+            (ts.passing_interceptions + ts.rushing_fumbles_lost + ts.receiving_fumbles_lost) as turnovers,
+            (ts.attempts + ts.carries) as plays,
+            (ts.passing_first_downs + ts.rushing_first_downs + ts.receiving_first_downs) as first_downs,
+            NULL as third_down_conv,
+            NULL as third_down_att,
+            NULL as fourth_down_conv,
+            NULL as fourth_down_att,
+            NULL as time_of_poss,
+            ts.fg_made,
+            ts.fg_att as fg_attempted,
+            ts.season_type
+        FROM team_stats_week ts
+        LEFT JOIN schedules s ON
+            ts.season = s.season
+            AND ts.week = s.week
+            AND ts.team IN (s.home_team, s.away_team)
+            AND ts.opponent_team IN (s.home_team, s.away_team)
+            AND ts.team != ts.opponent_team
+        WHERE ts.season_type = 'REG'
+    """)
+
+    conn.commit()
+
+    # Verify view was created
+    cursor.execute("SELECT COUNT(*) FROM team_game_summary")
+    count = cursor.fetchone()[0]
+    print(f"  ✓ Created team_game_summary view - {count} team-game records")
+
 def verify_data_integrity(conn):
     """Verify merged database integrity"""
     print("\n" + "="*60)
@@ -408,7 +488,10 @@ def main():
         # Step 7: Create merge_metadata table
         create_merge_metadata_table(merged_conn)
 
-        # Step 8: Verify data integrity
+        # Step 8: Create team_game_summary compatibility view
+        create_team_game_summary_view(merged_conn)
+
+        # Step 9: Verify data integrity
         verify_data_integrity(merged_conn)
 
         print("\n" + "="*60)

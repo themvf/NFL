@@ -12899,7 +12899,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
         # Calculate power rankings for each team using the same 4-step process as Power Rankings view
         # Use the selected season and the week before the first game for power rating calculation
-        power_rating_week = df['Week'].min() if selected_week == "All Weeks" else selected_week
+        # Convert to int to avoid float type issues with Streamlit
+        power_rating_week = int(df['Week'].min()) if selected_week == "All Weeks" else int(selected_week)
 
         # Get all unique teams in the schedule
         all_teams = set(df['Home Team'].tolist() + df['Away Team'].tolist())

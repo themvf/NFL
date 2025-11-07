@@ -245,13 +245,13 @@ def create_games_view(conn):
     cursor.execute("""
         CREATE VIEW games AS
         SELECT
-            -- Core game identifiers
+            -- Core game identifiers (using legacy column names for compatibility)
             s.game_id,
-            s.season as season_year,
+            s.season,
             s.week,
             s.gameday as game_date,
-            s.home_team,
-            s.away_team,
+            s.home_team as home_team_abbr,
+            s.away_team as away_team_abbr,
             CAST(s.home_score AS INTEGER) as home_score,
             CAST(s.away_score AS INTEGER) as away_score,
 

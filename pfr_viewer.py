@@ -5990,15 +5990,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
         with tab1:
             pass_leaders = players_df[players_df['pass_att'] > 0].groupby(['team', 'player']).agg({
-                'pass_cmp': 'sum',
+                'pass_comp': 'sum',
                 'pass_att': ['sum', 'count'],
                 'pass_yds': 'sum',
                 'pass_td': 'sum',
-                'pass_int': 'sum',
-                'pass_rating': 'mean'
+                'pass_int': 'sum'
             }).reset_index()
-            pass_leaders.columns = ['team', 'player', 'pass_cmp', 'pass_att', 'games', 'pass_yds', 'pass_td', 'pass_int', 'pass_rating']
-            pass_leaders['Comp%'] = (pass_leaders['pass_cmp'] / pass_leaders['pass_att'] * 100).round(1)
+            pass_leaders.columns = ['team', 'player', 'pass_comp', 'pass_att', 'games', 'pass_yds', 'pass_td', 'pass_int']
+            pass_leaders['Comp%'] = (pass_leaders['pass_comp'] / pass_leaders['pass_att'] * 100).round(1)
             pass_leaders = pass_leaders.sort_values('pass_yds', ascending=False)
 
             col1, col2 = st.columns(2)
@@ -6006,36 +6005,33 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"**{team1} Passing**")
                 t1_pass = pass_leaders[pass_leaders['team'] == team1].head(3)
                 if not t1_pass.empty:
-                    t1_pass_display = t1_pass[['player', 'games', 'pass_yds', 'pass_td', 'pass_int', 'Comp%', 'pass_rating']].copy()
-                    t1_pass_display.columns = ['Player', 'Games', 'Yards', 'TD', 'INT', 'Comp%', 'Rating']
+                    t1_pass_display = t1_pass[['player', 'games', 'pass_yds', 'pass_td', 'pass_int', 'Comp%']].copy()
+                    t1_pass_display.columns = ['Player', 'Games', 'Yards', 'TD', 'INT', 'Comp%']
                     t1_pass_display['Games'] = t1_pass_display['Games'].astype(int)
                     t1_pass_display['Yards'] = t1_pass_display['Yards'].astype(int)
                     t1_pass_display['TD'] = t1_pass_display['TD'].astype(int)
                     t1_pass_display['INT'] = t1_pass_display['INT'].astype(int)
-                    t1_pass_display['Rating'] = t1_pass_display['Rating'].round(1)
                     st.dataframe(t1_pass_display, hide_index=True, use_container_width=True)
 
             with col2:
                 st.markdown(f"**{team2} Passing**")
                 t2_pass = pass_leaders[pass_leaders['team'] == team2].head(3)
                 if not t2_pass.empty:
-                    t2_pass_display = t2_pass[['player', 'games', 'pass_yds', 'pass_td', 'pass_int', 'Comp%', 'pass_rating']].copy()
-                    t2_pass_display.columns = ['Player', 'Games', 'Yards', 'TD', 'INT', 'Comp%', 'Rating']
+                    t2_pass_display = t2_pass[['player', 'games', 'pass_yds', 'pass_td', 'pass_int', 'Comp%']].copy()
+                    t2_pass_display.columns = ['Player', 'Games', 'Yards', 'TD', 'INT', 'Comp%']
                     t2_pass_display['Games'] = t2_pass_display['Games'].astype(int)
                     t2_pass_display['Yards'] = t2_pass_display['Yards'].astype(int)
                     t2_pass_display['TD'] = t2_pass_display['TD'].astype(int)
                     t2_pass_display['INT'] = t2_pass_display['INT'].astype(int)
-                    t2_pass_display['Rating'] = t2_pass_display['Rating'].round(1)
                     st.dataframe(t2_pass_display, hide_index=True, use_container_width=True)
 
         with tab2:
             rush_leaders = players_df[players_df['rush_att'] > 0].groupby(['team', 'player']).agg({
                 'rush_att': 'sum',
                 'rush_yds': ['sum', 'count'],
-                'rush_td': 'sum',
-                'rush_long': 'max'
+                'rush_td': 'sum'
             }).reset_index()
-            rush_leaders.columns = ['team', 'player', 'rush_att', 'rush_yds', 'games', 'rush_td', 'rush_long']
+            rush_leaders.columns = ['team', 'player', 'rush_att', 'rush_yds', 'games', 'rush_td']
             rush_leaders['YPA'] = (rush_leaders['rush_yds'] / rush_leaders['rush_att']).round(1)
             rush_leaders = rush_leaders.sort_values('rush_yds', ascending=False)
 

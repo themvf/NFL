@@ -12846,7 +12846,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     away_score,
                     div_game,
                     away_rest,
-                    home_rest
+                    home_rest,
+                    location
                 FROM schedules
                 WHERE season = ? AND game_type = 'REG'
                 ORDER BY week ASC, gameday ASC
@@ -12871,7 +12872,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     away_score,
                     div_game,
                     away_rest,
-                    home_rest
+                    home_rest,
+                    location
                 FROM schedules
                 WHERE season = ? AND week = ? AND game_type = 'REG'
                 ORDER BY gameday ASC
@@ -12889,7 +12891,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
             'Date', 'Week', 'Home Team', 'Away Team', 'Day', 'Time',
             'Stadium', 'Roof', 'Surface', 'Temp', 'Wind',
             'Spread', 'Total', 'Home Score', 'Away Score', 'Div Game',
-            'Away Rest', 'Home Rest'
+            'Away Rest', 'Home Rest', 'Location'
         ])
 
         # Determine if game is completed or upcoming

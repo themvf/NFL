@@ -3165,8 +3165,10 @@ def calculate_league_statistics(season: int, week: Optional[int] = None, all_tea
 
     for metric_name, values in metrics.items():
         if len(values) > 1:
-            mean_val = statistics.mean(values)
-            std_val = statistics.stdev(values) if len(values) > 1 else 1.0
+            # Convert all values to float to avoid 'float has no numerator' errors
+            float_values = [float(v) for v in values]
+            mean_val = statistics.mean(float_values)
+            std_val = statistics.stdev(float_values) if len(float_values) > 1 else 1.0
 
             # CRITICAL FIX: Ensure minimum std to prevent extreme z-scores
             # If std is too small, z-scores become unreasonably large

@@ -6040,26 +6040,24 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"**{team1} Rushing**")
                 t1_rush = rush_leaders[rush_leaders['team'] == team1].head(5)
                 if not t1_rush.empty:
-                    t1_rush_display = t1_rush[['player', 'games', 'rush_yds', 'rush_att', 'YPA', 'rush_td', 'rush_long']].copy()
-                    t1_rush_display.columns = ['Player', 'Games', 'Yards', 'Att', 'YPA', 'TD', 'Long']
+                    t1_rush_display = t1_rush[['player', 'games', 'rush_yds', 'rush_att', 'YPA', 'rush_td']].copy()
+                    t1_rush_display.columns = ['Player', 'Games', 'Yards', 'Att', 'YPA', 'TD']
                     t1_rush_display['Games'] = t1_rush_display['Games'].astype(int)
                     t1_rush_display['Yards'] = t1_rush_display['Yards'].astype(int)
                     t1_rush_display['Att'] = t1_rush_display['Att'].astype(int)
                     t1_rush_display['TD'] = t1_rush_display['TD'].astype(int)
-                    t1_rush_display['Long'] = t1_rush_display['Long'].astype(int)
                     st.dataframe(t1_rush_display, hide_index=True, use_container_width=True)
 
             with col2:
                 st.markdown(f"**{team2} Rushing**")
                 t2_rush = rush_leaders[rush_leaders['team'] == team2].head(5)
                 if not t2_rush.empty:
-                    t2_rush_display = t2_rush[['player', 'games', 'rush_yds', 'rush_att', 'YPA', 'rush_td', 'rush_long']].copy()
-                    t2_rush_display.columns = ['Player', 'Games', 'Yards', 'Att', 'YPA', 'TD', 'Long']
+                    t2_rush_display = t2_rush[['player', 'games', 'rush_yds', 'rush_att', 'YPA', 'rush_td']].copy()
+                    t2_rush_display.columns = ['Player', 'Games', 'Yards', 'Att', 'YPA', 'TD']
                     t2_rush_display['Games'] = t2_rush_display['Games'].astype(int)
                     t2_rush_display['Yards'] = t2_rush_display['Yards'].astype(int)
                     t2_rush_display['Att'] = t2_rush_display['Att'].astype(int)
                     t2_rush_display['TD'] = t2_rush_display['TD'].astype(int)
-                    t2_rush_display['Long'] = t2_rush_display['Long'].astype(int)
                     st.dataframe(t2_rush_display, hide_index=True, use_container_width=True)
 
         with tab3:
@@ -6067,10 +6065,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 'rec': 'sum',
                 'targets': 'sum',
                 'rec_yds': ['sum', 'count'],
-                'rec_td': 'sum',
-                'rec_long': 'max'
+                'rec_td': 'sum'
             }).reset_index()
-            rec_leaders.columns = ['team', 'player', 'rec', 'targets', 'rec_yds', 'games', 'rec_td', 'rec_long']
+            rec_leaders.columns = ['team', 'player', 'rec', 'targets', 'rec_yds', 'games', 'rec_td']
             rec_leaders['YPR'] = (rec_leaders['rec_yds'] / rec_leaders['rec']).round(1)
             rec_leaders['Catch%'] = (rec_leaders['rec'] / rec_leaders['targets'] * 100).round(0)
             rec_leaders = rec_leaders.sort_values('rec_yds', ascending=False)
@@ -6080,30 +6077,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"**{team1} Receiving**")
                 t1_rec = rec_leaders[rec_leaders['team'] == team1].head(5)
                 if not t1_rec.empty:
-                    t1_rec_display = t1_rec[['player', 'games', 'rec_yds', 'targets', 'rec', 'YPR', 'rec_td', 'Catch%', 'rec_long']].copy()
-                    t1_rec_display.columns = ['Player', 'Games', 'Yards', 'Tgt', 'Rec', 'YPR', 'TD', 'Catch%', 'Long']
+                    t1_rec_display = t1_rec[['player', 'games', 'rec_yds', 'targets', 'rec', 'YPR', 'rec_td', 'Catch%']].copy()
+                    t1_rec_display.columns = ['Player', 'Games', 'Yards', 'Tgt', 'Rec', 'YPR', 'TD', 'Catch%']
                     t1_rec_display['Games'] = t1_rec_display['Games'].astype(int)
                     t1_rec_display['Yards'] = t1_rec_display['Yards'].astype(int)
                     t1_rec_display['Tgt'] = t1_rec_display['Tgt'].astype(int)
                     t1_rec_display['Rec'] = t1_rec_display['Rec'].astype(int)
                     t1_rec_display['TD'] = t1_rec_display['TD'].astype(int)
                     t1_rec_display['Catch%'] = t1_rec_display['Catch%'].astype(int)
-                    t1_rec_display['Long'] = t1_rec_display['Long'].astype(int)
                     st.dataframe(t1_rec_display, hide_index=True, use_container_width=True)
 
             with col2:
                 st.markdown(f"**{team2} Receiving**")
                 t2_rec = rec_leaders[rec_leaders['team'] == team2].head(5)
                 if not t2_rec.empty:
-                    t2_rec_display = t2_rec[['player', 'games', 'rec_yds', 'targets', 'rec', 'YPR', 'rec_td', 'Catch%', 'rec_long']].copy()
-                    t2_rec_display.columns = ['Player', 'Games', 'Yards', 'Tgt', 'Rec', 'YPR', 'TD', 'Catch%', 'Long']
+                    t2_rec_display = t2_rec[['player', 'games', 'rec_yds', 'targets', 'rec', 'YPR', 'rec_td', 'Catch%']].copy()
+                    t2_rec_display.columns = ['Player', 'Games', 'Yards', 'Tgt', 'Rec', 'YPR', 'TD', 'Catch%']
                     t2_rec_display['Games'] = t2_rec_display['Games'].astype(int)
                     t2_rec_display['Yards'] = t2_rec_display['Yards'].astype(int)
                     t2_rec_display['Tgt'] = t2_rec_display['Tgt'].astype(int)
                     t2_rec_display['Rec'] = t2_rec_display['Rec'].astype(int)
                     t2_rec_display['TD'] = t2_rec_display['TD'].astype(int)
                     t2_rec_display['Catch%'] = t2_rec_display['Catch%'].astype(int)
-                    t2_rec_display['Long'] = t2_rec_display['Long'].astype(int)
                     st.dataframe(t2_rec_display, hide_index=True, use_container_width=True)
 
         st.divider()

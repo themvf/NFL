@@ -680,12 +680,30 @@ def create_first_td_game_leaders_view(conn):
 
 
 def create_box_score_summary_view(conn):
-    """Create box_score_summary as alias to team_game_summary."""
+    """Create box_score_summary as alias to team_game_summary with column name fix."""
     print("\nCreating box_score_summary view (alias)...")
     cursor = conn.cursor()
 
     cursor.execute("DROP VIEW IF EXISTS box_score_summary")
-    cursor.execute("CREATE VIEW box_score_summary AS SELECT * FROM team_game_summary")
+    # Rename team_abbr to team for legacy compatibility
+    cursor.execute("""
+        CREATE VIEW box_score_summary AS
+        SELECT
+            game_id, season, week,
+            team_abbr as team,
+            opponent_abbr as opponent,
+            pass_comp, pass_att, pass_yds, pass_td, pass_int,
+            sacks, sack_yds,
+            rush_att, rush_yds, rush_td,
+            rec, rec_yds, rec_td,
+            yards_total, yards_per_play, points,
+            def_sack, def_int, def_fum, def_td,
+            pen, pen_yds, turnovers, plays, first_downs,
+            third_down_conv, third_down_att,
+            fourth_down_conv, fourth_down_att,
+            time_of_poss, fg_made, fg_attempted, season_type
+        FROM team_game_summary
+    """)
 
     conn.commit()
 

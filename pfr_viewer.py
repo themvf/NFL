@@ -3069,42 +3069,13 @@ def calculate_defensive_explosive_rate(team_abbr: str, season: int, week: Option
     """
     Calculate defensive explosive play rate by looking at opponents' explosive plays against this team.
     Lower opponent explosive rate = better defense.
+
+    NOTE: player_box_score table doesn't exist in NFLverse database.
+    Returns league average until we rebuild this from play-by-play data.
     """
-    # Get opponent big plays against this team
-    sql = """
-        SELECT
-            SUM(CASE WHEN pbs.rec > 0 AND pbs.rec_yds >= 40 THEN 1 ELSE 0 END) as opp_big_pass,
-            SUM(CASE WHEN pbs.rush_att > 0 AND pbs.rush_yds >= 40 THEN 1 ELSE 0 END) as opp_big_rush,
-            COUNT(DISTINCT g.game_id) as games
-        FROM player_box_score pbs
-        JOIN games g ON pbs.game_id = g.game_id
-        WHERE g.season = ?
-        AND (
-            (g.home_team_abbr = ? AND pbs.team = g.away_team_abbr)
-            OR
-            (g.away_team_abbr = ? AND pbs.team = g.home_team_abbr)
-        )
-    """
-    params = [season, team_abbr, team_abbr]
-    if week:
-        sql += " AND g.week <= ?"
-        params.append(week)
-
-    stats = query(sql, tuple(params))
-
-    if stats.empty:
-        return 0.05  # League average defensive explosive rate
-
-    opp_big_pass = stats['opp_big_pass'].iloc[0] or 0
-    opp_big_rush = stats['opp_big_rush'].iloc[0] or 0
-    games = stats['games'].iloc[0] or 1
-
-    # Calculate opponent explosive rate allowed
-    opp_explosive_per_game = (opp_big_pass + opp_big_rush) / games
-    estimated_plays = 65
-    opp_explosive_rate = opp_explosive_per_game / estimated_plays
-
-    return opp_explosive_rate
+    # TODO: Rebuild this function using plays table aggregation
+    # For now, return league average to avoid errors
+    return 0.05  # League average defensive explosive rate
 
 
 def calculate_league_statistics(season: int, week: Optional[int] = None, all_teams: list = None) -> dict:
@@ -3516,46 +3487,15 @@ def calculate_success_rates(team_abbr: str, season: int, week: Optional[int] = N
 
 
 def calculate_explosive_plays(team_abbr: str, season: int, week: Optional[int] = None) -> dict:
-    """Calculate explosive play proxies from player box scores (20+ yard plays)."""
-    # Get player stats to find big plays using actual column names
-    sql = """
-        SELECT
-            SUM(CASE WHEN rec > 0 AND rec_yds >= 40 THEN 1 ELSE 0 END) as big_pass_plays,
-            SUM(CASE WHEN rush_att > 0 AND rush_yds >= 40 THEN 1 ELSE 0 END) as big_rush_plays,
-            AVG(rec_yds) as avg_rec_yds,
-            AVG(rush_yds) as avg_rush_yds,
-            COUNT(DISTINCT pbs.game_id) as games
-        FROM player_box_score pbs
-        JOIN games g ON pbs.game_id = g.game_id
-        WHERE pbs.team = ?
-        AND g.season = ?
     """
-    params = [team_abbr, season]
-    if week:
-        sql += " AND g.week <= ?"
-        params.append(week)
+    Calculate explosive play proxies from player box scores (20+ yard plays).
 
-    stats = query(sql, tuple(params))
-
-    if stats.empty:
-        return {}
-
-    big_pass = stats['big_pass_plays'].iloc[0] or 0
-    big_rush = stats['big_rush_plays'].iloc[0] or 0
-    games = stats['games'].iloc[0] or 1
-
-    # Estimate explosive play rate (big plays per game / estimated plays per game)
-    explosive_per_game = (big_pass + big_rush) / games
-    estimated_plays = 65  # avg plays per game
-    explosive_rate = explosive_per_game / estimated_plays
-
-    return {
-        'explosive_rate': explosive_rate,
-        'explosive_pass_rate': (big_pass / games) / 35,  # ~35 pass attempts per game
-        'explosive_rush_rate': (big_rush / games) / 30,  # ~30 rush attempts per game
-        'total_explosive': int(big_pass + big_rush),
-        'avg_explosive_yards': 45  # Estimate for 40+ yard plays
-    }
+    NOTE: player_box_score table doesn't exist in NFLverse database.
+    Returns empty dict until we rebuild this from play-by-play data.
+    """
+    # TODO: Rebuild this function using plays table aggregation
+    # For now, return empty to avoid errors
+    return {}
 
 
 def get_team_defensive_stats(team_abbr: str, season: int, week: Optional[int] = None) -> dict:

@@ -1630,14 +1630,24 @@ def calculate_defensive_stats(season, max_week):
             """
             pass_df = pd.read_sql_query(pass_query, conn)
 
-            # Rush yards and TDs allowed (opponent RBs)
+            # Rush yards and TDs allowed (opponent RBs only, excludes QBs)
+            # Only count players with 50+ total touches to exclude QB scrambles
             rush_query = f"""
                 SELECT
-                    AVG(rushing_yards) as avg_rush_allowed,
-                    SUM(rushing_tds) as total_rush_td_allowed
-                FROM player_stats
-                WHERE season = {season} AND week < {max_week} AND carries >= 5
-                  AND opponent_team = '{team}'
+                    AVG(ps.rushing_yards) as avg_rush_allowed,
+                    SUM(ps.rushing_tds) as total_rush_td_allowed
+                FROM player_stats ps
+                INNER JOIN (
+                    SELECT player_display_name, team
+                    FROM player_stats
+                    WHERE season = {season} AND week < {max_week} AND carries >= 5
+                    GROUP BY player_display_name, team
+                    HAVING SUM(carries + targets) >= 50
+                ) qualified_rbs
+                ON ps.player_display_name = qualified_rbs.player_display_name
+                   AND ps.team = qualified_rbs.team
+                WHERE ps.season = {season} AND ps.week < {max_week}
+                  AND ps.opponent_team = '{team}'
             """
             rush_df = pd.read_sql_query(rush_query, conn)
 
@@ -1711,6 +1721,7 @@ def calculate_defensive_stats(season, max_week):
 def calculate_rb_rankings_and_opponent_quality(season, max_week):
     """
     Calculate RB rankings by average rushing yards and track opponent quality faced by each defense.
+    Uses 50+ total touches threshold to filter out backups and QBs.
 
     Returns:
         rb_rankings: dict {player_name: rank} where 1 = best RB
@@ -1719,18 +1730,19 @@ def calculate_rb_rankings_and_opponent_quality(season, max_week):
     try:
         conn = sqlite3.connect(DB_PATH)
 
-        # Get all RBs with their average rushing yards per game
+        # Get all RBs with 50+ total touches (excludes QBs and deep backups)
         rb_query = f"""
             SELECT
                 player_display_name as player,
                 team,
                 AVG(rushing_yards) as avg_rush_yds,
+                SUM(carries + targets) as total_touches,
                 COUNT(*) as games
             FROM player_stats
             WHERE season = {season} AND week < {max_week}
               AND carries >= 5
             GROUP BY player_display_name, team
-            HAVING games >= 2
+            HAVING total_touches >= 50
             ORDER BY avg_rush_yds DESC
         """
         rb_df = pd.read_sql_query(rb_query, conn)
@@ -1744,16 +1756,25 @@ def calculate_rb_rankings_and_opponent_quality(season, max_week):
                 'team': row.team
             }
 
-        # Track which RBs each defense faced
+        # Track which RBs each defense faced (only RBs with 50+ touches)
+        # This excludes QBs and backup RBs
         defense_opponents_query = f"""
             SELECT
-                opponent_team as defense,
-                player_display_name as rb_name,
-                AVG(rushing_yards) as avg_yds
-            FROM player_stats
-            WHERE season = {season} AND week < {max_week}
-              AND carries >= 5
-            GROUP BY opponent_team, player_display_name
+                ps.opponent_team as defense,
+                ps.player_display_name as rb_name,
+                AVG(ps.rushing_yards) as avg_yds
+            FROM player_stats ps
+            INNER JOIN (
+                SELECT player_display_name, team
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week} AND carries >= 5
+                GROUP BY player_display_name, team
+                HAVING SUM(carries + targets) >= 50
+            ) qualified_rbs
+            ON ps.player_display_name = qualified_rbs.player_display_name
+               AND ps.team = qualified_rbs.team
+            WHERE ps.season = {season} AND ps.week < {max_week}
+            GROUP BY ps.opponent_team, ps.player_display_name
         """
         def_opponents_df = pd.read_sql_query(defense_opponents_query, conn)
 

@@ -4471,12 +4471,31 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
     df = query(sql, tuple(params))
 
     # Query player stats
-    player_sql = "SELECT * FROM player_box_score WHERE season=? AND team IN (?, ?)"
-    player_params = [season, team1, team2]
+    player_sql = f"""
+        SELECT
+            player_display_name as player,
+            team,
+            week,
+            season,
+            opponent_team as opponent,
+            completions as pass_comp,
+            attempts as pass_att,
+            passing_yards as pass_yds,
+            passing_tds as pass_td,
+            passing_interceptions as pass_int,
+            carries as rush_att,
+            rushing_yards as rush_yds,
+            rushing_tds as rush_td,
+            receptions as rec,
+            targets,
+            receiving_yards as rec_yds,
+            receiving_tds as rec_td
+        FROM player_stats
+        WHERE season={season} AND team IN ('{team1}', '{team2}')
+    """
     if week:
-        player_sql += " AND week<=?"
-        player_params.append(week)
-    players_df = query(player_sql, tuple(player_params))
+        player_sql += f" AND week<={week}"
+    players_df = query(player_sql)
 
     # Query head-to-head games
     h2h_sql = """
@@ -6125,23 +6144,34 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             pass_stats = pass_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            # Note: Don't select 'week' from games table since players_df already has it
-            games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
-            games_info = query(games_query)
-            pass_players_with_games = players_df[players_df['pass_att'] > 0].merge(games_info, on='game_id', how='left')
+            # Note: player_stats already has opponent column from query
+            pass_players_with_games = players_df[players_df['pass_att'] > 0].copy()
 
-            # Add opponent column
-            def get_pass_opponent(row):
-                if row['team'] == row['home_team_abbr']:
-                    return row['away_team_abbr']
-                else:
-                    return row['home_team_abbr']
+            # Get schedule info to determine home/away games
+            schedules_query = f"""
+                SELECT week, season, away_team, home_team
+                FROM schedules
+                WHERE season={season}
+            """
+            schedules_info = query(schedules_query)
 
-            def is_pass_away_game(row):
-                return row['team'] == row['away_team_abbr']
+            # Create a temporary merge column combining week, season, team, opponent
+            # This helps us join with schedules to determine home/away
+            def determine_is_away(row):
+                # Find the game in schedules
+                game = schedules_info[
+                    (schedules_info['week'] == row['week']) &
+                    (schedules_info['season'] == row['season']) &
+                    (
+                        ((schedules_info['home_team'] == row['team']) & (schedules_info['away_team'] == row['opponent'])) |
+                        ((schedules_info['away_team'] == row['team']) & (schedules_info['home_team'] == row['opponent']))
+                    )
+                ]
+                if not game.empty:
+                    return row['team'] == game.iloc[0]['away_team']
+                return False  # Default to home if not found
 
-            pass_players_with_games['opponent'] = pass_players_with_games.apply(get_pass_opponent, axis=1)
-            pass_players_with_games['is_away'] = pass_players_with_games.apply(is_pass_away_game, axis=1)
+            pass_players_with_games['is_away'] = pass_players_with_games.apply(determine_is_away, axis=1)
 
             col1, col2 = st.columns(2)
 
@@ -6150,16 +6180,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 t1_passers = pass_stats[pass_stats['team'] == team1].head(3)
                 if not t1_passers.empty:
                     t1_pass_display = t1_passers.copy()
-                    t1_pass_display['Comp%'] = (t1_pass_display['total_cmp'] / t1_pass_display['total_att'] * 100).round(1)
-                    t1_pass_display = t1_pass_display[['player', 'games', 'total_yds', 'avg_yds', 'total_td', 'avg_td', 'total_int', 'Comp%', 'avg_rating']].copy()
-                    t1_pass_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot TD', 'Avg TD', 'INT', 'Comp%', 'Rating']
+                    t1_pass_display['Comp%'] = (t1_pass_display['total_comp'] / t1_pass_display['total_att'] * 100).round(1)
+                    t1_pass_display = t1_pass_display[['player', 'games', 'total_yds', 'avg_yds', 'total_td', 'avg_td', 'total_int', 'Comp%']].copy()
+                    t1_pass_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot TD', 'Avg TD', 'INT', 'Comp%']
                     t1_pass_display['Games'] = t1_pass_display['Games'].astype(int)
                     t1_pass_display['Tot Yds'] = t1_pass_display['Tot Yds'].astype(int)
                     t1_pass_display['Avg Yds'] = t1_pass_display['Avg Yds'].round(1)
                     t1_pass_display['Tot TD'] = t1_pass_display['Tot TD'].astype(int)
                     t1_pass_display['Avg TD'] = t1_pass_display['Avg TD'].round(1)
                     t1_pass_display['INT'] = t1_pass_display['INT'].astype(int)
-                    t1_pass_display['Rating'] = t1_pass_display['Rating'].round(1)
                     st.dataframe(t1_pass_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details for QBs
@@ -6174,8 +6203,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total_att = pass_players_with_games[(pass_players_with_games['game_id'] == row['game_id']) &
-                                                                             (pass_players_with_games['team'] == row['team'])]['pass_att'].sum()
+                                    team_total_att = pass_players_with_games[
+                                        (pass_players_with_games['week'] == row['week']) &
+                                        (pass_players_with_games['season'] == row['season']) &
+                                        (pass_players_with_games['team'] == row['team'])
+                                    ]['pass_att'].sum()
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
@@ -6221,8 +6253,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total_att = pass_players_with_games[(pass_players_with_games['game_id'] == row['game_id']) &
-                                                                             (pass_players_with_games['team'] == row['team'])]['pass_att'].sum()
+                                    team_total_att = pass_players_with_games[
+                                        (pass_players_with_games['week'] == row['week']) &
+                                        (pass_players_with_games['season'] == row['season']) &
+                                        (pass_players_with_games['team'] == row['team'])
+                                    ]['pass_att'].sum()
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
@@ -6254,45 +6289,32 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             rush_stats = rush_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            # Note: Don't select 'week' from games table since players_df already has it
-            games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
-            games_info = query(games_query)
-            players_with_games = players_df[players_df['rush_att'] > 0].merge(games_info, on='game_id', how='left')
+            # Note: player_stats already has opponent column from query
+            players_with_games = players_df[players_df['rush_att'] > 0].copy()
 
-            # Get touchdown_scorers data for first TD flags
-            td_scorers_query = f"SELECT game_id, player, team, touchdown_type, first_td_game, first_td_for_team FROM touchdown_scorers WHERE season={season} AND touchdown_type='Rushing'"
-            td_scorers = query(td_scorers_query)
-            if not td_scorers.empty:
-                # Aggregate by game_id, player, team to handle multiple TDs in same game
-                td_scorers_agg = td_scorers.groupby(['game_id', 'player', 'team']).agg({
-                    'first_td_game': 'max',
-                    'first_td_for_team': 'max'
-                }).reset_index()
-                players_with_games = players_with_games.merge(
-                    td_scorers_agg,
-                    on=['game_id', 'player', 'team'],
-                    how='left'
-                )
-            else:
-                players_with_games['first_td_game'] = 0
-                players_with_games['first_td_for_team'] = 0
+            # Get schedule info to determine home/away games
+            schedules_query = f"""
+                SELECT week, season, away_team, home_team
+                FROM schedules
+                WHERE season={season}
+            """
+            schedules_info = query(schedules_query)
 
-            # Add opponent column
-            def get_opponent(row):
-                if row['team'] == row['home_team_abbr']:
-                    return row['away_team_abbr']
-                else:
-                    return row['home_team_abbr']
+            # Determine if away game
+            def determine_is_away(row):
+                game = schedules_info[
+                    (schedules_info['week'] == row['week']) &
+                    (schedules_info['season'] == row['season']) &
+                    (
+                        ((schedules_info['home_team'] == row['team']) & (schedules_info['away_team'] == row['opponent'])) |
+                        ((schedules_info['away_team'] == row['team']) & (schedules_info['home_team'] == row['opponent']))
+                    )
+                ]
+                if not game.empty:
+                    return row['team'] == game.iloc[0]['away_team']
+                return False
 
-            def is_away_game(row):
-                return row['team'] == row['away_team_abbr']
-
-            players_with_games['opponent'] = players_with_games.apply(get_opponent, axis=1)
-            players_with_games['is_away'] = players_with_games.apply(is_away_game, axis=1)
-
-            # Fill NaN values in first TD columns with 0
-            players_with_games['first_td_game'] = players_with_games['first_td_game'].fillna(0).astype(int)
-            players_with_games['first_td_for_team'] = players_with_games['first_td_for_team'].fillna(0).astype(int)
+            players_with_games['is_away'] = players_with_games.apply(determine_is_away, axis=1)
 
             col1, col2 = st.columns(2)
 
@@ -6324,8 +6346,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total = players_with_games[(players_with_games['game_id'] == row['game_id']) &
-                                                                   (players_with_games['team'] == row['team'])]['rush_att'].sum()
+                                    team_total = players_with_games[
+                                        (players_with_games['week'] == row['week']) &
+                                        (players_with_games['season'] == row['season']) &
+                                        (players_with_games['team'] == row['team'])
+                                    ]['rush_att'].sum()
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
@@ -6334,8 +6359,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
                                         'TD': int(row['rush_td']),
-                                        '1st Game': 'Yes' if row['first_td_game'] == 1 else 'No',
-                                        '1st Team': 'Yes' if row['first_td_for_team'] == 1 else 'No',
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6371,8 +6394,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total = players_with_games[(players_with_games['game_id'] == row['game_id']) &
-                                                                   (players_with_games['team'] == row['team'])]['rush_att'].sum()
+                                    team_total = players_with_games[
+                                        (players_with_games['week'] == row['week']) &
+                                        (players_with_games['season'] == row['season']) &
+                                        (players_with_games['team'] == row['team'])
+                                    ]['rush_att'].sum()
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     game_data.append({
@@ -6381,8 +6407,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
                                         'TD': int(row['rush_td']),
-                                        '1st Game': 'Yes' if row['first_td_game'] == 1 else 'No',
-                                        '1st Team': 'Yes' if row['first_td_for_team'] == 1 else 'No',
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6405,40 +6429,32 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             rec_stats = rec_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
-            # Note: Don't select 'week' from games table since players_df already has it
-            rec_games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
-            rec_games_info = query(rec_games_query)
-            rec_players_with_games = players_df[players_df['rec'] > 0].merge(rec_games_info, on='game_id', how='left')
+            # Note: player_stats already has opponent column from query
+            rec_players_with_games = players_df[players_df['rec'] > 0].copy()
 
-            # Get touchdown_scorers data for first TD flags
-            rec_td_scorers_query = f"SELECT game_id, player, team, touchdown_type, first_td_game, first_td_for_team FROM touchdown_scorers WHERE season={season} AND touchdown_type='Receiving'"
-            rec_td_scorers = query(rec_td_scorers_query)
-            if not rec_td_scorers.empty:
-                # Aggregate by game_id, player, team to handle multiple TDs in same game
-                rec_td_scorers_agg = rec_td_scorers.groupby(['game_id', 'player', 'team']).agg({
-                    'first_td_game': 'max',
-                    'first_td_for_team': 'max'
-                }).reset_index()
-                rec_players_with_games = rec_players_with_games.merge(
-                    rec_td_scorers_agg,
-                    on=['game_id', 'player', 'team'],
-                    how='left'
-                )
-            else:
-                rec_players_with_games['first_td_game'] = 0
-                rec_players_with_games['first_td_for_team'] = 0
+            # Get schedule info to determine home/away games
+            schedules_query = f"""
+                SELECT week, season, away_team, home_team
+                FROM schedules
+                WHERE season={season}
+            """
+            schedules_info = query(schedules_query)
 
-            # Add opponent column
-            rec_players_with_games['opponent'] = rec_players_with_games.apply(
-                lambda row: row['away_team_abbr'] if row['team'] == row['home_team_abbr'] else row['home_team_abbr'], axis=1
-            )
-            rec_players_with_games['is_away'] = rec_players_with_games.apply(
-                lambda row: row['team'] == row['away_team_abbr'], axis=1
-            )
+            # Determine if away game
+            def determine_is_away_rec(row):
+                game = schedules_info[
+                    (schedules_info['week'] == row['week']) &
+                    (schedules_info['season'] == row['season']) &
+                    (
+                        ((schedules_info['home_team'] == row['team']) & (schedules_info['away_team'] == row['opponent'])) |
+                        ((schedules_info['away_team'] == row['team']) & (schedules_info['home_team'] == row['opponent']))
+                    )
+                ]
+                if not game.empty:
+                    return row['team'] == game.iloc[0]['away_team']
+                return False
 
-            # Fill NaN values in first TD columns with 0
-            rec_players_with_games['first_td_game'] = rec_players_with_games['first_td_game'].fillna(0).astype(int)
-            rec_players_with_games['first_td_for_team'] = rec_players_with_games['first_td_for_team'].fillna(0).astype(int)
+            rec_players_with_games['is_away'] = rec_players_with_games.apply(determine_is_away_rec, axis=1)
 
             col1, col2 = st.columns(2)
 
@@ -6450,7 +6466,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t1_rec_display['YPR'] = (t1_rec_display['total_yds'] / t1_rec_display['total_rec']).round(1)
                     t1_rec_display['Catch%'] = (t1_rec_display['total_rec'] / t1_rec_display['total_tgt'] * 100).round(1)
                     t1_rec_display['Rec/G'] = (t1_rec_display['total_rec'] / t1_rec_display['games']).round(1)
-                    t1_rec_display = t1_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'long']].copy()
+                    t1_rec_display = t1_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'max_yds']].copy()
                     t1_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'Catch%', 'Long']
                     t1_rec_display['Games'] = t1_rec_display['Games'].astype(int)
                     t1_rec_display['Tot Yds'] = t1_rec_display['Tot Yds'].astype(int)
@@ -6472,10 +6488,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total_tgt = rec_players_with_games[(rec_players_with_games['game_id'] == row['game_id']) &
-                                                                            (rec_players_with_games['team'] == row['team'])]['targets'].sum()
-                                    team_total_rec = rec_players_with_games[(rec_players_with_games['game_id'] == row['game_id']) &
-                                                                            (rec_players_with_games['team'] == row['team'])]['rec'].sum()
+                                    team_total_tgt = rec_players_with_games[
+                                        (rec_players_with_games['week'] == row['week']) &
+                                        (rec_players_with_games['season'] == row['season']) &
+                                        (rec_players_with_games['team'] == row['team'])
+                                    ]['targets'].sum()
+                                    team_total_rec = rec_players_with_games[
+                                        (rec_players_with_games['week'] == row['week']) &
+                                        (rec_players_with_games['season'] == row['season']) &
+                                        (rec_players_with_games['team'] == row['team'])
+                                    ]['rec'].sum()
                                     tgt_pct = (row['targets'] / team_total_tgt * 100) if team_total_tgt > 0 else 0
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
@@ -6485,8 +6507,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
                                         'TD': int(row['rec_td']),
-                                        '1st Game': 'Yes' if row['first_td_game'] == 1 else 'No',
-                                        '1st Team': 'Yes' if row['first_td_for_team'] == 1 else 'No',
                                         'Tgt %': f"{tgt_pct:.0f}%",
                                         'Rec %': f"{rec_pct:.0f}%"
                                     })
@@ -6525,10 +6545,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 # Build dataframe for last 3 games
                                 game_data = []
                                 for _, row in last_3.iterrows():
-                                    team_total_tgt = rec_players_with_games[(rec_players_with_games['game_id'] == row['game_id']) &
-                                                                            (rec_players_with_games['team'] == row['team'])]['targets'].sum()
-                                    team_total_rec = rec_players_with_games[(rec_players_with_games['game_id'] == row['game_id']) &
-                                                                            (rec_players_with_games['team'] == row['team'])]['rec'].sum()
+                                    team_total_tgt = rec_players_with_games[
+                                        (rec_players_with_games['week'] == row['week']) &
+                                        (rec_players_with_games['season'] == row['season']) &
+                                        (rec_players_with_games['team'] == row['team'])
+                                    ]['targets'].sum()
+                                    team_total_rec = rec_players_with_games[
+                                        (rec_players_with_games['week'] == row['week']) &
+                                        (rec_players_with_games['season'] == row['season']) &
+                                        (rec_players_with_games['team'] == row['team'])
+                                    ]['rec'].sum()
                                     tgt_pct = (row['targets'] / team_total_tgt * 100) if team_total_tgt > 0 else 0
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
@@ -6538,8 +6564,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
                                         'TD': int(row['rec_td']),
-                                        '1st Game': 'Yes' if row['first_td_game'] == 1 else 'No',
-                                        '1st Team': 'Yes' if row['first_td_for_team'] == 1 else 'No',
                                         'Tgt %': f"{tgt_pct:.0f}%",
                                         'Rec %': f"{rec_pct:.0f}%"
                                     })

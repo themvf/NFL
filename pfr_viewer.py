@@ -1673,6 +1673,18 @@ def calculate_defensive_stats(season, max_week):
             """
             rec_te_df = pd.read_sql_query(rec_te_query, conn)
 
+            # Get advanced defensive stats from pfr_advstats_def_week
+            def_adv_query = f"""
+                SELECT
+                    SUM(def_ints) as total_def_ints,
+                    SUM(def_times_blitzed) as total_blitzes,
+                    SUM(def_times_hurried) as total_hurries,
+                    SUM(def_sacks) as total_sacks
+                FROM pfr_advstats_def_week
+                WHERE season = {season} AND week < {max_week} AND team = '{team}'
+            """
+            def_adv_df = pd.read_sql_query(def_adv_query, conn)
+
             defensive_stats[team] = {
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
                 'pass_td_allowed': pass_df['total_pass_td_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['total_pass_td_allowed'].iloc[0]) else 0,
@@ -1681,7 +1693,11 @@ def calculate_defensive_stats(season, max_week):
                 'rec_to_rb': rec_rb_df['avg_rec_to_rb'].iloc[0] if not rec_rb_df.empty and not pd.isna(rec_rb_df['avg_rec_to_rb'].iloc[0]) else 20,
                 'rec_to_wr': rec_wr_df['avg_rec_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['avg_rec_to_wr'].iloc[0]) else 60,
                 'rec_td_to_wr': rec_wr_df['total_rec_td_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['total_rec_td_to_wr'].iloc[0]) else 0,
-                'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40
+                'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40,
+                'def_ints': def_adv_df['total_def_ints'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_def_ints'].iloc[0]) else 0,
+                'def_blitzes': def_adv_df['total_blitzes'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_blitzes'].iloc[0]) else 0,
+                'def_hurries': def_adv_df['total_hurries'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_hurries'].iloc[0]) else 0,
+                'def_sacks': def_adv_df['total_sacks'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_sacks'].iloc[0]) else 0
             }
 
         conn.close()
@@ -1708,6 +1724,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                 team,
                 passing_yards as pass_yds,
                 passing_tds as pass_td,
+                passing_interceptions as pass_int,
                 completions as pass_comp,
                 attempts as pass_att,
                 rushing_yards as rush_yds,
@@ -1759,6 +1776,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rush_yds': group['rush_yds'].median(),
                     'total_pass_td': group['pass_td'].sum(),
                     'total_rush_td': group['rush_td'].sum(),
+                    'total_pass_int': group['pass_int'].sum(),
                     'median_pass_comp_pct': (group['pass_comp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
                 })
 
@@ -1926,10 +1944,15 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
                     'Pass TDs': int(player['total_pass_td']),
+                    'Pass INTs': int(player['total_pass_int']),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Def Pass TDs': int(opponent_def['pass_td_allowed']),
+                    'Def INTs': int(opponent_def['def_ints']),
+                    'Def Blitzes': int(opponent_def['def_blitzes']),
+                    'Def Hurries': int(opponent_def['def_hurries']),
+                    'Def Sacks': int(opponent_def['def_sacks']),
                     'Def Pass Rank': def_pass_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),

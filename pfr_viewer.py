@@ -1610,88 +1610,68 @@ def calculate_defensive_stats(season, max_week):
     try:
         conn = sqlite3.connect(DB_PATH)
 
-        # Get all teams
-        teams_query = "SELECT DISTINCT team FROM player_box_score WHERE season = ?"
-        teams_df = pd.read_sql_query(teams_query, conn, params=(season,))
+        # Get all teams from player_stats table
+        teams_query = f"SELECT DISTINCT team FROM player_stats WHERE season = {season}"
+        teams_df = pd.read_sql_query(teams_query, conn)
         teams = teams_df['team'].tolist()
 
         defensive_stats = {}
 
         for team in teams:
             # Pass yards and TDs allowed (opponent QBs)
-            # Join with games to find players who played AGAINST this team
-            pass_query = """
+            # Use opponent_team field to find players who played AGAINST this team
+            pass_query = f"""
                 SELECT
-                    AVG(p.pass_yds) as avg_pass_allowed,
-                    SUM(p.pass_td) as total_pass_td_allowed
-                FROM player_box_score p
-                JOIN games g ON p.season = g.season AND p.week = g.week
-                WHERE p.season = ? AND p.week < ? AND p.pass_att > 10
-                  AND (
-                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
-                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
-                  )
+                    AVG(passing_yards) as avg_pass_allowed,
+                    SUM(passing_tds) as total_pass_td_allowed
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week} AND attempts > 10
+                  AND opponent_team = '{team}'
             """
-            pass_df = pd.read_sql_query(pass_query, conn, params=(season, max_week, team, team))
+            pass_df = pd.read_sql_query(pass_query, conn)
 
             # Rush yards and TDs allowed (opponent RBs)
-            rush_query = """
+            rush_query = f"""
                 SELECT
-                    AVG(p.rush_yds) as avg_rush_allowed,
-                    SUM(p.rush_td) as total_rush_td_allowed
-                FROM player_box_score p
-                JOIN games g ON p.season = g.season AND p.week = g.week
-                WHERE p.season = ? AND p.week < ? AND p.rush_att >= 5
-                  AND (
-                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
-                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
-                  )
+                    AVG(rushing_yards) as avg_rush_allowed,
+                    SUM(rushing_tds) as total_rush_td_allowed
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week} AND carries >= 5
+                  AND opponent_team = '{team}'
             """
-            rush_df = pd.read_sql_query(rush_query, conn, params=(season, max_week, team, team))
+            rush_df = pd.read_sql_query(rush_query, conn)
 
             # Receiving yards allowed to RBs (opponents with rush + rec)
-            rec_rb_query = """
-                SELECT AVG(p.rec_yds) as avg_rec_to_rb
-                FROM player_box_score p
-                JOIN games g ON p.season = g.season AND p.week = g.week
-                WHERE p.season = ? AND p.week < ?
-                  AND p.rush_att >= 5 AND p.targets > 0
-                  AND (
-                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
-                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
-                  )
+            rec_rb_query = f"""
+                SELECT AVG(receiving_yards) as avg_rec_to_rb
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week}
+                  AND carries >= 5 AND targets > 0
+                  AND opponent_team = '{team}'
             """
-            rec_rb_df = pd.read_sql_query(rec_rb_query, conn, params=(season, max_week, team, team))
+            rec_rb_df = pd.read_sql_query(rec_rb_query, conn)
 
             # Receiving yards and TDs allowed to WRs
-            rec_wr_query = """
+            rec_wr_query = f"""
                 SELECT
-                    AVG(p.rec_yds) as avg_rec_to_wr,
-                    SUM(p.rec_td) as total_rec_td_to_wr
-                FROM player_box_score p
-                JOIN games g ON p.season = g.season AND p.week = g.week
-                WHERE p.season = ? AND p.week < ?
-                  AND p.targets >= 4 AND p.rush_att < 3
-                  AND (
-                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
-                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
-                  )
+                    AVG(receiving_yards) as avg_rec_to_wr,
+                    SUM(receiving_tds) as total_rec_td_to_wr
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week}
+                  AND targets >= 4 AND carries < 3
+                  AND opponent_team = '{team}'
             """
-            rec_wr_df = pd.read_sql_query(rec_wr_query, conn, params=(season, max_week, team, team))
+            rec_wr_df = pd.read_sql_query(rec_wr_query, conn)
 
             # Receiving yards allowed to TEs
-            rec_te_query = """
-                SELECT AVG(p.rec_yds) as avg_rec_to_te
-                FROM player_box_score p
-                JOIN games g ON p.season = g.season AND p.week = g.week
-                WHERE p.season = ? AND p.week < ?
-                  AND p.targets >= 2 AND p.targets < 10 AND p.rush_att < 2
-                  AND (
-                    (p.team = g.away_team_abbr AND g.home_team_abbr = ?) OR
-                    (p.team = g.home_team_abbr AND g.away_team_abbr = ?)
-                  )
+            rec_te_query = f"""
+                SELECT AVG(receiving_yards) as avg_rec_to_te
+                FROM player_stats
+                WHERE season = {season} AND week < {max_week}
+                  AND targets >= 2 AND targets < 10 AND carries < 2
+                  AND opponent_team = '{team}'
             """
-            rec_te_df = pd.read_sql_query(rec_te_query, conn, params=(season, max_week, team, team))
+            rec_te_df = pd.read_sql_query(rec_te_query, conn)
 
             defensive_stats[team] = {
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
@@ -1721,34 +1701,31 @@ def calculate_player_medians(season, max_week, teams_playing=None):
     try:
         conn = sqlite3.connect(DB_PATH)
 
-        # Base query for all players
-        base_query = """
+        # Base query for all players - updated for player_stats table
+        base_query = f"""
             SELECT
-                player,
+                player_display_name as player,
                 team,
-                pass_yds,
-                pass_td,
-                pass_comp,
-                pass_att,
-                rush_yds,
-                rush_att,
-                rec_yds,
-                rec,
+                passing_yards as pass_yds,
+                passing_tds as pass_td,
+                completions as pass_comp,
+                attempts as pass_att,
+                rushing_yards as rush_yds,
+                carries as rush_att,
+                receiving_yards as rec_yds,
+                receptions as rec,
                 targets,
-                rush_td,
-                rec_td
-            FROM player_box_score
-            WHERE season = ? AND week < ?
+                rushing_tds as rush_td,
+                receiving_tds as rec_td
+            FROM player_stats
+            WHERE season = {season} AND week < {max_week}
         """
 
-        params = [season, max_week]
-
         if teams_playing:
-            placeholders = ','.join(['?' for _ in teams_playing])
-            base_query += f" AND team IN ({placeholders})"
-            params.extend(teams_playing)
+            teams_list = "', '".join(teams_playing)
+            base_query += f" AND team IN ('{teams_list}')"
 
-        df = pd.read_sql_query(base_query, conn, params=params)
+        df = pd.read_sql_query(base_query, conn)
         conn.close()
 
         if df.empty:

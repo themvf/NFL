@@ -1871,22 +1871,23 @@ def generate_player_projections(season, week, teams_playing):
         # Get matchups and injured players from database
         conn = sqlite3.connect(DB_PATH)
 
-        matchups_query = """
+        # Query from schedules table instead of upcoming_games
+        matchups_query = f"""
             SELECT home_team, away_team
-            FROM upcoming_games
-            WHERE season = ? AND week = ?
+            FROM schedules
+            WHERE season = {season} AND week = {week} AND game_type = 'REG'
         """
-        matchups_df = pd.read_sql_query(matchups_query, conn, params=(season, week))
+        matchups_df = pd.read_sql_query(matchups_query, conn)
 
         # Get injured players for this week
-        injuries_query = """
+        injuries_query = f"""
             SELECT player_name, team_abbr
             FROM player_injuries
-            WHERE season = ?
-              AND ? >= start_week
-              AND ? <= end_week
+            WHERE season = {season}
+              AND {week} >= start_week
+              AND {week} <= end_week
         """
-        injuries_df = pd.read_sql_query(injuries_query, conn, params=(season, week, week))
+        injuries_df = pd.read_sql_query(injuries_query, conn)
 
         conn.close()
 

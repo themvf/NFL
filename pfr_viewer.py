@@ -1708,6 +1708,86 @@ def calculate_defensive_stats(season, max_week):
         return {}
 
 
+def calculate_rb_rankings_and_opponent_quality(season, max_week):
+    """
+    Calculate RB rankings by average rushing yards and track opponent quality faced by each defense.
+
+    Returns:
+        rb_rankings: dict {player_name: rank} where 1 = best RB
+        defense_opponent_quality: dict {team: avg_opponent_rb_rank}
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Get all RBs with their average rushing yards per game
+        rb_query = f"""
+            SELECT
+                player_display_name as player,
+                team,
+                AVG(rushing_yards) as avg_rush_yds,
+                COUNT(*) as games
+            FROM player_stats
+            WHERE season = {season} AND week < {max_week}
+              AND carries >= 5
+            GROUP BY player_display_name, team
+            HAVING games >= 2
+            ORDER BY avg_rush_yds DESC
+        """
+        rb_df = pd.read_sql_query(rb_query, conn)
+
+        # Create rankings: 1 = highest avg rushing yards
+        rb_rankings = {}
+        for rank, row in enumerate(rb_df.itertuples(), 1):
+            rb_rankings[row.player] = {
+                'rank': rank,
+                'avg_rush_yds': row.avg_rush_yds,
+                'team': row.team
+            }
+
+        # Track which RBs each defense faced
+        defense_opponents_query = f"""
+            SELECT
+                opponent_team as defense,
+                player_display_name as rb_name,
+                AVG(rushing_yards) as avg_yds
+            FROM player_stats
+            WHERE season = {season} AND week < {max_week}
+              AND carries >= 5
+            GROUP BY opponent_team, player_display_name
+        """
+        def_opponents_df = pd.read_sql_query(defense_opponents_query, conn)
+
+        # Calculate average opponent RB rank for each defense
+        defense_opponent_quality = {}
+        for defense in def_opponents_df['defense'].unique():
+            rbs_faced = def_opponents_df[def_opponents_df['defense'] == defense]['rb_name'].tolist()
+
+            # Get ranks of RBs faced (only those in our rankings)
+            ranks_faced = [rb_rankings[rb]['rank'] for rb in rbs_faced if rb in rb_rankings]
+
+            if ranks_faced:
+                defense_opponent_quality[defense] = {
+                    'avg_opponent_rank': sum(ranks_faced) / len(ranks_faced),
+                    'num_rbs_faced': len(ranks_faced),
+                    'best_rb_rank': min(ranks_faced),
+                    'worst_rb_rank': max(ranks_faced)
+                }
+            else:
+                defense_opponent_quality[defense] = {
+                    'avg_opponent_rank': 0,
+                    'num_rbs_faced': 0,
+                    'best_rb_rank': 0,
+                    'worst_rb_rank': 0
+                }
+
+        conn.close()
+        return rb_rankings, defense_opponent_quality
+
+    except Exception as e:
+        st.error(f"Error calculating RB rankings: {e}")
+        return {}, {}
+
+
 def calculate_player_medians(season, max_week, teams_playing=None):
     """
     Calculate median stats for all players by position.
@@ -1843,6 +1923,9 @@ def generate_player_projections(season, week, teams_playing):
         # Calculate defensive stats
         defensive_stats = calculate_defensive_stats(season, week)
 
+        # Calculate RB rankings and opponent quality
+        rb_rankings, defense_opponent_quality = calculate_rb_rankings_and_opponent_quality(season, week)
+
         # Calculate defensive rankings for yards allowed by position
         # Lower yards = better defense = lower rank number (1 = best, 32 = worst)
         def_pass_ranking = {}
@@ -1972,10 +2055,16 @@ def generate_player_projections(season, week, teams_playing):
                 # Calculate combined median total yards
                 combined_median = player['median_rush_yds'] + player['median_rec_yds']
 
+                # Get RB ranking and opponent quality
+                rb_rank = rb_rankings.get(player['player'], {}).get('rank', 999)
+                opp_quality = defense_opponent_quality.get(opponent, {})
+                avg_opp_rank = opp_quality.get('avg_opponent_rank', 0)
+
                 projections['RB'].append({
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'RB Rank': rb_rank,
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush': round(player['median_rush_yds'], 1),
                     'Median Rec': round(player['median_rec_yds'], 1),
@@ -1983,6 +2072,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
                     'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
+                    'Def Avg Opp RB Rank': round(avg_opp_rank, 1) if avg_opp_rank > 0 else 0,
                     'Def Rush TDs': int(opponent_def['rush_td_allowed']),
                     'Def Rush Rank': def_rush_ranking.get(opponent, 16),
                     'Projected Total': round(proj_total, 1),

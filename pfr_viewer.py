@@ -1900,6 +1900,10 @@ def calculate_player_medians(season, max_week, teams_playing=None):
             # WR: High targets, low rushing
             elif avg_targets >= 4 and avg_rush_att < 3:
                 position = 'WR'
+
+                # Calculate last 3 games averages
+                last_3_games = group.tail(3) if len(group) >= 3 else group
+
                 stats.update({
                     'avg_rec_yds': group['rec_yds'].mean(),
                     'median_rec_yds': group['rec_yds'].median(),
@@ -1908,6 +1912,10 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rush_td': group['rush_td'].median(),
                     'total_rush_td': group['rush_td'].sum(),
                     'total_rec_td': group['rec_td'].sum(),
+                    'total_targets': group['targets'].sum(),
+                    'total_receptions': group['rec'].sum(),
+                    'last_3_avg_targets': last_3_games['targets'].mean(),
+                    'last_3_avg_receptions': last_3_games['rec'].mean(),
                     'median_rec': group['rec'].median()
                 })
 
@@ -2127,6 +2135,10 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
+                    'Total Targets': int(player['total_targets']),
+                    'Total Receptions': int(player['total_receptions']),
+                    'Last 3 Avg Tgts': round(player['last_3_avg_targets'], 1),
+                    'Last 3 Avg Rec': round(player['last_3_avg_receptions'], 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
                     'Def Rec Yds': round(opponent_def['rec_to_wr'], 1),

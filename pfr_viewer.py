@@ -6115,14 +6115,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 'pass_yds': ['mean', 'median', 'max', 'min', 'sum', 'count'],
                 'pass_td': ['mean', 'sum'],
                 'pass_int': ['sum'],
-                'pass_cmp': ['sum'],
-                'pass_att': ['sum'],
-                'pass_rating': ['mean']
+                'pass_comp': ['sum'],
+                'pass_att': ['sum']
             }).reset_index()
 
             # Flatten column names
             pass_stats.columns = ['team', 'player', 'avg_yds', 'med_yds', 'max_yds', 'min_yds', 'total_yds', 'games',
-                                  'avg_td', 'total_td', 'total_int', 'total_cmp', 'total_att', 'avg_rating']
+                                  'avg_td', 'total_td', 'total_int', 'total_comp', 'total_att']
             pass_stats = pass_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games

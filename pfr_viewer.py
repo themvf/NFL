@@ -1728,7 +1728,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                 team,
                 pass_yds,
                 pass_td,
-                pass_cmp,
+                pass_comp,
                 pass_att,
                 rush_yds,
                 rush_att,
@@ -1782,7 +1782,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rush_yds': group['rush_yds'].median(),
                     'total_pass_td': group['pass_td'].sum(),
                     'total_rush_td': group['rush_td'].sum(),
-                    'median_pass_cmp_pct': (group['pass_cmp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
+                    'median_pass_comp_pct': (group['pass_comp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
                 })
 
             # RB: High rush attempts
@@ -6178,7 +6178,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                                                              (pass_players_with_games['team'] == row['team'])]['pass_att'].sum()
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
-                                    cmp_att = f"{int(row['pass_cmp'])}/{int(row['pass_att'])}"
+                                    cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
@@ -6186,7 +6186,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
                                         'INT': int(row['pass_int']),
-                                        'Rating': round(row['pass_rating'], 1) if pd.notna(row['pass_rating']) else 0.0,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6199,16 +6198,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 t2_passers = pass_stats[pass_stats['team'] == team2].head(3)
                 if not t2_passers.empty:
                     t2_pass_display = t2_passers.copy()
-                    t2_pass_display['Comp%'] = (t2_pass_display['total_cmp'] / t2_pass_display['total_att'] * 100).round(1)
-                    t2_pass_display = t2_pass_display[['player', 'games', 'total_yds', 'avg_yds', 'total_td', 'avg_td', 'total_int', 'Comp%', 'avg_rating']].copy()
-                    t2_pass_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot TD', 'Avg TD', 'INT', 'Comp%', 'Rating']
+                    t2_pass_display['Comp%'] = (t2_pass_display['total_comp'] / t2_pass_display['total_att'] * 100).round(1)
+                    t2_pass_display = t2_pass_display[['player', 'games', 'total_yds', 'avg_yds', 'total_td', 'avg_td', 'total_int', 'Comp%']].copy()
+                    t2_pass_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot TD', 'Avg TD', 'INT', 'Comp%']
                     t2_pass_display['Games'] = t2_pass_display['Games'].astype(int)
                     t2_pass_display['Tot Yds'] = t2_pass_display['Tot Yds'].astype(int)
                     t2_pass_display['Avg Yds'] = t2_pass_display['Avg Yds'].round(1)
                     t2_pass_display['Tot TD'] = t2_pass_display['Tot TD'].astype(int)
                     t2_pass_display['Avg TD'] = t2_pass_display['Avg TD'].round(1)
                     t2_pass_display['INT'] = t2_pass_display['INT'].astype(int)
-                    t2_pass_display['Rating'] = t2_pass_display['Rating'].round(1)
                     st.dataframe(t2_pass_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details for QBs
@@ -6227,7 +6225,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                                                              (pass_players_with_games['team'] == row['team'])]['pass_att'].sum()
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
-                                    cmp_att = f"{int(row['pass_cmp'])}/{int(row['pass_att'])}"
+                                    cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
@@ -6235,7 +6233,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
                                         'INT': int(row['pass_int']),
-                                        'Rating': round(row['pass_rating'], 1) if pd.notna(row['pass_rating']) else 0.0,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6248,13 +6245,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             rush_stats = players_df[players_df['rush_att'] > 0].groupby(['team', 'player']).agg({
                 'rush_yds': ['mean', 'median', 'max', 'min', 'sum', 'count', 'std'],
                 'rush_att': ['sum', 'min', 'max'],
-                'rush_td': ['mean', 'sum'],
-                'rush_long': ['max']
+                'rush_td': ['mean', 'sum']
             }).reset_index()
 
             # Flatten column names
             rush_stats.columns = ['team', 'player', 'avg_yds', 'med_yds', 'max_yds', 'min_yds', 'total_yds', 'games', 'std_yds',
-                                  'total_att', 'min_att', 'max_att', 'avg_td', 'total_td', 'long']
+                                  'total_att', 'min_att', 'max_att', 'avg_td', 'total_td']
             rush_stats = rush_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
@@ -6400,13 +6396,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 'rec_yds': ['mean', 'median', 'max', 'min', 'sum', 'count', 'std'],
                 'rec': ['sum', 'min', 'max'],
                 'targets': ['sum'],
-                'rec_td': ['mean', 'sum'],
-                'rec_long': ['max']
+                'rec_td': ['mean', 'sum']
             }).reset_index()
 
             # Flatten column names
             rec_stats.columns = ['team', 'player', 'avg_yds', 'med_yds', 'max_yds', 'min_yds', 'total_yds', 'games', 'std_yds',
-                                 'total_rec', 'min_rec', 'max_rec', 'total_tgt', 'avg_td', 'total_td', 'long']
+                                 'total_rec', 'min_rec', 'max_rec', 'total_tgt', 'avg_td', 'total_td']
             rec_stats = rec_stats.sort_values('total_yds', ascending=False)
 
             # Get game-by-game data with opponents for last 3 games
@@ -6813,10 +6808,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 pass_stats = players_df[players_df['pass_att'] > 0].groupby(['team', 'player']).agg({
                     'pass_yds': ['median', 'mean', 'std'],
                     'pass_td': ['median', 'mean', 'std'],
-                    'pass_cmp': 'median'
+                    'pass_comp': 'median'
                 }).reset_index()
                 pass_stats.columns = ['team', 'player', 'pass_yds_median', 'pass_yds_mean', 'pass_yds_std',
-                                     'pass_td_median', 'pass_td_mean', 'pass_td_std', 'pass_cmp']
+                                     'pass_td_median', 'pass_td_mean', 'pass_td_std', 'pass_comp']
                 pass_stats = pass_stats.sort_values('pass_yds_median', ascending=False)
 
                 col1, col2 = st.columns(2)
@@ -8600,22 +8595,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     for player, tds in t1_td_leaders.head(5).items():
                         st.markdown(f"- {player}: {int(tds)} TDs")
 
-                # Explosive plays (20+ yard plays for rush/rec)
-                t1_explosive_rush = players_df[(players_df['team'] == team1) & (players_df['rush_long'] >= 20)]
-                t1_explosive_rec = players_df[(players_df['team'] == team1) & (players_df['rec_long'] >= 20)]
-
-                if not t1_explosive_rush.empty or not t1_explosive_rec.empty:
-                    st.markdown("**Explosive Play Producers:**")
-                    explosive_players = {}
-                    for _, row in t1_explosive_rush.iterrows():
-                        player = row['player']
-                        explosive_players[player] = explosive_players.get(player, 0) + 1
-                    for _, row in t1_explosive_rec.iterrows():
-                        player = row['player']
-                        explosive_players[player] = explosive_players.get(player, 0) + 1
-
-                    for player, count in sorted(explosive_players.items(), key=lambda x: x[1], reverse=True)[:5]:
-                        st.markdown(f"- {player}: {count} explosive plays (20+ yds)")
+                # TODO: Explosive plays tracking disabled - rush_long and rec_long not in NFLverse schema
+                # Need to calculate from individual game logs or play-by-play data
+                # st.markdown("**Explosive Play Producers:**")
+                # st.caption("Feature temporarily disabled - requires play-by-play data")
 
             with col2:
                 st.markdown(f"#### {team2} Scoring & Big Plays")
@@ -8630,22 +8613,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     for player, tds in t2_td_leaders.head(5).items():
                         st.markdown(f"- {player}: {int(tds)} TDs")
 
-                # Explosive plays
-                t2_explosive_rush = players_df[(players_df['team'] == team2) & (players_df['rush_long'] >= 20)]
-                t2_explosive_rec = players_df[(players_df['team'] == team2) & (players_df['rec_long'] >= 20)]
-
-                if not t2_explosive_rush.empty or not t2_explosive_rec.empty:
-                    st.markdown("**Explosive Play Producers:**")
-                    explosive_players = {}
-                    for _, row in t2_explosive_rush.iterrows():
-                        player = row['player']
-                        explosive_players[player] = explosive_players.get(player, 0) + 1
-                    for _, row in t2_explosive_rec.iterrows():
-                        player = row['player']
-                        explosive_players[player] = explosive_players.get(player, 0) + 1
-
-                    for player, count in sorted(explosive_players.items(), key=lambda x: x[1], reverse=True)[:5]:
-                        st.markdown(f"- {player}: {count} explosive plays (20+ yds)")
+                # TODO: Explosive plays tracking disabled - rush_long and rec_long not in NFLverse schema
+                # Need to calculate from individual game logs or play-by-play data
+                # st.markdown("**Explosive Play Producers:**")
+                # st.caption("Feature temporarily disabled - requires play-by-play data")
 
         st.divider()
 
@@ -10865,7 +10836,7 @@ def render_player_stats(season: Optional[int], week: Optional[int], team: Option
     st.dataframe(
         df[[
             'player', 'team', 'week',
-            'pass_cmp', 'pass_att', 'pass_yds', 'pass_td', 'pass_int',
+            'pass_comp', 'pass_att', 'pass_yds', 'pass_td', 'pass_int',
             'rush_att', 'rush_yds', 'rush_td',
             'targets', 'rec', 'rec_yds', 'rec_td'
         ]].sort_values('week'),

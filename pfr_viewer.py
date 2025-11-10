@@ -1912,7 +1912,9 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'median_rec_td': group['rec_td'].median(),
                     'total_rush_td': group['rush_td'].sum(),
                     'total_rec_td': group['rec_td'].sum(),
-                    'median_targets': group['targets'].median()
+                    'median_targets': group['targets'].median(),
+                    'avg_rec_air_yds': group['rec_air_yds'].mean(),
+                    'avg_rec_yac': group['rec_yac'].mean()
                 })
 
             # WR: High targets, low rushing
@@ -1934,7 +1936,9 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'total_receptions': group['rec'].sum(),
                     'last_3_avg_targets': last_3_games['targets'].mean(),
                     'last_3_avg_receptions': last_3_games['rec'].mean(),
-                    'median_rec': group['rec'].median()
+                    'median_rec': group['rec'].median(),
+                    'avg_rec_air_yds': group['rec_air_yds'].mean(),
+                    'avg_rec_yac': group['rec_yac'].mean()
                 })
 
             # TE: Moderate targets
@@ -2132,7 +2136,10 @@ def generate_player_projections(season, week, teams_playing):
                     'Team': f"{player['team']} (RB)",
                     'Opponent': opponent,
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
-                    'Median Yds': round(player['median_total_yds'], 1),
+                    'Median Rush Yds': round(player['median_rush_yds'], 1),
+                    'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Avg Air Yds': round(player.get('avg_rec_air_yds', 0), 1),
+                    'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
                     'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),
@@ -2172,7 +2179,10 @@ def generate_player_projections(season, week, teams_playing):
                     'Team': f"{player['team']} (WR)",
                     'Opponent': opponent,
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
-                    'Median Yds': round(player['median_rec_yds'], 1),
+                    'Median Rush Yds': 0,
+                    'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Avg Air Yds': round(player.get('avg_rec_air_yds', 0), 1),
+                    'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
                     'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),

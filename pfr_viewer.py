@@ -6390,7 +6390,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     sacked = int(adv_stats['times_sacked'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_sacked'].iloc[0]) else 0
                                     pressure_pct = f"{adv_stats['times_pressured_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['times_pressured_pct'].iloc[0]) else "0.0%"
                                     bad_throw_pct = f"{adv_stats['passing_bad_throw_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_bad_throw_pct'].iloc[0]) else "0.0%"
-                                    drop_pct = f"{adv_stats['passing_drop_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_drop_pct'].iloc[0]) else "0.0%"
+
+                                    # Format drops as "# (X%)" for clarity
+                                    if not adv_stats.empty and pd.notna(adv_stats['passing_drops'].iloc[0]):
+                                        drops_num = int(adv_stats['passing_drops'].iloc[0])
+                                        drops_pct = adv_stats['passing_drop_pct'].iloc[0] * 100
+                                        drop_display = f"{drops_num} ({drops_pct:.1f}%)"
+                                    else:
+                                        drop_display = "0 (0.0%)"
 
                                     game_data.append({
                                         'Week': int(row['week']),
@@ -6404,7 +6411,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Sacked': sacked,
                                         'Press%': pressure_pct,
                                         'BadTh%': bad_throw_pct,
-                                        'Drop%': drop_pct,
+                                        'Drops': drop_display,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6463,7 +6470,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     sacked = int(adv_stats['times_sacked'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_sacked'].iloc[0]) else 0
                                     pressure_pct = f"{adv_stats['times_pressured_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['times_pressured_pct'].iloc[0]) else "0.0%"
                                     bad_throw_pct = f"{adv_stats['passing_bad_throw_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_bad_throw_pct'].iloc[0]) else "0.0%"
-                                    drop_pct = f"{adv_stats['passing_drop_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_drop_pct'].iloc[0]) else "0.0%"
+
+                                    # Format drops as "# (X%)" for clarity
+                                    if not adv_stats.empty and pd.notna(adv_stats['passing_drops'].iloc[0]):
+                                        drops_num = int(adv_stats['passing_drops'].iloc[0])
+                                        drops_pct = adv_stats['passing_drop_pct'].iloc[0] * 100
+                                        drop_display = f"{drops_num} ({drops_pct:.1f}%)"
+                                    else:
+                                        drop_display = "0 (0.0%)"
 
                                     game_data.append({
                                         'Week': int(row['week']),
@@ -6477,7 +6491,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Sacked': sacked,
                                         'Press%': pressure_pct,
                                         'BadTh%': bad_throw_pct,
-                                        'Drop%': drop_pct,
+                                        'Drops': drop_display,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6714,6 +6728,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Tgts': int(row['targets']),
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
                                         'TD': int(row['rec_td']),
@@ -6771,6 +6786,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Tgts': int(row['targets']),
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
                                         'TD': int(row['rec_td']),

@@ -8224,15 +8224,26 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         with tab2:
             st.markdown("### Home vs Away Performance Splits")
 
-            # Join with games to get location
-            games_query = f"SELECT game_id, home_team_abbr, away_team_abbr FROM games WHERE season={season}"
-            games_loc = query(games_query)
+            # Join with schedules to get location (using week and teams)
+            schedules_query = f"SELECT week, season, home_team, away_team FROM schedules WHERE season={season}"
+            schedules_info = query(schedules_query)
 
-            # Add location to players_df
-            players_with_loc = players_df.merge(games_loc, on='game_id', how='left')
-            players_with_loc['location'] = players_with_loc.apply(
-                lambda row: 'home' if row['team'] == row['home_team_abbr'] else 'away', axis=1
-            )
+            # Determine home/away for each player game
+            def determine_location(row):
+                matching_games = schedules_info[
+                    (schedules_info['week'] == row['week']) &
+                    (schedules_info['season'] == row['season']) &
+                    (
+                        ((schedules_info['home_team'] == row['team']) & (schedules_info['away_team'] == row['opponent'])) |
+                        ((schedules_info['away_team'] == row['team']) & (schedules_info['home_team'] == row['opponent']))
+                    )
+                ]
+                if not matching_games.empty:
+                    return 'home' if row['team'] == matching_games.iloc[0]['home_team'] else 'away'
+                return 'unknown'
+
+            players_with_loc = players_df.copy()
+            players_with_loc['location'] = players_with_loc.apply(determine_location, axis=1)
 
             col1, col2 = st.columns(2)
 

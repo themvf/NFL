@@ -6302,6 +6302,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     times_sacked,
                     times_pressured_pct,
                     passing_bad_throw_pct,
+                    passing_drops,
                     passing_drop_pct
                 FROM pfr_advstats_pass_week
                 WHERE season={season} AND team IN ('{team1}', '{team2}')

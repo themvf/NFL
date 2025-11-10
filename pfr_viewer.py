@@ -6469,7 +6469,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t1_rush_display = t1_rushers.copy()
                     t1_rush_display['YPC'] = (t1_rush_display['total_yds'] / t1_rush_display['total_att']).round(2)
                     t1_rush_display['Att/G'] = (t1_rush_display['total_att'] / t1_rush_display['games']).round(1)
-                    t1_rush_display = t1_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'long']].copy()
+                    t1_rush_display = t1_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'max_yds']].copy()
                     t1_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'Long']
                     t1_rush_display['Games'] = t1_rush_display['Games'].astype(int)
                     t1_rush_display['Tot Yds'] = t1_rush_display['Tot Yds'].astype(int)
@@ -6517,7 +6517,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t2_rush_display = t2_rushers.copy()
                     t2_rush_display['YPC'] = (t2_rush_display['total_yds'] / t2_rush_display['total_att']).round(2)
                     t2_rush_display['Att/G'] = (t2_rush_display['total_att'] / t2_rush_display['games']).round(1)
-                    t2_rush_display = t2_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'long']].copy()
+                    t2_rush_display = t2_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'max_yds']].copy()
                     t2_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'Long']
                     t2_rush_display['Games'] = t2_rush_display['Games'].astype(int)
                     t2_rush_display['Tot Yds'] = t2_rush_display['Tot Yds'].astype(int)
@@ -6667,7 +6667,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t2_rec_display['YPR'] = (t2_rec_display['total_yds'] / t2_rec_display['total_rec']).round(1)
                     t2_rec_display['Catch%'] = (t2_rec_display['total_rec'] / t2_rec_display['total_tgt'] * 100).round(1)
                     t2_rec_display['Rec/G'] = (t2_rec_display['total_rec'] / t2_rec_display['games']).round(1)
-                    t2_rec_display = t2_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'long']].copy()
+                    t2_rec_display = t2_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'max_yds']].copy()
                     t2_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'Catch%', 'Long']
                     t2_rec_display['Games'] = t2_rec_display['Games'].astype(int)
                     t2_rec_display['Tot Yds'] = t2_rec_display['Tot Yds'].astype(int)

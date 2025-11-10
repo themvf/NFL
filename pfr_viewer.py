@@ -8674,27 +8674,45 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             st.markdown("### Game Script Dependency")
             st.caption("How do players perform when their team is winning vs losing?")
 
-            # Add score differential to players_df
-            players_with_score = players_df.merge(games_loc, on='game_id', how='left')
+            # Get game scores using schedules and team_stats_week tables
+            scores_query = f"""
+                SELECT 
+                    ts.season,
+                    ts.week,
+                    ts.team as team_abbr,
+                    ts.points as team_score,
+                    s.home_team,
+                    s.away_team,
+                    CASE 
+                        WHEN ts.team = s.home_team THEN 
+                            (SELECT points FROM team_stats_week WHERE season=ts.season AND week=ts.week AND team=s.away_team)
+                        ELSE 
+                            (SELECT points FROM team_stats_week WHERE season=ts.season AND week=ts.week AND team=s.home_team)
+                    END as opp_score
+                FROM team_stats_week ts
+                JOIN schedules s ON ts.season = s.season AND ts.week = s.week 
+                    AND (ts.team = s.home_team OR ts.team = s.away_team)
+                WHERE ts.season = {season}
+                    AND ts.team IN ('{team1}', '{team2}')
+            """
+            if week:
+                scores_query += f" AND ts.week <= {week}"
+            
+            game_scores = query(scores_query)
 
-            # Calculate score differential at game time
-            # Get final scores
-            final_scores = query(f"SELECT game_id, home_score, away_score FROM games WHERE season={season}")
-            players_with_score = players_with_score.merge(final_scores, on='game_id', how='left')
+            # Merge scores with players_df using week, season, and team
+            players_with_score = players_df.merge(
+                game_scores, 
+                left_on=['week', 'season', 'team'], 
+                right_on=['week', 'season', 'team_abbr'],
+                how='left'
+            )
 
             # Determine if team won
-            players_with_score['team_won'] = players_with_score.apply(
-                lambda row: (row['home_score'] > row['away_score']) if row['team'] == row['home_team_abbr']
-                else (row['away_score'] > row['home_score']),
-                axis=1
-            )
+            players_with_score['team_won'] = players_with_score['team_score'] > players_with_score['opp_score']
 
             # Calculate margin
-            players_with_score['margin'] = players_with_score.apply(
-                lambda row: (row['home_score'] - row['away_score']) if row['team'] == row['home_team_abbr']
-                else (row['away_score'] - row['home_score']),
-                axis=1
-            )
+            players_with_score['margin'] = players_with_score['team_score'] - players_with_score['opp_score']
 
             # Categorize game script
             players_with_score['game_script'] = players_with_score['margin'].apply(

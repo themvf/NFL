@@ -6291,6 +6291,26 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             # Note: player_stats already has opponent column from query
             pass_players_with_games = players_df[players_df['pass_att'] > 0].copy()
 
+            # Load advanced QB stats from pfr_advstats_pass_week
+            qb_adv_query = f"""
+                SELECT
+                    season,
+                    week,
+                    team,
+                    pfr_player_name as player,
+                    times_blitzed,
+                    times_sacked,
+                    times_pressured_pct,
+                    passing_bad_throw_pct,
+                    passing_drop_pct
+                FROM pfr_advstats_pass_week
+                WHERE season={season} AND team IN ('{team1}', '{team2}')
+            """
+            if week:
+                qb_adv_query += f" AND week<={week}"
+
+            qb_adv_stats = query(qb_adv_query)
+
             # Get schedule info to determine home/away games
             schedules_query = f"""
                 SELECT week, season, away_team, home_team
@@ -6355,6 +6375,23 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
+
+                                    # Get advanced stats for this player/week
+                                    adv_stats = qb_adv_stats[
+                                        (qb_adv_stats['player'] == row['player']) &
+                                        (qb_adv_stats['week'] == row['week']) &
+                                        (qb_adv_stats['season'] == row['season']) &
+                                        (qb_adv_stats['team'] == row['team'])
+                                    ]
+
+                                    # Extract advanced stats or use defaults
+                                    rush_td = int(row['rush_td']) if row['rush_td'] > 0 else 0
+                                    blitzed = int(adv_stats['times_blitzed'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_blitzed'].iloc[0]) else 0
+                                    sacked = int(adv_stats['times_sacked'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_sacked'].iloc[0]) else 0
+                                    pressure_pct = f"{adv_stats['times_pressured_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['times_pressured_pct'].iloc[0]) else "0.0%"
+                                    bad_throw_pct = f"{adv_stats['passing_bad_throw_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_bad_throw_pct'].iloc[0]) else "0.0%"
+                                    drop_pct = f"{adv_stats['passing_drop_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_drop_pct'].iloc[0]) else "0.0%"
+
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
@@ -6362,6 +6399,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
                                         'INT': int(row['pass_int']),
+                                        'Rush TD': rush_td,
+                                        'Blitzed': blitzed,
+                                        'Sacked': sacked,
+                                        'Press%': pressure_pct,
+                                        'BadTh%': bad_throw_pct,
+                                        'Drop%': drop_pct,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 
@@ -6405,6 +6448,23 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     att_pct = (row['pass_att'] / team_total_att * 100) if team_total_att > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
                                     cmp_att = f"{int(row['pass_comp'])}/{int(row['pass_att'])}"
+
+                                    # Get advanced stats for this player/week
+                                    adv_stats = qb_adv_stats[
+                                        (qb_adv_stats['player'] == row['player']) &
+                                        (qb_adv_stats['week'] == row['week']) &
+                                        (qb_adv_stats['season'] == row['season']) &
+                                        (qb_adv_stats['team'] == row['team'])
+                                    ]
+
+                                    # Extract advanced stats or use defaults
+                                    rush_td = int(row['rush_td']) if row['rush_td'] > 0 else 0
+                                    blitzed = int(adv_stats['times_blitzed'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_blitzed'].iloc[0]) else 0
+                                    sacked = int(adv_stats['times_sacked'].iloc[0]) if not adv_stats.empty and pd.notna(adv_stats['times_sacked'].iloc[0]) else 0
+                                    pressure_pct = f"{adv_stats['times_pressured_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['times_pressured_pct'].iloc[0]) else "0.0%"
+                                    bad_throw_pct = f"{adv_stats['passing_bad_throw_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_bad_throw_pct'].iloc[0]) else "0.0%"
+                                    drop_pct = f"{adv_stats['passing_drop_pct'].iloc[0]*100:.1f}%" if not adv_stats.empty and pd.notna(adv_stats['passing_drop_pct'].iloc[0]) else "0.0%"
+
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
@@ -6412,6 +6472,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
                                         'INT': int(row['pass_int']),
+                                        'Rush TD': rush_td,
+                                        'Blitzed': blitzed,
+                                        'Sacked': sacked,
+                                        'Press%': pressure_pct,
+                                        'BadTh%': bad_throw_pct,
+                                        'Drop%': drop_pct,
                                         'Att %': f"{att_pct:.0f}%"
                                     })
 

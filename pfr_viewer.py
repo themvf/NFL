@@ -1652,34 +1652,52 @@ def calculate_defensive_stats(season, max_week):
             rush_df = pd.read_sql_query(rush_query, conn)
 
             # Receiving yards allowed to RBs (opponents with rush + rec)
+            # Calculate per-game totals, then average
             rec_rb_query = f"""
-                SELECT AVG(receiving_yards) as avg_rec_to_rb
-                FROM player_stats
-                WHERE season = {season} AND week < {max_week}
-                  AND carries >= 5 AND targets > 0
-                  AND opponent_team = '{team}'
+                SELECT AVG(game_total) as avg_rec_to_rb
+                FROM (
+                    SELECT week, SUM(receiving_yards) as game_total
+                    FROM player_stats
+                    WHERE season = {season} AND week < {max_week}
+                      AND carries >= 5 AND targets > 0
+                      AND opponent_team = '{team}'
+                    GROUP BY week
+                ) per_game
             """
             rec_rb_df = pd.read_sql_query(rec_rb_query, conn)
 
             # Receiving yards and TDs allowed to WRs
+            # Calculate per-game totals, then average
             rec_wr_query = f"""
                 SELECT
-                    AVG(receiving_yards) as avg_rec_to_wr,
-                    SUM(receiving_tds) as total_rec_td_to_wr
-                FROM player_stats
-                WHERE season = {season} AND week < {max_week}
-                  AND targets >= 4 AND carries < 3
-                  AND opponent_team = '{team}'
+                    AVG(game_yards) as avg_rec_to_wr,
+                    SUM(game_tds) as total_rec_td_to_wr
+                FROM (
+                    SELECT
+                        week,
+                        SUM(receiving_yards) as game_yards,
+                        SUM(receiving_tds) as game_tds
+                    FROM player_stats
+                    WHERE season = {season} AND week < {max_week}
+                      AND targets >= 4 AND carries < 3
+                      AND opponent_team = '{team}'
+                    GROUP BY week
+                ) per_game
             """
             rec_wr_df = pd.read_sql_query(rec_wr_query, conn)
 
             # Receiving yards allowed to TEs
+            # Calculate per-game totals, then average
             rec_te_query = f"""
-                SELECT AVG(receiving_yards) as avg_rec_to_te
-                FROM player_stats
-                WHERE season = {season} AND week < {max_week}
-                  AND targets >= 2 AND targets < 10 AND carries < 2
-                  AND opponent_team = '{team}'
+                SELECT AVG(game_total) as avg_rec_to_te
+                FROM (
+                    SELECT week, SUM(receiving_yards) as game_total
+                    FROM player_stats
+                    WHERE season = {season} AND week < {max_week}
+                      AND targets >= 2 AND targets < 10 AND carries < 2
+                      AND opponent_team = '{team}'
+                    GROUP BY week
+                ) per_game
             """
             rec_te_df = pd.read_sql_query(rec_te_query, conn)
 

@@ -13281,8 +13281,17 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # Away needs to win by more than spread, or home needs to lose by less
                 return "✓" if actual_margin < -abs(row['Spread']) else "✗"
 
+        def check_over_under(row):
+            """Check if total went over the O/U line"""
+            if pd.isna(row['Home Score']) or pd.isna(row['Away Score']) or pd.isna(row['Total']):
+                return ""  # Game not played or no total available
+
+            actual_total = row['Home Score'] + row['Away Score']
+            return "✓" if actual_total > row['Total'] else "✗"
+
         df['Power Winner ✓'] = df.apply(check_power_winner, axis=1)
         df['Favorite Covered ✓'] = df.apply(check_spread_cover, axis=1)
+        df['Over ✓'] = df.apply(check_over_under, axis=1)
 
         # Create matchup column with location info
         def format_matchup(row):
@@ -13324,7 +13333,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         'Date', 'Time', 'Day', 'Home Team', 'Home Power', 'Home Score',
                         'Away Team', 'Away Power', 'Away Score',
                         'Status', 'Spread', 'Power Winner ✓', 'Favorite Covered ✓',
-                        'Stadium', 'Roof', 'Temp'
+                        'Total', 'Over ✓', 'Stadium', 'Roof', 'Temp'
                     ]].copy()
 
                     st.dataframe(
@@ -13345,6 +13354,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                             "Spread": st.column_config.NumberColumn("Spread", width="small", format="%.1f"),
                             "Power Winner ✓": st.column_config.TextColumn("Pwr ✓", width="small"),
                             "Favorite Covered ✓": st.column_config.TextColumn("Cov ✓", width="small"),
+                            "Total": st.column_config.NumberColumn("O/U", width="small", format="%.1f"),
+                            "Over ✓": st.column_config.TextColumn("O ✓", width="small"),
                             "Stadium": st.column_config.TextColumn("Stadium", width="medium"),
                             "Roof": st.column_config.TextColumn("Roof", width="small"),
                             "Temp": st.column_config.NumberColumn("Temp", width="small", format="%.0f°")
@@ -13358,7 +13369,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 'Date', 'Time', 'Day', 'Home Team', 'Home Power', 'Home Score',
                 'Away Team', 'Away Power', 'Away Score',
                 'Status', 'Spread', 'Power Winner ✓', 'Favorite Covered ✓',
-                'Total', 'Stadium', 'Roof', 'Surface', 'Temp', 'Wind'
+                'Total', 'Over ✓', 'Stadium', 'Roof', 'Surface', 'Temp', 'Wind'
             ]].copy()
 
             st.dataframe(
@@ -13380,6 +13391,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     "Power Winner ✓": st.column_config.TextColumn("Pwr ✓", width="small"),
                     "Favorite Covered ✓": st.column_config.TextColumn("Cov ✓", width="small"),
                     "Total": st.column_config.NumberColumn("O/U", width="small", format="%.1f"),
+                    "Over ✓": st.column_config.TextColumn("O ✓", width="small"),
                     "Stadium": st.column_config.TextColumn("Stadium", width="medium"),
                     "Roof": st.column_config.TextColumn("Roof", width="small"),
                     "Surface": st.column_config.TextColumn("Surface", width="small"),

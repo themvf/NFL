@@ -1913,8 +1913,8 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'total_rush_td': group['rush_td'].sum(),
                     'total_rec_td': group['rec_td'].sum(),
                     'median_targets': group['targets'].median(),
-                    'avg_rec_air_yds': group['rec_air_yds'].mean(),
-                    'avg_rec_yac': group['rec_yac'].mean()
+                    'avg_rec_air_yds': group['receiving_air_yards'].mean(),
+                    'avg_rec_yac': group['receiving_yards_after_catch'].mean()
                 })
 
             # WR: High targets, low rushing
@@ -1937,8 +1937,8 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'last_3_avg_targets': last_3_games['targets'].mean(),
                     'last_3_avg_receptions': last_3_games['rec'].mean(),
                     'median_rec': group['rec'].median(),
-                    'avg_rec_air_yds': group['rec_air_yds'].mean(),
-                    'avg_rec_yac': group['rec_yac'].mean()
+                    'avg_rec_air_yds': group['receiving_air_yards'].mean(),
+                    'avg_rec_yac': group['receiving_yards_after_catch'].mean()
                 })
 
             # TE: Moderate targets

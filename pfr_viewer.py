@@ -1852,7 +1852,9 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                 receptions as rec,
                 targets,
                 rushing_tds as rush_td,
-                receiving_tds as rec_td
+                receiving_tds as rec_td,
+                receiving_air_yards,
+                receiving_yards_after_catch
             FROM player_stats
             WHERE season = {season} AND week < {max_week}
         """

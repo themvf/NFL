@@ -13865,7 +13865,7 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
                 SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
                 SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
             FROM games g
-            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.away_team_abbr
+            JOIN player_box_score pb ON g.season = pb.season AND g.week = pb.week AND pb.team = g.away_team_abbr
             WHERE g.season = ?
             {week_filter}
             GROUP BY g.game_id, g.home_team_abbr
@@ -13879,7 +13879,7 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
                 SUM(CASE WHEN pb.pass_yds > 0 THEN pb.pass_yds ELSE 0 END) as pass_yds_allowed,
                 SUM(CASE WHEN pb.rush_yds > 0 THEN pb.rush_yds ELSE 0 END) as rush_yds_allowed
             FROM games g
-            JOIN player_box_score pb ON g.game_id = pb.game_id AND pb.team = g.home_team_abbr
+            JOIN player_box_score pb ON g.season = pb.season AND g.week = pb.week AND pb.team = g.home_team_abbr
             WHERE g.season = ?
             {week_filter}
             GROUP BY g.game_id, g.away_team_abbr

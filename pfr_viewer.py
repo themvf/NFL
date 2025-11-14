@@ -2302,9 +2302,18 @@ def calculate_air_yac_matchup_stats(season, max_week=None):
         offense_df['offense_yac_yards'] = (offense_df['total_yac'] / offense_df['games']).round(1)
         offense_df['offense_passing_yards'] = (offense_df['total_receiving_yards'] / offense_df['games']).round(1)
 
+        # Calculate air yards on completions only (not all targets)
+        # Air Yards on Completions = Total Receiving Yards - YAC
+        offense_df['air_yards_on_completions'] = (
+            offense_df['total_receiving_yards'] - offense_df['total_yac']
+        )
+
         # Calculate shares (avoid division by zero)
+        # Air % = Air Yards on Completions / Total Receiving Yards * 100
+        # YAC % = YAC / Total Receiving Yards * 100
+        # These two percentages will always sum to 100%
         offense_df['offense_air_share'] = (
-            (offense_df['total_air_yards'] /
+            (offense_df['air_yards_on_completions'] /
              offense_df['total_receiving_yards'].replace(0, 1)) * 100
         ).round(1)
         offense_df['offense_yac_share'] = (
@@ -2334,8 +2343,18 @@ def calculate_air_yac_matchup_stats(season, max_week=None):
         defense_df['defense_yac_allowed'] = (defense_df['total_yac_allowed'] / defense_df['games']).round(1)
         defense_df['defense_passing_allowed'] = (defense_df['total_receiving_allowed'] / defense_df['games']).round(1)
 
+        # Calculate air yards on completions only (not all targets)
+        # Air Yards on Completions = Total Receiving Yards - YAC
+        defense_df['air_yards_allowed_on_completions'] = (
+            defense_df['total_receiving_allowed'] - defense_df['total_yac_allowed']
+        )
+
+        # Calculate shares (avoid division by zero)
+        # Air % = Air Yards on Completions / Total Receiving Yards * 100
+        # YAC % = YAC / Total Receiving Yards * 100
+        # These two percentages will always sum to 100%
         defense_df['defense_air_share'] = (
-            (defense_df['total_air_allowed'] /
+            (defense_df['air_yards_allowed_on_completions'] /
              defense_df['total_receiving_allowed'].replace(0, 1)) * 100
         ).round(1)
         defense_df['defense_yac_share'] = (

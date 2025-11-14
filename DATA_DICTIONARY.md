@@ -1,7 +1,7 @@
 # NFL Database Data Dictionary
 
 **Database:** `nfl_merged.db`
-**Last Updated:** 2025-11-11
+**Last Updated:** 2025-11-14
 **Purpose:** Comprehensive reference for all data types, column names, and sources
 
 ---
@@ -10,9 +10,8 @@
 
 | Source | Tables | Description |
 |--------|--------|-------------|
-| **NFLVerse API** | player_stats, schedules, team_stats, team_stats_week | Official NFL statistical data from nflverse-data repository |
-| **Pro Football Reference (PFR)** | pfr_advstats_* | Advanced analytics scraped from Pro-Football-Reference.com |
-| **Custom Tracking** | player_injuries, ingest_metadata, merge_metadata | Application-specific data management |
+| **NFLVerse API** | player_stats, schedules, team_stats, team_stats_week, rosters, injuries, pfr_advstats_* | Official NFL statistical data from nflverse-data repository (includes PFR-format advanced stats) |
+| **Custom Tracking** | player_injuries, ingest_metadata, merge_metadata, upcoming_games, projection_accuracy | Application-specific data management |
 | **Play-by-Play** | plays, play_participants | Detailed play-level data |
 
 ---
@@ -103,9 +102,9 @@
 ---
 
 ### 2. pfr_advstats_pass_week
-**Source:** Pro Football Reference (scraped)
+**Source:** NFLVerse API (via `nfl.load_pfr_advstats()`)
 **Rows:** 320
-**Description:** Advanced passing metrics including pressure stats, drops, and throw quality
+**Description:** Advanced passing metrics including pressure stats, drops, and throw quality (PFR-format data from nflverse API)
 
 | Column Name | Data Type | Definition |
 |-------------|-----------|------------|
@@ -133,9 +132,9 @@
 ---
 
 ### 3. pfr_advstats_rec_week
-**Source:** Pro Football Reference (scraped)
+**Source:** NFLVerse API (via `nfl.load_pfr_advstats()`)
 **Rows:** 2,139
-**Description:** Advanced receiving metrics including broken tackles and drops
+**Description:** Advanced receiving metrics including broken tackles and drops (PFR-format data from nflverse API)
 
 | Column Name | Data Type | Definition |
 |-------------|-----------|------------|
@@ -151,9 +150,9 @@
 ---
 
 ### 4. pfr_advstats_rush_week
-**Source:** Pro Football Reference (scraped)
+**Source:** NFLVerse API (via `nfl.load_pfr_advstats()`)
 **Rows:** 1,107
-**Description:** Advanced rushing metrics including yards before/after contact
+**Description:** Advanced rushing metrics including yards before/after contact (PFR-format data from nflverse API)
 
 | Column Name | Data Type | Definition |
 |-------------|-----------|------------|
@@ -169,9 +168,9 @@
 ---
 
 ### 5. pfr_advstats_def_week
-**Source:** Pro Football Reference (scraped)
+**Source:** NFLVerse API (via `nfl.load_pfr_advstats()`)
 **Rows:** 3,789
-**Description:** Advanced defensive coverage and pressure metrics
+**Description:** Advanced defensive coverage and pressure metrics (PFR-format data from nflverse API)
 
 | Column Name | Data Type | Definition |
 |-------------|-----------|------------|

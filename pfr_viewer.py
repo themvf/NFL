@@ -2950,6 +2950,680 @@ def generate_rb_receiving_storyline(rb_targets_per_game, defense_rec_to_rb):
 
 
 # ============================================================================
+# QB Passing TD Matchup Analysis Functions
+# ============================================================================
+
+def calculate_passing_td_matchup_stats(season, max_week=None):
+    """
+    Calculate QB Passing TD matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - offense_pass_tds: Passing TDs scored per game
+    - defense_pass_tds_allowed: Passing TDs allowed per game
+    - games: Games played
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive passing TD stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_tds) as total_pass_tds
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            offense_df['offense_pass_tds'] = (offense_df['total_pass_tds'] / offense_df['games']).round(2)
+
+        # Get defensive passing TD stats (TDs allowed)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_tds) as total_pass_tds_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            defense_df['defense_pass_tds_allowed'] = (
+                defense_df['total_pass_tds_allowed'] / defense_df['games']
+            ).round(2)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'offense_pass_tds']],
+            defense_df[['team', 'defense_pass_tds_allowed']],
+            on='team',
+            how='outer'
+        )
+
+        result_df = result_df.fillna(0)
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Passing TD matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_passing_td_offense(pass_tds_per_game):
+    """
+    Categorize offensive passing TD production.
+
+    Benchmarks (based on API passing_tds metric):
+    - Elite TD Producer (>2.5 TDs/game): High-volume TD scoring
+    - Balanced Passer (1.5-2.5 TDs/game): Standard touchdown production
+    - Game Manager (<1.5 TDs/game): Conservative/limited TD passing
+    """
+    if pass_tds_per_game >= 2.5:
+        return "Elite TD Producer"
+    elif pass_tds_per_game >= 1.5:
+        return "Balanced Passer"
+    else:
+        return "Game Manager"
+
+
+def categorize_passing_td_defense(pass_tds_allowed_per_game):
+    """
+    Categorize defensive passing TD vulnerability.
+
+    Benchmarks (based on API passing_tds allowed):
+    - TD Funnel Defense (>2.5 TDs/game allowed): Allows high TD rate to QBs
+    - Average Coverage (1.5-2.5 TDs/game): League standard TD prevention
+    - Lockdown Secondary (<1.5 TDs/game): Elite at limiting passing TDs
+    """
+    if pass_tds_allowed_per_game >= 2.5:
+        return "TD Funnel Defense"
+    elif pass_tds_allowed_per_game >= 1.5:
+        return "Average Coverage"
+    else:
+        return "Lockdown Secondary"
+
+
+def generate_passing_td_storyline(offense_pass_tds, defense_pass_tds_allowed):
+    """
+    Generate narrative storyline based on passing TD production vs defensive vulnerability.
+
+    Favorable Matchups (High TD upside):
+    - Elite TD Producer vs TD Funnel Defense (most explosive)
+    - Game Manager vs TD Funnel Defense (streaming opportunity)
+    - Elite TD Producer vs Average Coverage
+
+    Unfavorable Matchups (Limited TD upside):
+    - Elite TD Producer vs Lockdown Secondary (strength vs strength)
+    - Game Manager vs Lockdown Secondary (worst case)
+    """
+
+    off_category = categorize_passing_td_offense(offense_pass_tds)
+    def_category = categorize_passing_td_defense(defense_pass_tds_allowed)
+
+    # EXPLOIT MATCHUPS (High TD upside)
+    if off_category == "Elite TD Producer" and defense_pass_tds_allowed >= 2.5:
+        return "🎯 TD SMASH SPOT", f"Elite TD scorer ({offense_pass_tds:.1f} TDs/gm) vs TD-vulnerable defense ({defense_pass_tds_allowed:.1f} allowed/gm) - Elite TD upside"
+
+    elif off_category == "Game Manager" and defense_pass_tds_allowed >= 2.5:
+        return "💎 SNEAKY VALUE", f"Conservative QB ({offense_pass_tds:.1f} TDs/gm) faces generous secondary ({defense_pass_tds_allowed:.1f} allowed/gm) - Streaming opportunity"
+
+    elif off_category == "Elite TD Producer" and 1.5 <= defense_pass_tds_allowed < 2.5:
+        return "✅ FAVORABLE", f"Elite TD producer ({offense_pass_tds:.1f} TDs/gm) vs average defense ({defense_pass_tds_allowed:.1f} allowed/gm) - Solid TD odds"
+
+    # TOUGH MATCHUPS (Limited TD upside)
+    elif off_category == "Elite TD Producer" and defense_pass_tds_allowed < 1.5:
+        return "⚔️ TOUGH TEST", f"Elite QB ({offense_pass_tds:.1f} TDs/gm) vs lockdown secondary ({defense_pass_tds_allowed:.1f} allowed/gm) - Limited ceiling"
+
+    elif off_category == "Game Manager" and defense_pass_tds_allowed < 1.5:
+        return "🛑 AVOID", f"Game manager ({offense_pass_tds:.1f} TDs/gm) vs elite coverage ({defense_pass_tds_allowed:.1f} allowed/gm) - Low TD potential"
+
+    # NEUTRAL MATCHUPS
+    elif off_category == "Balanced Passer":
+        return "⚖️ BALANCED", f"Standard TD production ({offense_pass_tds:.1f} TDs/gm) vs defense allowing {defense_pass_tds_allowed:.1f} TDs/gm"
+
+    else:
+        return "⚪ STANDARD", f"Pass TDs: {offense_pass_tds:.1f}/gm vs Def Allows: {defense_pass_tds_allowed:.1f}/gm"
+
+
+# ============================================================================
+# QB Passing Yards Matchup Analysis Functions
+# ============================================================================
+
+def calculate_passing_yards_matchup_stats(season, max_week=None):
+    """
+    Calculate QB Passing Yards matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - offense_pass_yards: Passing yards per game
+    - defense_pass_yards_allowed: Passing yards allowed per game
+    - games: Games played
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive passing yards stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_yards) as total_pass_yards
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            offense_df['offense_pass_yards'] = (offense_df['total_pass_yards'] / offense_df['games']).round(1)
+
+        # Get defensive passing yards stats (yards allowed)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_yards) as total_pass_yards_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            defense_df['defense_pass_yards_allowed'] = (
+                defense_df['total_pass_yards_allowed'] / defense_df['games']
+            ).round(1)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'offense_pass_yards']],
+            defense_df[['team', 'defense_pass_yards_allowed']],
+            on='team',
+            how='outer'
+        )
+
+        result_df = result_df.fillna(0)
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Passing Yards matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_passing_yards_offense(pass_yards_per_game):
+    """
+    Categorize offensive passing yards production.
+
+    Benchmarks (based on API passing_yards metric):
+    - Air Raid Offense (≥280 yards/game): High-volume passing attack
+    - Balanced Passing (220-280 yards/game): Standard passing volume
+    - Run-First Offense (<220 yards/game): Conservative passing approach
+    """
+    if pass_yards_per_game >= 280:
+        return "Air Raid Offense"
+    elif pass_yards_per_game >= 220:
+        return "Balanced Passing"
+    else:
+        return "Run-First Offense"
+
+
+def categorize_passing_yards_defense(pass_yards_allowed_per_game):
+    """
+    Categorize defensive passing yards vulnerability.
+
+    Benchmarks (based on API passing_yards allowed):
+    - Pass Funnel Defense (≥270 yards/game allowed): Allows high passing volume
+    - Average Secondary (220-270 yards/game): League standard pass defense
+    - Elite Coverage (<220 yards/game): Dominant at limiting passing yards
+    """
+    if pass_yards_allowed_per_game >= 270:
+        return "Pass Funnel Defense"
+    elif pass_yards_allowed_per_game >= 220:
+        return "Average Secondary"
+    else:
+        return "Elite Coverage"
+
+
+def generate_passing_yards_storyline(offense_pass_yards, defense_pass_yards_allowed):
+    """
+    Generate narrative storyline based on passing yards production vs defensive vulnerability.
+
+    Favorable Matchups (High volume upside):
+    - Air Raid vs Pass Funnel (most explosive)
+    - Run-First vs Pass Funnel (game script opportunity)
+    - Air Raid vs Average Secondary
+
+    Unfavorable Matchups (Limited volume):
+    - Air Raid vs Elite Coverage (grind it out)
+    - Run-First vs Elite Coverage (lowest volume)
+    """
+
+    off_category = categorize_passing_yards_offense(offense_pass_yards)
+    def_category = categorize_passing_yards_defense(defense_pass_yards_allowed)
+
+    # EXPLOIT MATCHUPS (High volume upside)
+    if off_category == "Air Raid Offense" and defense_pass_yards_allowed >= 270:
+        return "🚀 CEILING EXPLOSION", f"High-volume passing ({offense_pass_yards:.0f} yds/gm) vs generous secondary ({defense_pass_yards_allowed:.0f} yds allowed/gm) - Elite yardage ceiling"
+
+    elif off_category == "Run-First Offense" and defense_pass_yards_allowed >= 270:
+        return "📈 VOLUME SPIKE", f"Run-heavy offense ({offense_pass_yards:.0f} yds/gm) forced to pass vs weak secondary ({defense_pass_yards_allowed:.0f} yds allowed/gm) - Game script opportunity"
+
+    elif off_category == "Air Raid Offense" and 220 <= defense_pass_yards_allowed < 270:
+        return "✅ SOLID VOLUME", f"Air raid attack ({offense_pass_yards:.0f} yds/gm) vs average coverage ({defense_pass_yards_allowed:.0f} yds allowed/gm) - Reliable yardage"
+
+    # TOUGH MATCHUPS (Limited volume)
+    elif off_category == "Air Raid Offense" and defense_pass_yards_allowed < 220:
+        return "💪 GRIND IT OUT", f"High-volume QB ({offense_pass_yards:.0f} yds/gm) vs elite coverage ({defense_pass_yards_allowed:.0f} yds allowed/gm) - Tough sledding"
+
+    elif off_category == "Run-First Offense" and defense_pass_yards_allowed < 220:
+        return "⚠️ LOW VOLUME", f"Conservative passing ({offense_pass_yards:.0f} yds/gm) vs dominant coverage ({defense_pass_yards_allowed:.0f} yds allowed/gm) - Minimal upside"
+
+    # NEUTRAL MATCHUPS
+    elif off_category == "Balanced Passing":
+        return "⚖️ BALANCED", f"Standard passing volume ({offense_pass_yards:.0f} yds/gm) vs defense allowing {defense_pass_yards_allowed:.0f} yds/gm"
+
+    else:
+        return "⚪ STANDARD", f"Pass Yards: {offense_pass_yards:.0f}/gm vs Def Allows: {defense_pass_yards_allowed:.0f}/gm"
+
+
+# ============================================================================
+# QB TD Rate vs Defensive INT Rate Matchup Analysis Functions
+# ============================================================================
+
+def calculate_qb_td_rate_vs_int_stats(season, max_week=None):
+    """
+    Calculate QB TD Rate vs Defensive INT Rate matchup statistics.
+
+    Requires merging player_stats (for QB TD rate) and pfr_advstats_def_week (for defensive INTs).
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - qb_td_rate: TD percentage per attempt
+    - defense_ints_per_game: Interceptions forced per game
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive QB TD rate (TDs per attempt)
+        offense_query = f"""
+        SELECT
+            team,
+            SUM(passing_tds) as total_tds,
+            SUM(attempts) as total_attempts
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            offense_df['qb_td_rate'] = (
+                (offense_df['total_tds'] / offense_df['total_attempts'].replace(0, 1)) * 100
+            ).round(2)
+
+        # Get defensive INT rate from pfr_advstats_def_week table
+        defense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(CAST(def_interceptions AS REAL)) as total_ints
+        FROM pfr_advstats_def_week
+        WHERE season = {season}
+        {week_filter}
+        GROUP BY team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            defense_df['defense_ints_per_game'] = (
+                defense_df['total_ints'] / defense_df['games']
+            ).round(2)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'qb_td_rate']],
+            defense_df[['team', 'defense_ints_per_game']],
+            on='team',
+            how='outer'
+        )
+
+        result_df = result_df.fillna(0)
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating QB TD Rate vs INT stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_qb_td_rate(td_rate_percent):
+    """
+    Categorize QB TD efficiency.
+
+    Benchmarks (based on API passing_tds / attempts):
+    - Elite Efficiency (≥5.5% TD rate): Top-tier TD efficiency
+    - Average Efficiency (3.5-5.5% TD rate): Standard QB efficiency
+    - Struggling QB (<3.5% TD rate): Below-average TD conversion
+    """
+    if td_rate_percent >= 5.5:
+        return "Elite Efficiency"
+    elif td_rate_percent >= 3.5:
+        return "Average Efficiency"
+    else:
+        return "Struggling QB"
+
+
+def categorize_defensive_int_rate(ints_per_game):
+    """
+    Categorize defensive INT creation.
+
+    Benchmarks (based on pfr_advstats_def_week.def_interceptions):
+    - Ball Hawk Defense (≥1.2 INTs/game): Aggressive turnover creation
+    - Average Turnover Creation (0.7-1.2 INTs/game): League standard
+    - Passive Coverage (<0.7 INTs/game): Limited turnover generation
+    """
+    if ints_per_game >= 1.2:
+        return "Ball Hawk Defense"
+    elif ints_per_game >= 0.7:
+        return "Average Turnover Creation"
+    else:
+        return "Passive Coverage"
+
+
+def generate_qb_td_rate_vs_int_storyline(qb_td_rate, defense_ints_per_game):
+    """
+    Generate narrative storyline based on QB TD efficiency vs defensive INT creation.
+
+    Favorable Matchups (High ceiling, low risk):
+    - Elite Efficiency vs Passive Coverage (safest ceiling play)
+    - Average Efficiency vs Passive Coverage
+    - Elite Efficiency vs Average Turnover Creation
+
+    Unfavorable Matchups (High risk):
+    - Elite Efficiency vs Ball Hawk Defense (boom-bust)
+    - Struggling QB vs Ball Hawk Defense (danger zone)
+    """
+
+    off_category = categorize_qb_td_rate(qb_td_rate)
+    def_category = categorize_defensive_int_rate(defense_ints_per_game)
+
+    # FAVORABLE MATCHUPS (Safe ceiling plays)
+    if off_category == "Elite Efficiency" and defense_ints_per_game < 0.7:
+        return "⚡ HIGH CEILING, LOW RISK", f"Elite TD rate ({qb_td_rate:.1f}%) vs passive coverage ({defense_ints_per_game:.1f} INTs/gm) - Safe ceiling play"
+
+    elif off_category == "Average Efficiency" and defense_ints_per_game < 0.7:
+        return "✅ SAFE FLOOR", f"Standard efficiency ({qb_td_rate:.1f}%) vs passive defense ({defense_ints_per_game:.1f} INTs/gm) - Low turnover risk"
+
+    elif off_category == "Elite Efficiency" and 0.7 <= defense_ints_per_game < 1.2:
+        return "💎 SOLID PLAY", f"Elite efficiency ({qb_td_rate:.1f}%) vs average coverage ({defense_ints_per_game:.1f} INTs/gm) - Good TD upside"
+
+    # RISKY MATCHUPS (Turnover danger)
+    elif off_category == "Elite Efficiency" and defense_ints_per_game >= 1.2:
+        return "🎲 BOOM-BUST", f"Efficient QB ({qb_td_rate:.1f}%) vs ball-hawk defense ({defense_ints_per_game:.1f} INTs/gm) - High variance"
+
+    elif off_category == "Struggling QB" and defense_ints_per_game >= 1.2:
+        return "💀 DANGER ZONE", f"Struggling QB ({qb_td_rate:.1f}%) vs aggressive defense ({defense_ints_per_game:.1f} INTs/gm) - Multiple turnover risk"
+
+    elif off_category == "Struggling QB" and 0.7 <= defense_ints_per_game < 1.2:
+        return "⚠️ RISKY", f"Low efficiency ({qb_td_rate:.1f}%) vs average coverage ({defense_ints_per_game:.1f} INTs/gm) - Turnover concern"
+
+    # NEUTRAL MATCHUPS
+    elif off_category == "Average Efficiency":
+        return "⚖️ BALANCED", f"Average efficiency ({qb_td_rate:.1f}%) vs {defense_ints_per_game:.1f} INTs/gm - Standard risk profile"
+
+    else:
+        return "⚪ STANDARD", f"TD Rate: {qb_td_rate:.1f}% vs Def INTs: {defense_ints_per_game:.1f}/gm"
+
+
+# ============================================================================
+# QB Efficiency Matchup Analysis Functions (Composite Metrics)
+# ============================================================================
+
+def calculate_qb_efficiency_matchup_stats(season, max_week=None):
+    """
+    Calculate QB Efficiency matchup statistics using composite metrics.
+
+    Offensive Efficiency: Passing yards per game + INT rate (lower is better)
+    Defensive Efficiency: Passing yards allowed + INTs forced + sacks
+
+    Requires merging player_stats and pfr_advstats_def_week.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - qb_pass_yards_per_game: Passing yards per game
+    - qb_int_rate: INT rate percentage (INTs per attempt)
+    - qb_efficiency_score: Composite efficiency score
+    - defense_pass_yards_allowed: Passing yards allowed per game
+    - defense_ints_per_game: INTs forced per game
+    - defense_sacks_per_game: Sacks per game
+    - defense_efficiency_score: Composite defensive efficiency score
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive QB efficiency stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_yards) as total_pass_yards,
+            SUM(passing_interceptions) as total_ints,
+            SUM(attempts) as total_attempts
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            offense_df['qb_pass_yards_per_game'] = (
+                offense_df['total_pass_yards'] / offense_df['games']
+            ).round(1)
+            offense_df['qb_int_rate'] = (
+                (offense_df['total_ints'] / offense_df['total_attempts'].replace(0, 1)) * 100
+            ).round(2)
+
+            # Efficiency score: Higher yards good, lower INT rate good
+            # Normalize: yards/game scaled, subtract INT penalty
+            offense_df['qb_efficiency_score'] = (
+                offense_df['qb_pass_yards_per_game'] - (offense_df['qb_int_rate'] * 20)
+            ).round(1)
+
+        # Get defensive passing yards allowed (from player_stats)
+        defense_yards_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(passing_yards) as total_pass_yards_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('QB')
+        GROUP BY opponent_team
+        """
+
+        defense_yards_df = pd.read_sql_query(defense_yards_query, conn)
+
+        if not defense_yards_df.empty:
+            defense_yards_df['defense_pass_yards_allowed'] = (
+                defense_yards_df['total_pass_yards_allowed'] / defense_yards_df['games']
+            ).round(1)
+
+        # Get defensive INT and sack stats (from pfr_advstats_def_week)
+        defense_advanced_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(CAST(def_interceptions AS REAL)) as total_ints,
+            SUM(CAST(def_sacks AS REAL)) as total_sacks
+        FROM pfr_advstats_def_week
+        WHERE season = {season}
+        {week_filter}
+        GROUP BY team
+        """
+
+        defense_advanced_df = pd.read_sql_query(defense_advanced_query, conn)
+
+        if not defense_advanced_df.empty:
+            defense_advanced_df['defense_ints_per_game'] = (
+                defense_advanced_df['total_ints'] / defense_advanced_df['games']
+            ).round(2)
+            defense_advanced_df['defense_sacks_per_game'] = (
+                defense_advanced_df['total_sacks'] / defense_advanced_df['games']
+            ).round(2)
+
+        # Merge defensive stats
+        defense_df = pd.merge(
+            defense_yards_df[['team', 'defense_pass_yards_allowed']],
+            defense_advanced_df[['team', 'defense_ints_per_game', 'defense_sacks_per_game']],
+            on='team',
+            how='outer'
+        )
+
+        if not defense_df.empty:
+            # Defensive efficiency score: Lower yards allowed good, higher INTs/sacks good
+            # Normalize: subtract yards allowed, add INT/sack bonuses
+            defense_df['defense_efficiency_score'] = (
+                -(defense_df['defense_pass_yards_allowed'].fillna(0)) +
+                (defense_df['defense_ints_per_game'].fillna(0) * 30) +
+                (defense_df['defense_sacks_per_game'].fillna(0) * 15)
+            ).round(1)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'qb_pass_yards_per_game', 'qb_int_rate', 'qb_efficiency_score']],
+            defense_df[['team', 'defense_pass_yards_allowed', 'defense_ints_per_game',
+                       'defense_sacks_per_game', 'defense_efficiency_score']],
+            on='team',
+            how='outer'
+        )
+
+        result_df = result_df.fillna(0)
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating QB Efficiency matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_qb_efficiency(pass_yards_per_game, int_rate):
+    """
+    Categorize QB offensive efficiency based on yards and turnover safety.
+
+    Benchmarks:
+    - Elite Efficient (high yards, <2% INT rate): Best combo
+    - Volume Chucker (high yards, >3% INT): High output but turnover prone
+    - Safe Manager (moderate yards, <2% INT): Conservative but secure
+    - Struggling (low yards or high INT rate): Below average
+    """
+    if pass_yards_per_game >= 260 and int_rate < 2.0:
+        return "Elite Efficient"
+    elif pass_yards_per_game >= 260 and int_rate >= 3.0:
+        return "Volume Chucker"
+    elif 200 <= pass_yards_per_game < 260 and int_rate < 2.0:
+        return "Safe Manager"
+    else:
+        return "Struggling"
+
+
+def categorize_defensive_passing_efficiency(yards_allowed, ints_per_game, sacks_per_game):
+    """
+    Categorize defensive passing efficiency based on composite metrics.
+
+    Benchmarks:
+    - Generous (high yards allowed, low pressure): Easy matchup
+    - Opportunistic (moderate yards, high INTs): Creates turnovers
+    - Dominant (low yards, high pressure): Elite pass defense
+    - Average: Standard defense
+    """
+    if yards_allowed >= 260 and ints_per_game < 0.7 and sacks_per_game < 2.0:
+        return "Generous"
+    elif ints_per_game >= 1.0 or sacks_per_game >= 3.0:
+        return "Opportunistic"
+    elif yards_allowed < 220 and (ints_per_game >= 0.7 or sacks_per_game >= 2.0):
+        return "Dominant"
+    else:
+        return "Average"
+
+
+def generate_qb_efficiency_storyline(qb_yards, qb_int_rate, def_yards_allowed, def_ints, def_sacks):
+    """
+    Generate narrative storyline based on composite QB efficiency vs defensive efficiency.
+
+    Favorable Matchups (High ceiling, low risk):
+    - Elite Efficient vs Generous defense
+    - Safe Manager vs Generous defense
+    - Elite Efficient vs Average defense
+
+    Unfavorable Matchups (Low ceiling or high risk):
+    - Any QB vs Dominant defense
+    - Volume Chucker vs Opportunistic defense (turnover trap)
+    - Struggling vs any strong defense
+    """
+
+    off_category = categorize_qb_efficiency(qb_yards, qb_int_rate)
+    def_category = categorize_defensive_passing_efficiency(def_yards_allowed, def_ints, def_sacks)
+
+    # EXPLOIT MATCHUPS (Best scenarios)
+    if off_category == "Elite Efficient" and def_category == "Generous":
+        return "💎 SAFE CEILING SPOT", f"Elite efficiency ({qb_yards:.0f} yds, {qb_int_rate:.1f}% INT) vs generous D ({def_yards_allowed:.0f} yds, {def_ints:.1f} INTs, {def_sacks:.1f} sacks) - Smash play"
+
+    elif off_category == "Safe Manager" and def_category == "Generous":
+        return "✅ VOLUME OPPORTUNITY", f"Conservative QB ({qb_yards:.0f} yds, {qb_int_rate:.1f}% INT) vs soft coverage ({def_yards_allowed:.0f} yds allowed) - Safe volume boost"
+
+    elif off_category == "Elite Efficient" and def_category == "Average":
+        return "🔥 FAVORABLE", f"Elite QB ({qb_yards:.0f} yds, {qb_int_rate:.1f}% INT) vs average D - Reliable production"
+
+    # RISKY/TOUGH MATCHUPS
+    elif def_category == "Dominant":
+        return "🛡️ DEFENSIVE WALL", f"QB faces dominant D ({def_yards_allowed:.0f} yds allowed, {def_ints:.1f} INTs, {def_sacks:.1f} sacks) - Limited ceiling"
+
+    elif off_category == "Volume Chucker" and def_category == "Opportunistic":
+        return "⚠️ TURNOVER TRAP", f"Turnover-prone QB ({qb_int_rate:.1f}% INT) vs aggressive D ({def_ints:.1f} INTs/gm) - Multiple INT risk"
+
+    elif off_category == "Struggling":
+        return "🚫 AVOID", f"Struggling QB ({qb_yards:.0f} yds, {qb_int_rate:.1f}% INT) - Low floor and ceiling"
+
+    # NEUTRAL MATCHUPS
+    elif off_category in ["Safe Manager", "Elite Efficient"]:
+        return "⚖️ BALANCED", f"QB efficiency vs defense - Standard matchup ({qb_yards:.0f} yds/gm, {qb_int_rate:.1f}% INT)"
+
+    else:
+        return "⚪ STANDARD", f"Yards: {qb_yards:.0f}/gm, INT: {qb_int_rate:.1f}% vs Def: {def_yards_allowed:.0f} yds, {def_ints:.1f} INTs, {def_sacks:.1f} sacks"
+
+
+# ============================================================================
 # Projection Accuracy Tracking Functions
 # ============================================================================
 
@@ -14263,6 +14937,46 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     # Use same upcoming games dataframe
                     render_rb_receiving_matchup_chart(selected_season, selected_week, upcoming_games_df)
 
+                # ========== QB PASSING TD MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🎯 **QB Passing TD Matchup** - Identify QB Touchdown Opportunities", expanded=False):
+                    st.markdown("""
+                    Match QB passing TD production vs defensive TD prevention (API data: `passing_tds`).
+                    Look for **TD SMASH SPOT** and **SNEAKY VALUE** matchups for QB streaming.
+                    """)
+
+                    render_passing_td_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
+                # ========== QB PASSING YARDS MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🚀 **QB Passing Yards Matchup** - Identify Volume Opportunities", expanded=False):
+                    st.markdown("""
+                    Match QB passing yards vs defensive yards allowed (API data: `passing_yards`).
+                    Look for **CEILING EXPLOSION** and **VOLUME SPIKE** matchups for yardage upside.
+                    """)
+
+                    render_passing_yards_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
+                # ========== QB TD RATE VS DEFENSIVE INT RATE ==========
+                st.divider()
+                with st.expander("⚡ **QB Efficiency vs INT Risk** - Risk-Reward Analysis", expanded=False):
+                    st.markdown("""
+                    Match QB TD efficiency vs defensive INT creation (API: `passing_tds`/attempts vs `def_interceptions`).
+                    Look for **HIGH CEILING LOW RISK** plays and avoid **DANGER ZONE** matchups.
+                    """)
+
+                    render_qb_td_rate_vs_int_chart(selected_season, selected_week, upcoming_games_df)
+
+                # ========== QB EFFICIENCY MATCHUP (COMPOSITE) ==========
+                st.divider()
+                with st.expander("💎 **QB Composite Efficiency** - Multi-Factor Matchup Analysis", expanded=False):
+                    st.markdown("""
+                    Composite QB efficiency (yards + INT rate) vs defensive passing efficiency (yards allowed + INTs + sacks).
+                    Look for **SAFE CEILING SPOT** and **VOLUME OPPORTUNITY** matchups while avoiding **DEFENSIVE WALL** games.
+                    """)
+
+                    render_qb_efficiency_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
             else:
                 st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")
 
@@ -14292,6 +15006,10 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "QB Pressure Matchup Analysis",
             "Rushing TD Efficiency Matchup Analysis",
             "RB Pass-Catching Matchup Analysis",
+            "QB Passing TD Matchup Analysis",
+            "QB Passing Yards Matchup Analysis",
+            "QB TD Rate vs Defensive INT Rate",
+            "QB Composite Efficiency Matchup",
             "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
@@ -14323,6 +15041,14 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_rushing_td_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "RB Pass-Catching Matchup Analysis":
         render_rb_receiving_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "QB Passing TD Matchup Analysis":
+        render_passing_td_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "QB Passing Yards Matchup Analysis":
+        render_passing_yards_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "QB TD Rate vs Defensive INT Rate":
+        render_qb_td_rate_vs_int_chart(season, week, upcoming_games=None)
+    elif chart_type == "QB Composite Efficiency Matchup":
+        render_qb_efficiency_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "Power Rating vs Offensive Yards":
         render_power_rating_yards_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
@@ -15613,6 +16339,648 @@ def render_rb_receiving_matchup_chart(season: Optional[int], week: Optional[int]
         st.error(f"Error generating RB receiving matchup chart: {e}")
         import traceback
         st.error(traceback.format_exc())
+
+
+
+def render_passing_td_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: QB Passing TD Matchup Analysis"""
+    st.subheader("🎯 QB Passing TD Matchup Analysis")
+    st.markdown("""
+    **Goal:** Match QB passing TD rates vs defensive TD prevention (API data: `passing_tds` per game)
+    - **Top-right quadrant:** 🎯 TD SMASH SPOT (high TD production vs TD-prone defense)
+    - **Top-left:** 💎 SNEAKY VALUE (game manager vs TD-prone defense)
+    - **Bottom-right:** ⚔️ TOUGH TEST (elite QB vs lockdown secondary)
+    - **Bottom-left:** ⚖️ BALANCED (balanced matchup)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate stats
+        stats = calculate_passing_td_matchup_stats(season, week)
+
+        if stats.empty:
+            st.info("No data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = stats[stats['team'] == home_team]
+                away_def = stats[stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_val = home_stats.iloc[0]['offense_pass_tds']
+                    defense_val = away_def.iloc[0]['defense_pass_tds_allowed']
+
+                    storyline, description = generate_passing_td_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'offense_pass_tds': offense_val,
+                        'defense_pass_tds_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = stats[stats['team'] == away_team]
+                home_def = stats[stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_val = away_stats.iloc[0]['offense_pass_tds']
+                    defense_val = home_def.iloc[0]['defense_pass_tds_allowed']
+
+                    storyline, description = generate_passing_td_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'offense_pass_tds': offense_val,
+                        'defense_pass_tds_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            matchup_df = stats.copy()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['offense_pass_tds'],
+            y=matchup_df['defense_pass_tds_allowed'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['offense_pass_tds'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Passing TDs per Game")
+            ),
+            text=hover_text,
+            hovertemplate='<b>%{text}</b><br>Passing TDs per Game: %{x}<br>Passing TDs Allowed per Game: %{y}<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add team logos
+        for _, row in matchup_df.iterrows():
+            team = row['team']
+            logo_url = get_team_logo_url(team)
+            if logo_url:
+                fig.add_layout_image(
+                    dict(
+                        source=logo_url,
+                        xref="x",
+                        yref="y",
+                        x=row['offense_pass_tds'],
+                        y=row['defense_pass_tds_allowed'],
+                        sizex=0.15 * (matchup_df['offense_pass_tds'].max() - matchup_df['offense_pass_tds'].min()),
+                        sizey=0.15 * (matchup_df['defense_pass_tds_allowed'].max() - matchup_df['defense_pass_tds_allowed'].min()),
+                        xanchor="center",
+                        yanchor="middle",
+                        sizing="contain",
+                        opacity=0.8,
+                        layer="above"
+                    )
+                )
+
+        # Add league average lines
+        avg_offense = matchup_df['offense_pass_tds'].mean()
+        avg_defense = matchup_df['defense_pass_tds_allowed'].mean()
+
+        fig.add_hline(y=avg_defense, line_dash="dash", line_color="gray", annotation_text="Avg Defense")
+        fig.add_vline(x=avg_offense, line_dash="dash", line_color="gray", annotation_text="Avg Offense")
+
+        fig.update_layout(
+            title=f"QB Passing TD Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Passing TDs per Game",
+            yaxis_title="Passing TDs Allowed per Game",
+            height=600,
+            hovermode='closest'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            st.subheader("Matchup Storylines")
+            display_df = matchup_df[['team', 'opponent', 'location', 'offense_pass_tds', 'defense_pass_tds_allowed', 'storyline', 'description']].copy()
+            display_df.columns = ['Team', 'Opponent', 'Location', 'Pass TDs', 'TDs Allowed', 'Storyline', 'Description']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_passing_yards_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: QB Passing Yards Matchup Analysis"""
+    st.subheader("🚀 QB Passing Yards Matchup Analysis")
+    st.markdown("""
+    **Goal:** Match QB passing yards vs defensive passing yards allowed (API data: `passing_yards` per game)
+    - **Top-right quadrant:** 🚀 CEILING EXPLOSION (air raid vs pass funnel)
+    - **Top-left:** 📈 VOLUME SPIKE (run-first vs pass funnel)
+    - **Bottom-right:** 💪 GRIND IT OUT (air raid vs elite coverage)
+    - **Bottom-left:** ⚠️ LOW VOLUME (run-first vs elite coverage)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate stats
+        stats = calculate_passing_yards_matchup_stats(season, week)
+
+        if stats.empty:
+            st.info("No data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = stats[stats['team'] == home_team]
+                away_def = stats[stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_val = home_stats.iloc[0]['offense_pass_yards']
+                    defense_val = away_def.iloc[0]['defense_pass_yards_allowed']
+
+                    storyline, description = generate_passing_yards_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'offense_pass_yards': offense_val,
+                        'defense_pass_yards_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = stats[stats['team'] == away_team]
+                home_def = stats[stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_val = away_stats.iloc[0]['offense_pass_yards']
+                    defense_val = home_def.iloc[0]['defense_pass_yards_allowed']
+
+                    storyline, description = generate_passing_yards_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'offense_pass_yards': offense_val,
+                        'defense_pass_yards_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            matchup_df = stats.copy()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['offense_pass_yards'],
+            y=matchup_df['defense_pass_yards_allowed'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['offense_pass_yards'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Passing Yards per Game")
+            ),
+            text=hover_text,
+            hovertemplate='<b>%{text}</b><br>Passing Yards per Game: %{x}<br>Passing Yards Allowed per Game: %{y}<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add team logos
+        for _, row in matchup_df.iterrows():
+            team = row['team']
+            logo_url = get_team_logo_url(team)
+            if logo_url:
+                fig.add_layout_image(
+                    dict(
+                        source=logo_url,
+                        xref="x",
+                        yref="y",
+                        x=row['offense_pass_yards'],
+                        y=row['defense_pass_yards_allowed'],
+                        sizex=0.15 * (matchup_df['offense_pass_yards'].max() - matchup_df['offense_pass_yards'].min()),
+                        sizey=0.15 * (matchup_df['defense_pass_yards_allowed'].max() - matchup_df['defense_pass_yards_allowed'].min()),
+                        xanchor="center",
+                        yanchor="middle",
+                        sizing="contain",
+                        opacity=0.8,
+                        layer="above"
+                    )
+                )
+
+        # Add league average lines
+        avg_offense = matchup_df['offense_pass_yards'].mean()
+        avg_defense = matchup_df['defense_pass_yards_allowed'].mean()
+
+        fig.add_hline(y=avg_defense, line_dash="dash", line_color="gray", annotation_text="Avg Defense")
+        fig.add_vline(x=avg_offense, line_dash="dash", line_color="gray", annotation_text="Avg Offense")
+
+        fig.update_layout(
+            title=f"QB Passing Yards Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Passing Yards per Game",
+            yaxis_title="Passing Yards Allowed per Game",
+            height=600,
+            hovermode='closest'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            st.subheader("Matchup Storylines")
+            display_df = matchup_df[['team', 'opponent', 'location', 'offense_pass_yards', 'defense_pass_yards_allowed', 'storyline', 'description']].copy()
+            display_df.columns = ['Team', 'Opponent', 'Location', 'Pass Yards', 'Yards Allowed', 'Storyline', 'Description']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_qb_td_rate_vs_int_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: QB TD Rate vs Defensive INT Rate"""
+    st.subheader("⚡ QB TD Rate vs Defensive INT Rate")
+    st.markdown("""
+    **Goal:** Match QB TD efficiency vs defensive INT creation (API: `passing_tds`/attempts vs `def_interceptions`)
+    - **Top-right quadrant:** ⚡ HIGH CEILING LOW RISK (elite efficiency vs passive coverage)
+    - **Top-left:** 🎲 BOOM-BUST (elite efficiency vs ball-hawk defense)
+    - **Bottom-right:** 💎 SOLID PLAY (elite efficiency vs average coverage)
+    - **Bottom-left:** ⚖️ BALANCED (average efficiency)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate stats
+        stats = calculate_qb_td_rate_vs_int_stats(season, week)
+
+        if stats.empty:
+            st.info("No data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = stats[stats['team'] == home_team]
+                away_def = stats[stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_val = home_stats.iloc[0]['qb_td_rate']
+                    defense_val = away_def.iloc[0]['defense_ints_per_game']
+
+                    storyline, description = generate_qb_td_rate_vs_int_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'qb_td_rate': offense_val,
+                        'defense_ints_per_game': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = stats[stats['team'] == away_team]
+                home_def = stats[stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_val = away_stats.iloc[0]['qb_td_rate']
+                    defense_val = home_def.iloc[0]['defense_ints_per_game']
+
+                    storyline, description = generate_qb_td_rate_vs_int_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'qb_td_rate': offense_val,
+                        'defense_ints_per_game': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            matchup_df = stats.copy()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['qb_td_rate'],
+            y=matchup_df['defense_ints_per_game'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['qb_td_rate'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="QB TD Rate (%)")
+            ),
+            text=hover_text,
+            hovertemplate='<b>%{text}</b><br>QB TD Rate (%): %{x}<br>Defensive INTs per Game: %{y}<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add team logos
+        for _, row in matchup_df.iterrows():
+            team = row['team']
+            logo_url = get_team_logo_url(team)
+            if logo_url:
+                fig.add_layout_image(
+                    dict(
+                        source=logo_url,
+                        xref="x",
+                        yref="y",
+                        x=row['qb_td_rate'],
+                        y=row['defense_ints_per_game'],
+                        sizex=0.15 * (matchup_df['qb_td_rate'].max() - matchup_df['qb_td_rate'].min()),
+                        sizey=0.15 * (matchup_df['defense_ints_per_game'].max() - matchup_df['defense_ints_per_game'].min()),
+                        xanchor="center",
+                        yanchor="middle",
+                        sizing="contain",
+                        opacity=0.8,
+                        layer="above"
+                    )
+                )
+
+        # Add league average lines
+        avg_offense = matchup_df['qb_td_rate'].mean()
+        avg_defense = matchup_df['defense_ints_per_game'].mean()
+
+        fig.add_hline(y=avg_defense, line_dash="dash", line_color="gray", annotation_text="Avg Defense")
+        fig.add_vline(x=avg_offense, line_dash="dash", line_color="gray", annotation_text="Avg Offense")
+
+        fig.update_layout(
+            title=f"QB TD Rate vs Defensive INT Rate ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="QB TD Rate (%)",
+            yaxis_title="Defensive INTs per Game",
+            height=600,
+            hovermode='closest'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            st.subheader("Matchup Storylines")
+            display_df = matchup_df[['team', 'opponent', 'location', 'qb_td_rate', 'defense_ints_per_game', 'storyline', 'description']].copy()
+            display_df.columns = ['Team', 'Opponent', 'Location', 'TD Rate %', 'INTs/Gm', 'Storyline', 'Description']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_qb_efficiency_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: QB Efficiency Matchup (Composite)"""
+    st.subheader("💎 QB Efficiency Matchup (Composite)")
+    st.markdown("""
+    **Goal:** Composite QB efficiency (yards + INT rate) vs defensive passing efficiency (yards + INTs + sacks)
+    - **Top-right quadrant:** 💎 SAFE CEILING SPOT (elite efficient vs generous defense)
+    - **Top-left:** ✅ VOLUME OPPORTUNITY (safe manager vs generous defense)
+    - **Bottom-right:** 🔥 FAVORABLE (elite QB vs average defense)
+    - **Bottom-left:** 🛡️ DEFENSIVE WALL (vs dominant defense)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate stats
+        stats = calculate_qb_efficiency_matchup_stats(season, week)
+
+        if stats.empty:
+            st.info("No data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = stats[stats['team'] == home_team]
+                away_def = stats[stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_val = home_stats.iloc[0]['qb_efficiency_score']
+                    defense_val = away_def.iloc[0]['defense_efficiency_score']
+
+                    storyline, description = generate_qb_efficiency_storyline(
+                        home_stats.iloc[0]['qb_pass_yards_per_game'],
+                        home_stats.iloc[0]['qb_int_rate'],
+                        away_def.iloc[0]['defense_pass_yards_allowed'],
+                        away_def.iloc[0]['defense_ints_per_game'],
+                        away_def.iloc[0]['defense_sacks_per_game']
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'qb_efficiency_score': offense_val,
+                        'defense_efficiency_score': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = stats[stats['team'] == away_team]
+                home_def = stats[stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_val = away_stats.iloc[0]['qb_efficiency_score']
+                    defense_val = home_def.iloc[0]['defense_efficiency_score']
+
+                    storyline, description = generate_qb_efficiency_storyline(
+                        away_stats.iloc[0]['qb_pass_yards_per_game'],
+                        away_stats.iloc[0]['qb_int_rate'],
+                        home_def.iloc[0]['defense_pass_yards_allowed'],
+                        home_def.iloc[0]['defense_ints_per_game'],
+                        home_def.iloc[0]['defense_sacks_per_game']
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'qb_efficiency_score': offense_val,
+                        'defense_efficiency_score': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            matchup_df = stats.copy()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['qb_efficiency_score'],
+            y=matchup_df['defense_efficiency_score'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['qb_efficiency_score'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="QB Efficiency Score")
+            ),
+            text=hover_text,
+            hovertemplate='<b>%{text}</b><br>QB Efficiency Score: %{x}<br>Defensive Efficiency Score: %{y}<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add team logos
+        for _, row in matchup_df.iterrows():
+            team = row['team']
+            logo_url = get_team_logo_url(team)
+            if logo_url:
+                fig.add_layout_image(
+                    dict(
+                        source=logo_url,
+                        xref="x",
+                        yref="y",
+                        x=row['qb_efficiency_score'],
+                        y=row['defense_efficiency_score'],
+                        sizex=0.15 * (matchup_df['qb_efficiency_score'].max() - matchup_df['qb_efficiency_score'].min()),
+                        sizey=0.15 * (matchup_df['defense_efficiency_score'].max() - matchup_df['defense_efficiency_score'].min()),
+                        xanchor="center",
+                        yanchor="middle",
+                        sizing="contain",
+                        opacity=0.8,
+                        layer="above"
+                    )
+                )
+
+        # Add league average lines
+        avg_offense = matchup_df['qb_efficiency_score'].mean()
+        avg_defense = matchup_df['defense_efficiency_score'].mean()
+
+        fig.add_hline(y=avg_defense, line_dash="dash", line_color="gray", annotation_text="Avg Defense")
+        fig.add_vline(x=avg_offense, line_dash="dash", line_color="gray", annotation_text="Avg Offense")
+
+        fig.update_layout(
+            title=f"QB Efficiency Matchup (Composite) ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="QB Efficiency Score",
+            yaxis_title="Defensive Efficiency Score",
+            height=600,
+            hovermode='closest'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            st.subheader("Matchup Storylines")
+            display_df = matchup_df[['team', 'opponent', 'location', 'qb_efficiency_score', 'defense_efficiency_score', 'storyline', 'description']].copy()
+            display_df.columns = ['Team', 'Opponent', 'Location', 'QB Eff', 'Def Eff', 'Storyline', 'Description']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
 
 
 def render_power_rating_yards_chart(season: Optional[int], week: Optional[int]):

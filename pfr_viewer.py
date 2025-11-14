@@ -2364,34 +2364,97 @@ def calculate_air_yac_matchup_stats(season, max_week=None):
         return pd.DataFrame()
 
 
+def categorize_offensive_style(air_share):
+    """
+    Categorize offensive passing style based on air yards percentage.
+
+    Benchmarks:
+    - Deep Ball (>60% air): Team throws deep, relies on air yards
+    - Balanced (45-60% air): Mix of deep and short passes
+    - Short Passing (<45% air): YAC-dependent, underneath routes
+    """
+    if air_share >= 60:
+        return "Deep Ball"
+    elif air_share >= 45:
+        return "Balanced"
+    else:
+        return "Short Passing"
+
+
+def categorize_defensive_weakness(air_share_allowed, yac_share_allowed):
+    """
+    Categorize defensive vulnerability based on what they allow.
+
+    Benchmarks:
+    - Air Vulnerable (>60% air allowed): Allows deep completions
+    - YAC Vulnerable (>55% YAC allowed): Allows yards after catch
+    - Balanced Defense: Neither extreme
+    """
+    if air_share_allowed >= 60:
+        return "Air Vulnerable"
+    elif yac_share_allowed >= 55:
+        return "YAC Vulnerable"
+    else:
+        return "Balanced Defense"
+
+
 def generate_air_yac_storyline(offense_air_share, defense_yac_share, defense_air_share, offense_yac_share):
     """
-    Generate narrative storyline based on air yards vs YAC matchup.
+    Generate narrative storyline based on air yards vs YAC matchup with refined benchmarks.
 
-    Logic:
-    - Vertical offense (>55% air) vs YAC-leaky defense (>55% YAC allowed) = vertical_vs_yac_leaky
-    - Underneath offense (<45% air) vs Air-prone defense (>55% air allowed) = underneath_vs_air_prone
-    - Vertical offense vs Air-stingy defense (<45% air allowed) = vertical_vs_tight_coverage
-    - Underneath offense vs YAC-stingy defense (<45% YAC allowed) = underneath_vs_yac_stingy
-    - Otherwise = balanced
+    Offensive Style Buckets:
+    - Deep Ball: >60% air share (vertical passing attack)
+    - Balanced: 45-60% air share (mix of deep and short)
+    - Short Passing: <45% air share (YAC-dependent, underneath routes)
+
+    Defensive Weakness Buckets:
+    - Air Vulnerable: >60% air allowed (gives up deep balls)
+    - YAC Vulnerable: >55% YAC allowed (gives up yards after catch)
+    - Balanced Defense: Neither extreme
+
+    Favorable Matchups (Offense exploits defensive weakness):
+    - Deep Ball offense vs YAC Vulnerable defense
+    - Short Passing offense vs Air Vulnerable defense
+    - Deep Ball offense vs Air Vulnerable defense (most explosive)
+
+    Unfavorable Matchups (Mismatch):
+    - Deep Ball offense vs defense that limits air yards (<45% air allowed)
+    - Short Passing offense vs defense that limits YAC (<45% YAC allowed)
     """
 
-    if offense_air_share > 55 and defense_yac_share > 55:
-        return "🎯 Vertical vs YAC-Leaky", "Offense throws deep vs defense that allows YAC - explosive play potential"
-    elif offense_air_share < 45 and defense_air_share > 55:
-        return "🔄 Underneath vs Air-Prone", "Short passing game vs defense weak against deep balls - mismatch favors offense"
-    elif offense_air_share > 55 and defense_air_share < 45:
-        return "🛡️ Vertical vs Tight Coverage", "Deep throws vs defense that limits air yards - tough matchup"
-    elif offense_air_share < 45 and defense_yac_share < 45:
-        return "🚧 Underneath vs YAC-Stingy", "Short passes vs defense that prevents YAC - limited upside"
-    elif abs(offense_air_share - 50) < 10 and abs(defense_air_share - 50) < 10:
-        return "⚖️ Balanced", "Even matchup between air/YAC tendencies"
-    elif offense_air_share > 55:
-        return "✈️ Vertical Offense", "Team relies heavily on deep passing"
-    elif offense_air_share < 45:
-        return "🏃 YAC-Dependent Offense", "Team generates yards after catch"
+    # Categorize offense and defense
+    off_style = categorize_offensive_style(offense_air_share)
+    def_weakness = categorize_defensive_weakness(defense_air_share, defense_yac_share)
+
+    # FAVORABLE MATCHUPS (Offense exploits defensive weakness)
+    if off_style == "Deep Ball" and defense_yac_share >= 55:
+        return "🎯 EXPLOIT: Deep Ball vs YAC-Leaky", f"Vertical attack ({offense_air_share:.0f}% air) faces defense allowing YAC ({defense_yac_share:.0f}%) - big play potential"
+
+    elif off_style == "Deep Ball" and defense_air_share >= 60:
+        return "🔥 EXPLOIT: Deep Ball vs Air-Prone", f"Vertical attack ({offense_air_share:.0f}% air) vs defense weak against deep balls ({defense_air_share:.0f}% air allowed) - ELITE matchup"
+
+    elif off_style == "Short Passing" and defense_air_share >= 60:
+        return "✅ FAVORABLE: Short Game vs Air-Prone", f"YAC offense ({offense_yac_share:.0f}% YAC) vs defense allowing deep balls - favorable mismatch"
+
+    # UNFAVORABLE MATCHUPS (Offense strength neutralized)
+    elif off_style == "Deep Ball" and defense_air_share < 45:
+        return "🛡️ TOUGH: Deep Ball vs Tight Coverage", f"Vertical attack ({offense_air_share:.0f}% air) vs defense limiting air yards ({defense_air_share:.0f}%) - challenging matchup"
+
+    elif off_style == "Short Passing" and defense_yac_share < 45:
+        return "🚧 TOUGH: Short Game vs YAC-Stingy", f"YAC offense ({offense_yac_share:.0f}%) vs defense preventing YAC ({defense_yac_share:.0f}%) - limited upside"
+
+    # BALANCED/NEUTRAL MATCHUPS
+    elif off_style == "Balanced" and def_weakness == "Balanced Defense":
+        return "⚖️ NEUTRAL: Balanced Matchup", f"Balanced offense ({offense_air_share:.0f}% air, {offense_yac_share:.0f}% YAC) vs balanced defense"
+
+    elif off_style == "Deep Ball":
+        return f"✈️ Deep Ball Offense", f"Vertical passing attack ({offense_air_share:.0f}% air, {offense_yac_share:.0f}% YAC)"
+
+    elif off_style == "Short Passing":
+        return f"🏃 YAC-Dependent Offense", f"Underneath routes and YAC ({offense_air_share:.0f}% air, {offense_yac_share:.0f}% YAC)"
+
     else:
-        return "⚪ Neutral Matchup", "Standard air/YAC distribution"
+        return "⚪ Standard Matchup", f"Air: {offense_air_share:.0f}% vs Def Air Allowed: {defense_air_share:.0f}%"
 
 
 # ============================================================================

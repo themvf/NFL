@@ -2140,6 +2140,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush Yds': round(player['median_rush_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Median Yds': round(player['median_rush_yds'] + player['median_rec_yds'], 1),
                     'Avg Air Yds': round(player.get('avg_rec_air_yds', 0), 1),
                     'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
@@ -2183,6 +2184,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rush Yds': 0,
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
+                    'Median Yds': round(player['median_rec_yds'], 1),
                     'Avg Air Yds': round(player.get('avg_rec_air_yds', 0), 1),
                     'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
@@ -2250,6 +2252,299 @@ def get_matchup_rating(multiplier):
         return '⚠️ Tough', 'background-color: #FFD3D3'
     else:
         return '🛑 Brutal', 'background-color: #FF9090'
+
+
+# ============================================================================
+# Air Yards / YAC Matchup Analysis Functions
+# ============================================================================
+
+def calculate_air_yac_matchup_stats(season, max_week=None):
+    """
+    Calculate Air Yards vs YAC matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - offense_air_yards: Average air yards per game (offense)
+    - offense_yac_yards: Average YAC per game (offense)
+    - offense_passing_yards: Total passing yards per game
+    - offense_air_share: Percentage of passing yards from air yards
+    - offense_yac_share: Percentage of passing yards from YAC
+    - defense_air_allowed: Average air yards allowed per game
+    - defense_yac_allowed: Average YAC allowed per game
+    - defense_air_share: Percentage of yards allowed via air
+    - defense_yac_share: Percentage of yards allowed via YAC
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Calculate offensive air yards and YAC stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(receiving_air_yards) as total_air_yards,
+            SUM(receiving_yards_after_catch) as total_yac,
+            SUM(receiving_yards) as total_receiving_yards
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND (receiving_air_yards > 0 OR receiving_yards_after_catch > 0)
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        # Calculate per-game averages and shares for offense
+        offense_df['offense_air_yards'] = (offense_df['total_air_yards'] / offense_df['games']).round(1)
+        offense_df['offense_yac_yards'] = (offense_df['total_yac'] / offense_df['games']).round(1)
+        offense_df['offense_passing_yards'] = (offense_df['total_receiving_yards'] / offense_df['games']).round(1)
+
+        # Calculate shares (avoid division by zero)
+        offense_df['offense_air_share'] = (
+            (offense_df['total_air_yards'] /
+             offense_df['total_receiving_yards'].replace(0, 1)) * 100
+        ).round(1)
+        offense_df['offense_yac_share'] = (
+            (offense_df['total_yac'] /
+             offense_df['total_receiving_yards'].replace(0, 1)) * 100
+        ).round(1)
+
+        # Calculate defensive stats (opponent's offensive stats)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(receiving_air_yards) as total_air_allowed,
+            SUM(receiving_yards_after_catch) as total_yac_allowed,
+            SUM(receiving_yards) as total_receiving_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND (receiving_air_yards > 0 OR receiving_yards_after_catch > 0)
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        # Calculate per-game averages and shares for defense
+        defense_df['defense_air_allowed'] = (defense_df['total_air_allowed'] / defense_df['games']).round(1)
+        defense_df['defense_yac_allowed'] = (defense_df['total_yac_allowed'] / defense_df['games']).round(1)
+        defense_df['defense_passing_allowed'] = (defense_df['total_receiving_allowed'] / defense_df['games']).round(1)
+
+        defense_df['defense_air_share'] = (
+            (defense_df['total_air_allowed'] /
+             defense_df['total_receiving_allowed'].replace(0, 1)) * 100
+        ).round(1)
+        defense_df['defense_yac_share'] = (
+            (defense_df['total_yac_allowed'] /
+             defense_df['total_receiving_allowed'].replace(0, 1)) * 100
+        ).round(1)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'offense_air_yards', 'offense_yac_yards', 'offense_passing_yards',
+                       'offense_air_share', 'offense_yac_share']],
+            defense_df[['team', 'defense_air_allowed', 'defense_yac_allowed', 'defense_passing_allowed',
+                       'defense_air_share', 'defense_yac_share']],
+            on='team',
+            how='outer'
+        )
+
+        # Fill NaN values with 0
+        result_df = result_df.fillna(0)
+
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Air/YAC matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def generate_air_yac_storyline(offense_air_share, defense_yac_share, defense_air_share, offense_yac_share):
+    """
+    Generate narrative storyline based on air yards vs YAC matchup.
+
+    Logic:
+    - Vertical offense (>55% air) vs YAC-leaky defense (>55% YAC allowed) = vertical_vs_yac_leaky
+    - Underneath offense (<45% air) vs Air-prone defense (>55% air allowed) = underneath_vs_air_prone
+    - Vertical offense vs Air-stingy defense (<45% air allowed) = vertical_vs_tight_coverage
+    - Underneath offense vs YAC-stingy defense (<45% YAC allowed) = underneath_vs_yac_stingy
+    - Otherwise = balanced
+    """
+
+    if offense_air_share > 55 and defense_yac_share > 55:
+        return "🎯 Vertical vs YAC-Leaky", "Offense throws deep vs defense that allows YAC - explosive play potential"
+    elif offense_air_share < 45 and defense_air_share > 55:
+        return "🔄 Underneath vs Air-Prone", "Short passing game vs defense weak against deep balls - mismatch favors offense"
+    elif offense_air_share > 55 and defense_air_share < 45:
+        return "🛡️ Vertical vs Tight Coverage", "Deep throws vs defense that limits air yards - tough matchup"
+    elif offense_air_share < 45 and defense_yac_share < 45:
+        return "🚧 Underneath vs YAC-Stingy", "Short passes vs defense that prevents YAC - limited upside"
+    elif abs(offense_air_share - 50) < 10 and abs(defense_air_share - 50) < 10:
+        return "⚖️ Balanced", "Even matchup between air/YAC tendencies"
+    elif offense_air_share > 55:
+        return "✈️ Vertical Offense", "Team relies heavily on deep passing"
+    elif offense_air_share < 45:
+        return "🏃 YAC-Dependent Offense", "Team generates yards after catch"
+    else:
+        return "⚪ Neutral Matchup", "Standard air/YAC distribution"
+
+
+# ============================================================================
+# QB Pressure / Sack Matchup Analysis Functions
+# ============================================================================
+
+def calculate_qb_pressure_stats(season, max_week=None):
+    """
+    Calculate QB pressure statistics from PFR advanced stats.
+
+    Returns DataFrame with columns:
+    - player: QB name
+    - team: Team abbreviation
+    - games: Games played
+    - pressures: Total pressures faced
+    - sacks: Total sacks taken
+    - hurries: Total hurries
+    - hits: Total QB hits
+    - pressure_rate: % of dropbacks with pressure
+    - sacks_per_pressure: Sacks / pressures (vulnerability metric)
+    - bad_throw_pct: Bad throw percentage under pressure
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get QB pressure stats from pfr_advstats_pass_week
+        query = f"""
+        SELECT
+            pfr_player_name as player,
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(COALESCE(times_pressured, 0)) as pressures,
+            SUM(COALESCE(times_sacked, 0)) as sacks,
+            SUM(COALESCE(times_hurried, 0)) as hurries,
+            SUM(COALESCE(times_hit, 0)) as hits,
+            SUM(COALESCE(times_blitzed, 0)) as blitzes,
+            AVG(COALESCE(times_pressured_pct, 0)) * 100 as pressure_rate,
+            AVG(COALESCE(passing_bad_throw_pct, 0)) * 100 as bad_throw_pct
+        FROM pfr_advstats_pass_week
+        WHERE season = {season}
+        {week_filter}
+        GROUP BY pfr_player_name, team
+        HAVING pressures > 0
+        """
+
+        df = pd.read_sql_query(query, conn)
+
+        if not df.empty:
+            # Calculate sacks per pressure (vulnerability metric)
+            df['sacks_per_pressure'] = (df['sacks'] / df['pressures'].replace(0, 1) * 100).round(1)
+
+            # Calculate per-game averages
+            df['pressures_per_game'] = (df['pressures'] / df['games']).round(1)
+            df['sacks_per_game'] = (df['sacks'] / df['games']).round(1)
+
+            # Round other percentages
+            df['pressure_rate'] = df['pressure_rate'].round(1)
+            df['bad_throw_pct'] = df['bad_throw_pct'].round(1)
+
+        conn.close()
+        return df
+
+    except Exception as e:
+        st.error(f"Error calculating QB pressure stats: {e}")
+        return pd.DataFrame()
+
+
+def calculate_defense_pressure_stats(season, max_week=None):
+    """
+    Calculate defensive pressure statistics from PFR advanced stats.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - games: Games played
+    - pressures: Total pressures generated
+    - sacks: Total sacks
+    - hurries: Total hurries
+    - qb_hits: Total QB hits
+    - blitzes: Total blitzes sent
+    - pressure_rate: Average pressure rate
+    - sack_rate: Sacks per game
+    - blitz_rate: Blitzes per game
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Aggregate defensive pressure stats by team
+        query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(COALESCE(def_pressures, 0)) as pressures,
+            SUM(COALESCE(def_sacks, 0)) as sacks,
+            SUM(COALESCE(def_times_hurried, 0)) as hurries,
+            SUM(COALESCE(def_times_hitqb, 0)) as qb_hits,
+            SUM(COALESCE(def_times_blitzed, 0)) as blitzes
+        FROM pfr_advstats_def_week
+        WHERE season = {season}
+        {week_filter}
+        GROUP BY team
+        """
+
+        df = pd.read_sql_query(query, conn)
+
+        if not df.empty:
+            # Calculate per-game rates
+            df['pressures_per_game'] = (df['pressures'] / df['games']).round(1)
+            df['sacks_per_game'] = (df['sacks'] / df['games']).round(1)
+            df['hurries_per_game'] = (df['hurries'] / df['games']).round(1)
+            df['qb_hits_per_game'] = (df['qb_hits'] / df['games']).round(1)
+            df['blitzes_per_game'] = (df['blitzes'] / df['games']).round(1)
+
+            # Calculate pressure efficiency (sacks per pressure)
+            df['sack_per_pressure_pct'] = (df['sacks'] / df['pressures'].replace(0, 1) * 100).round(1)
+
+        conn.close()
+        return df
+
+    except Exception as e:
+        st.error(f"Error calculating defense pressure stats: {e}")
+        return pd.DataFrame()
+
+
+def generate_qb_pressure_storyline(qb_pressure_rate, def_pressure_rate, sacks_per_pressure):
+    """
+    Generate narrative storyline based on QB pressure vulnerability vs defensive pressure strength.
+
+    Logic:
+    - High QB pressure rate (>30%) + High def pressure rate (>12/game) = DANGER ZONE
+    - Low QB pressure rate (<20%) + High def pressure rate = Tough Test
+    - High QB pressure rate + Low def pressure rate (<8/game) = Exploitable
+    - Low QB pressure rate + Low def pressure rate = Clean Pocket
+    - Otherwise = Competitive Matchup
+    """
+
+    if qb_pressure_rate > 30 and def_pressure_rate > 12:
+        return "🚨 DANGER ZONE", f"QB struggles with pressure ({qb_pressure_rate:.1f}%) vs aggressive pass rush ({def_pressure_rate:.1f}/gm)"
+    elif qb_pressure_rate < 20 and def_pressure_rate > 12:
+        return "⚔️ Tough Test", f"Good protection ({qb_pressure_rate:.1f}%) faces strong pass rush ({def_pressure_rate:.1f}/gm)"
+    elif qb_pressure_rate > 30 and def_pressure_rate < 8:
+        return "🎯 Exploit able", f"QB vulnerable to pressure ({qb_pressure_rate:.1f}%) vs weak pass rush ({def_pressure_rate:.1f}/gm)"
+    elif qb_pressure_rate < 20 and def_pressure_rate < 8:
+        return "✅ Clean Pocket", f"Good protection ({qb_pressure_rate:.1f}%) vs weak pass rush ({def_pressure_rate:.1f}/gm) - QB should thrive"
+    elif sacks_per_pressure > 30:
+        return "⚠️ High Sack Risk", f"QB takes sacks on {sacks_per_pressure:.1f}% of pressures - pocket awareness concern"
+    else:
+        return "⚪ Competitive Battle", "Standard pressure matchup"
 
 
 # ============================================================================
@@ -13519,6 +13814,31 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 *Projections are calculated by multiplying player's median yards by the defensive matchup factor. The multiplier shows how the opponent's defense compares to league average.*
                 """)
 
+                # ========== AIR YARDS / YAC MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🎯 **Air Yards vs YAC Matchup Analysis** - Identify WR/TE Opportunities", expanded=False):
+                    st.markdown("""
+                    This analysis shows which teams' offensive passing tendencies match up well against their opponent's defensive vulnerabilities.
+                    Look for teams with vertical passing attacks facing defenses that allow yards after catch (YAC).
+                    """)
+
+                    # Get upcoming games for this week
+                    upcoming_games_df = df[['Home Team', 'Away Team']].copy()
+                    upcoming_games_df.columns = ['home_team', 'away_team']
+
+                    render_air_yac_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
+                # ========== QB PRESSURE MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("⚡ **QB Pressure Matchup Analysis** - Identify Protection Concerns", expanded=False):
+                    st.markdown("""
+                    This analysis reveals quarterback protection vulnerabilities by comparing QB pressure rates against opposing defensive pass rush strength.
+                    **DANGER ZONE** matchups indicate QBs who struggle under pressure facing aggressive defenses.
+                    """)
+
+                    # Use same upcoming games dataframe
+                    render_qb_pressure_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
             else:
                 st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")
 
@@ -13544,6 +13864,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Team PPG Home vs Away",
             "Team Plays per Game vs Points per Game",
             "Defense Yards Allowed (Pass vs Rush)",
+            "Air Yards vs YAC Matchup Analysis",
+            "QB Pressure Matchup Analysis",
             "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
@@ -13567,6 +13889,10 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_team_plays_ppg_chart(season, week)
     elif chart_type == "Defense Yards Allowed (Pass vs Rush)":
         render_defense_yards_allowed_chart(season, week)
+    elif chart_type == "Air Yards vs YAC Matchup Analysis":
+        render_air_yac_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "QB Pressure Matchup Analysis":
+        render_qb_pressure_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "Power Rating vs Offensive Yards":
         render_power_rating_yards_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
@@ -13996,6 +14322,432 @@ def render_defense_yards_allowed_chart(season: Optional[int], week: Optional[int
 
     except Exception as e:
         st.error(f"Error generating chart: {e}")
+
+
+def render_air_yac_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: Air Yards vs YAC Matchup Analysis for Upcoming Games"""
+    st.subheader("🎯 Air Yards vs YAC Matchup Analysis")
+    st.markdown("""
+    **Goal:** Identify favorable/unfavorable passing matchups based on offensive air yards tendencies vs defensive YAC vulnerabilities.
+    - **Top-right quadrant:** 🎯 Explosive potential (vertical offense vs YAC-leaky defense)
+    - **Top-left:** 🔄 Mismatch (underneath offense vs air-prone defense)
+    - **Bottom-right:** 🛡️ Tough matchup (vertical offense vs tight coverage)
+    - **Bottom-left:** 🚧 Limited upside (underneath offense vs YAC-stingy defense)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate Air/YAC stats for all teams
+        air_yac_df = calculate_air_yac_matchup_stats(season, week)
+
+        if air_yac_df.empty:
+            st.info("No Air Yards/YAC data available for selected filters")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Get home team offense vs away team defense
+                home_stats = air_yac_df[air_yac_df['team'] == home_team]
+                away_defense_stats = air_yac_df[air_yac_df['team'] == away_team]
+
+                if not home_stats.empty and not away_defense_stats.empty:
+                    home_off_air_share = home_stats.iloc[0]['offense_air_share']
+                    away_def_yac_share = away_defense_stats.iloc[0]['defense_yac_share']
+                    away_def_air_share = away_defense_stats.iloc[0]['defense_air_share']
+                    home_off_yac_share = home_stats.iloc[0]['offense_yac_share']
+
+                    storyline, description = generate_air_yac_storyline(
+                        home_off_air_share, away_def_yac_share, away_def_air_share, home_off_yac_share
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'air_share': home_off_air_share,
+                        'opp_yac_share': away_def_yac_share,
+                        'storyline': storyline,
+                        'description': description,
+                        'projected_rec_yds': home_stats.iloc[0]['offense_passing_yards']
+                    })
+
+                # Get away team offense vs home team defense
+                away_stats = air_yac_df[air_yac_df['team'] == away_team]
+                home_defense_stats = air_yac_df[air_yac_df['team'] == home_team]
+
+                if not away_stats.empty and not home_defense_stats.empty:
+                    away_off_air_share = away_stats.iloc[0]['offense_air_share']
+                    home_def_yac_share = home_defense_stats.iloc[0]['defense_yac_share']
+                    home_def_air_share = home_defense_stats.iloc[0]['defense_air_share']
+                    away_off_yac_share = away_stats.iloc[0]['offense_yac_share']
+
+                    storyline, description = generate_air_yac_storyline(
+                        away_off_air_share, home_def_yac_share, home_def_air_share, away_off_yac_share
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'air_share': away_off_air_share,
+                        'opp_yac_share': home_def_yac_share,
+                        'storyline': storyline,
+                        'description': description,
+                        'projected_rec_yds': away_stats.iloc[0]['offense_passing_yards']
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            # Show all teams (not matchup-specific)
+            matchup_df = air_yac_df.copy()
+            matchup_df['air_share'] = matchup_df['offense_air_share']
+            matchup_df['opp_yac_share'] = matchup_df['defense_yac_share']
+            matchup_df['projected_rec_yds'] = matchup_df['offense_passing_yards']
+            matchup_df = matchup_df.rename(columns={'team': 'team'})
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        fig.add_trace(go.Scatter(
+            x=matchup_df['air_share'],
+            y=matchup_df['opp_yac_share'],
+            mode='markers',
+            marker=dict(
+                size=1,
+                color=matchup_df['projected_rec_yds'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Proj Pass Yds"),
+                opacity=0
+            ),
+            text=matchup_df['team'] + ('' if 'opponent' not in matchup_df.columns else ' vs ' + matchup_df['opponent']),
+            customdata=matchup_df[['projected_rec_yds'] + (['storyline'] if 'storyline' in matchup_df.columns else [])].values if 'storyline' in matchup_df.columns else matchup_df[['projected_rec_yds']].values,
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Offense Air Share: %{x:.1f}%<br>' +
+                         'Defense YAC Share Allowed: %{y:.1f}%<br>' +
+                         'Projected Receiving Yds/G: %{customdata[0]:.1f}<br>' +
+                         ('%{customdata[1]}<br>' if 'storyline' in matchup_df.columns else '') +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_air_share = matchup_df['air_share'].mean()
+        avg_yac_share = matchup_df['opp_yac_share'].mean()
+
+        fig.add_hline(y=avg_yac_share, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Defense YAC%", annotation_position="right")
+        fig.add_vline(x=avg_air_share, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Offense Air%", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=matchup_df['air_share'].max() * 0.95, y=matchup_df['opp_yac_share'].max() * 0.95,
+                          text="🎯 Explosive Potential", showarrow=False, font=dict(size=12, color="green"))
+        fig.add_annotation(x=matchup_df['air_share'].min() * 1.05, y=matchup_df['opp_yac_share'].max() * 0.95,
+                          text="🔄 Favorable Mismatch", showarrow=False, font=dict(size=12, color="blue"))
+        fig.add_annotation(x=matchup_df['air_share'].max() * 0.95, y=matchup_df['opp_yac_share'].min() * 1.05,
+                          text="🛡️ Tough Matchup", showarrow=False, font=dict(size=12, color="orange"))
+        fig.add_annotation(x=matchup_df['air_share'].min() * 1.05, y=matchup_df['opp_yac_share'].min() * 1.05,
+                          text="🚧 Limited Upside", showarrow=False, font=dict(size=12, color="red"))
+
+        # Calculate logo sizes based on data range
+        x_range = matchup_df['air_share'].max() - matchup_df['air_share'].min()
+        y_range = matchup_df['opp_yac_share'].max() - matchup_df['opp_yac_share'].min()
+        logo_size_x = max(x_range * 0.06, 2)
+        logo_size_y = max(y_range * 0.06, 2)
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in matchup_df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team']),
+                xref="x",
+                yref="y",
+                x=row['air_share'],
+                y=row['opp_yac_share'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Air Yards vs YAC Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Offense Air Share (%)",
+            yaxis_title="Defense YAC Share Allowed (%)",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            with st.expander("📋 View Matchup Storylines"):
+                display_df = matchup_df[['team', 'opponent', 'location', 'air_share', 'opp_yac_share',
+                                        'storyline', 'description', 'projected_rec_yds']].copy()
+                display_df.columns = ['Team', 'Opponent', 'Location', 'Off Air %', 'Def YAC %',
+                                     'Storyline', 'Description', 'Proj Pass Yds']
+                display_df = display_df.round({'Off Air %': 1, 'Def YAC %': 1, 'Proj Pass Yds': 1})
+                display_df = display_df.sort_values('Proj Pass Yds', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                # Highlight top storylines
+                st.markdown("### 🔥 Key Matchups This Week")
+                explosive = display_df[display_df['Storyline'].str.contains('Vertical vs YAC')]
+                if not explosive.empty:
+                    st.success(f"**Explosive Potential:** {len(explosive)} matchup(s) with vertical offense vs YAC-leaky defense")
+                    for _, row in explosive.head(3).iterrows():
+                        st.markdown(f"- **{row['Team']} vs {row['Opponent']}**: {row['Description']}")
+
+        else:
+            # Show general team stats
+            with st.expander("📋 View Air/YAC Stats Table"):
+                display_df = air_yac_df[['team', 'offense_air_share', 'offense_yac_share',
+                                         'defense_air_share', 'defense_yac_share']].copy()
+                display_df.columns = ['Team', 'Off Air %', 'Off YAC %', 'Def Air %', 'Def YAC %']
+                display_df = display_df.round(1).sort_values('Off Air %', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating Air/YAC matchup chart: {e}")
+
+
+def render_qb_pressure_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: QB Pressure/Sack Matchup Analysis for Upcoming Games"""
+    st.subheader("⚡ QB Pressure Matchup Analysis")
+    st.markdown("""
+    **Goal:** Identify QB protection concerns based on QB pressure vulnerability vs defensive pass rush strength.
+    - **Top-right quadrant:** 🚨 DANGER ZONE (vulnerable QB vs aggressive pass rush)
+    - **Top-left:** ⚔️ Tough test (good protection vs strong rush)
+    - **Bottom-right:** 🎯 Exploitable (vulnerable QB vs weak rush)
+    - **Bottom-left:** ✅ Clean pocket expected
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate QB and defensive pressure stats
+        qb_stats = calculate_qb_pressure_stats(season, week)
+        def_stats = calculate_defense_pressure_stats(season, week)
+
+        if qb_stats.empty or def_stats.empty:
+            st.info("No QB pressure data available for selected filters. PFR advanced stats may be limited.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            # Get starting QBs from schedules table for upcoming games
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Get home team QB stats
+                home_qbs = qb_stats[qb_stats['team'] == home_team]
+                if not home_qbs.empty:
+                    # Take the QB with most games played
+                    home_qb = home_qbs.sort_values('games', ascending=False).iloc[0]
+
+                    # Get away team defense stats
+                    away_def = def_stats[def_stats['team'] == away_team]
+
+                    if not away_def.empty:
+                        qb_pressure_rate = home_qb['pressure_rate']
+                        def_pressure_rate = away_def.iloc[0]['pressures_per_game']
+                        sacks_per_pressure = home_qb['sacks_per_pressure']
+
+                        storyline, description = generate_qb_pressure_storyline(
+                            qb_pressure_rate, def_pressure_rate, sacks_per_pressure
+                        )
+
+                        matchup_data.append({
+                            'qb': home_qb['player'],
+                            'team': home_team,
+                            'opponent': away_team,
+                            'location': 'Home',
+                            'qb_pressure_rate': qb_pressure_rate,
+                            'def_pressure_rate': def_pressure_rate,
+                            'sacks_per_pressure': sacks_per_pressure,
+                            'storyline': storyline,
+                            'description': description,
+                            'projected_pass_yds': 250.0  # Placeholder - could calculate actual projection
+                        })
+
+                # Get away team QB stats
+                away_qbs = qb_stats[qb_stats['team'] == away_team]
+                if not away_qbs.empty:
+                    # Take the QB with most games played
+                    away_qb = away_qbs.sort_values('games', ascending=False).iloc[0]
+
+                    # Get home team defense stats
+                    home_def = def_stats[def_stats['team'] == home_team]
+
+                    if not home_def.empty:
+                        qb_pressure_rate = away_qb['pressure_rate']
+                        def_pressure_rate = home_def.iloc[0]['pressures_per_game']
+                        sacks_per_pressure = away_qb['sacks_per_pressure']
+
+                        storyline, description = generate_qb_pressure_storyline(
+                            qb_pressure_rate, def_pressure_rate, sacks_per_pressure
+                        )
+
+                        matchup_data.append({
+                            'qb': away_qb['player'],
+                            'team': away_team,
+                            'opponent': home_team,
+                            'location': 'Away',
+                            'qb_pressure_rate': qb_pressure_rate,
+                            'def_pressure_rate': def_pressure_rate,
+                            'sacks_per_pressure': sacks_per_pressure,
+                            'storyline': storyline,
+                            'description': description,
+                            'projected_pass_yds': 250.0  # Placeholder
+                        })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            # Show all QBs (not matchup-specific)
+            matchup_df = qb_stats.copy()
+            matchup_df['qb'] = matchup_df['player']
+            matchup_df['qb_pressure_rate'] = matchup_df['pressure_rate']
+            # For general view, use league average defensive pressure
+            avg_def_pressure = def_stats['pressures_per_game'].mean()
+            matchup_df['def_pressure_rate'] = avg_def_pressure
+            matchup_df['projected_pass_yds'] = 250.0
+
+        if matchup_df.empty:
+            st.info("No QB matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        hover_text = matchup_df['qb'] if 'opponent' not in matchup_df.columns else matchup_df['qb'] + ' (' + matchup_df['team'] + ') vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['qb_pressure_rate'],
+            y=matchup_df['def_pressure_rate'],
+            mode='markers',
+            marker=dict(
+                size=matchup_df['sacks_per_pressure'] if 'sacks_per_pressure' in matchup_df.columns else 10,  # Bubble size = sack vulnerability
+                sizemode='diameter',
+                sizeref=2,
+                sizemin=4,
+                color=matchup_df['projected_pass_yds'] if 'projected_pass_yds' in matchup_df.columns else matchup_df['pressure_rate'],
+                colorscale='RdYlGn_r',  # Reversed: red=high pressure, green=low
+                showscale=True,
+                colorbar=dict(title="Proj Pass Yds"),
+                opacity=0.6,
+                line=dict(width=2, color='white')
+            ),
+            text=hover_text,
+            customdata=matchup_df[['qb_pressure_rate', 'def_pressure_rate', 'sacks_per_pressure'] +
+                                  (['storyline'] if 'storyline' in matchup_df.columns else [])].values if 'storyline' in matchup_df.columns else matchup_df[['qb_pressure_rate', 'def_pressure_rate', 'sacks_per_pressure']].values,
+            hovertemplate='<b>%{text}</b><br>' +
+                         'QB Pressure Rate: %{x:.1f}%<br>' +
+                         'Opp Defense Pressures/Gm: %{y:.1f}<br>' +
+                         'Sacks per Pressure: %{customdata[2]:.1f}%<br>' +
+                         ('%{customdata[3]}<br>' if 'storyline' in matchup_df.columns else '') +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_qb_pressure = matchup_df['qb_pressure_rate'].mean()
+        avg_def_pressure = matchup_df['def_pressure_rate'].mean()
+
+        fig.add_hline(y=avg_def_pressure, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Def Pressure/Gm", annotation_position="right")
+        fig.add_vline(x=avg_qb_pressure, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg QB Pressure%", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=matchup_df['qb_pressure_rate'].max() * 0.95, y=matchup_df['def_pressure_rate'].max() * 0.95,
+                          text="🚨 DANGER ZONE", showarrow=False, font=dict(size=14, color="red"))
+        fig.add_annotation(x=matchup_df['qb_pressure_rate'].min() * 1.05, y=matchup_df['def_pressure_rate'].max() * 0.95,
+                          text="⚔️ Tough Test", showarrow=False, font=dict(size=14, color="orange"))
+        fig.add_annotation(x=matchup_df['qb_pressure_rate'].max() * 0.95, y=matchup_df['def_pressure_rate'].min() * 1.05,
+                          text="🎯 Exploitable", showarrow=False, font=dict(size=14, color="blue"))
+        fig.add_annotation(x=matchup_df['qb_pressure_rate'].min() * 1.05, y=matchup_df['def_pressure_rate'].min() * 1.05,
+                          text="✅ Clean Pocket", showarrow=False, font=dict(size=14, color="green"))
+
+        fig.update_layout(
+            title=f"QB Pressure Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="QB Pressure Rate (%)",
+            yaxis_title="Opposing Defense Pressures per Game",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            with st.expander("📋 View QB Pressure Matchup Details"):
+                display_df = matchup_df[['qb', 'team', 'opponent', 'location', 'qb_pressure_rate',
+                                        'def_pressure_rate', 'sacks_per_pressure', 'storyline', 'description']].copy()
+                display_df.columns = ['QB', 'Team', 'Opponent', 'Location', 'QB Press %',
+                                     'Def Press/Gm', 'Sacks/Press %', 'Storyline', 'Description']
+                display_df = display_df.round({'QB Press %': 1, 'Def Press/Gm': 1, 'Sacks/Press %': 1})
+                display_df = display_df.sort_values('QB Press %', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                # Highlight danger zone matchups
+                st.markdown("### 🚨 Watch List: Pressure Concerns")
+                danger = display_df[display_df['Storyline'].str.contains('DANGER')]
+                if not danger.empty:
+                    st.error(f"**{len(danger)} Danger Zone Matchup(s):** QB struggles with pressure facing aggressive defense")
+                    for _, row in danger.head(3).iterrows():
+                        st.markdown(f"- **{row['QB']} ({row['Team']}) vs {row['Opponent']}**: {row['Description']}")
+                else:
+                    st.success("No extreme danger zone matchups this week")
+
+                # Highlight clean pocket opportunities
+                clean = display_df[display_df['Storyline'].str.contains('Clean Pocket')]
+                if not clean.empty:
+                    st.success(f"**{len(clean)} Clean Pocket Opportunity(ies):** QB should have time to throw")
+                    for _, row in clean.head(3).iterrows():
+                        st.markdown(f"- **{row['QB']} ({row['Team']}) vs {row['Opponent']}**: {row['Description']}")
+
+        else:
+            # Show general QB stats
+            with st.expander("📋 View QB Pressure Stats"):
+                display_df = qb_stats[['player', 'team', 'pressure_rate', 'sacks_per_pressure',
+                                      'pressures_per_game', 'sacks_per_game']].copy()
+                display_df.columns = ['QB', 'Team', 'Pressure %', 'Sacks/Press %', 'Pressures/Gm', 'Sacks/Gm']
+                display_df = display_df.round(1).sort_values('Pressure %', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating QB pressure matchup chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
 
 
 def render_power_rating_yards_chart(season: Optional[int], week: Optional[int]):

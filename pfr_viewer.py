@@ -2790,6 +2790,155 @@ def generate_rushing_td_storyline(offense_rush_tds, defense_rush_tds_allowed):
 
 
 # ============================================================================
+# RB Rushing Yards Matchup Analysis Functions
+# ============================================================================
+
+def calculate_rushing_yards_matchup_stats(season, max_week=None):
+    """
+    Calculate RB Rushing Yards matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - offense_rush_yards: Rushing yards per game
+    - defense_rush_yards_allowed: Rushing yards allowed per game
+    - games: Games played
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive rushing yards stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(rushing_yards) as total_rush_yards
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'FB')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            offense_df['offense_rush_yards'] = (offense_df['total_rush_yards'] / offense_df['games']).round(1)
+
+        # Get defensive rushing yards stats (yards allowed)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(rushing_yards) as total_rush_yards_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'FB')
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            defense_df['defense_rush_yards_allowed'] = (
+                defense_df['total_rush_yards_allowed'] / defense_df['games']
+            ).round(1)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'offense_rush_yards']],
+            defense_df[['team', 'defense_rush_yards_allowed']],
+            on='team',
+            how='outer'
+        )
+
+        result_df = result_df.fillna(0)
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Rushing Yards matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_rushing_yards_offense(rush_yards_per_game):
+    """
+    Categorize offensive rushing yards production.
+
+    Benchmarks (based on API rushing_yards metric):
+    - Elite Ground Game (≥140 yards/game): High-volume rushing attack
+    - Balanced Run Game (100-140 yards/game): Standard rushing volume
+    - Pass-Heavy Offense (<100 yards/game): Conservative rushing approach
+    """
+    if rush_yards_per_game >= 140:
+        return "Elite Ground Game"
+    elif rush_yards_per_game >= 100:
+        return "Balanced Run Game"
+    else:
+        return "Pass-Heavy Offense"
+
+
+def categorize_rushing_yards_defense(rush_yards_allowed_per_game):
+    """
+    Categorize defensive rushing yards vulnerability.
+
+    Benchmarks (based on API rushing_yards allowed):
+    - Run Funnel Defense (≥130 yards/game allowed): Allows high rushing volume
+    - Average Run Defense (100-130 yards/game): League standard run defense
+    - Elite Run Defense (<100 yards/game): Dominant at limiting rushing yards
+    """
+    if rush_yards_allowed_per_game >= 130:
+        return "Run Funnel Defense"
+    elif rush_yards_allowed_per_game >= 100:
+        return "Average Run Defense"
+    else:
+        return "Elite Run Defense"
+
+
+def generate_rushing_yards_storyline(offense_rush_yards, defense_rush_yards_allowed):
+    """
+    Generate narrative storyline based on rushing yards production vs defensive vulnerability.
+
+    Favorable Matchups (High volume upside):
+    - Elite Ground Game vs Run Funnel (most explosive)
+    - Pass-Heavy vs Run Funnel (game script opportunity)
+    - Elite Ground Game vs Average Run Defense
+
+    Unfavorable Matchups (Limited volume):
+    - Elite Ground Game vs Elite Run Defense (grind it out)
+    - Pass-Heavy vs Elite Run Defense (lowest volume)
+    """
+
+    off_category = categorize_rushing_yards_offense(offense_rush_yards)
+    def_category = categorize_rushing_yards_defense(defense_rush_yards_allowed)
+
+    # EXPLOIT MATCHUPS (High volume upside)
+    if off_category == "Elite Ground Game" and defense_rush_yards_allowed >= 130:
+        return "🚀 CEILING EXPLOSION", f"Elite rushing attack ({offense_rush_yards:.0f} yds/gm) vs run funnel defense ({defense_rush_yards_allowed:.0f} allowed/gm) - Massive yardage upside"
+
+    elif off_category == "Pass-Heavy Offense" and defense_rush_yards_allowed >= 130:
+        return "📈 VOLUME SPIKE", f"Low-volume rush attack ({offense_rush_yards:.0f} yds/gm) vs run funnel ({defense_rush_yards_allowed:.0f} allowed/gm) - Game script opportunity"
+
+    elif off_category == "Elite Ground Game" and 100 <= defense_rush_yards_allowed < 130:
+        return "✅ FAVORABLE", f"Strong rushing attack ({offense_rush_yards:.0f} yds/gm) vs average run defense ({defense_rush_yards_allowed:.0f} allowed/gm) - Good yardage floor"
+
+    # TOUGH MATCHUPS (Limited volume)
+    elif off_category == "Elite Ground Game" and defense_rush_yards_allowed < 100:
+        return "💪 GRIND IT OUT", f"Elite rush attack ({offense_rush_yards:.0f} yds/gm) faces elite run defense ({defense_rush_yards_allowed:.0f} allowed/gm) - Limited ceiling"
+
+    elif off_category == "Pass-Heavy Offense" and defense_rush_yards_allowed < 100:
+        return "⚠️ LOW VOLUME", f"Weak rushing attack ({offense_rush_yards:.0f} yds/gm) vs elite run defense ({defense_rush_yards_allowed:.0f} allowed/gm) - Avoid in yardage formats"
+
+    # NEUTRAL MATCHUPS
+    elif off_category == "Balanced Run Game":
+        return "⚖️ BALANCED", f"Balanced rushing attack ({offense_rush_yards:.0f} yds/gm) vs defense allowing {defense_rush_yards_allowed:.0f} yards/gm"
+
+    else:
+        return "⚪ STANDARD", f"Rush Yards: {offense_rush_yards:.0f}/gm vs Def Allows: {defense_rush_yards_allowed:.0f}/gm"
+
+
+# ============================================================================
 # RB Pass-Catching Exploitation Matchup Analysis Functions
 # ============================================================================
 
@@ -3847,9 +3996,10 @@ def synthesize_qb_matchup(team, opponent, season, max_week=None):
 
 def synthesize_rb_matchup(team, opponent, season, max_week=None):
     """
-    Synthesize RB matchup by combining rushing TD and receiving storylines.
+    Synthesize RB matchup by combining rushing yards, rushing TD, and receiving storylines.
 
     Combines:
+    - Rushing Yards Matchup
     - Rushing TD Efficiency
     - RB Pass-Catching (PPR value)
 
@@ -3864,12 +4014,16 @@ def synthesize_rb_matchup(team, opponent, season, max_week=None):
     """
     try:
         # Calculate RB-related matchup stats
+        rush_yards_stats = calculate_rushing_yards_matchup_stats(season, max_week)
         rush_td_stats = calculate_rushing_td_matchup_stats(season, max_week)
         rb_rec_stats = calculate_rb_receiving_matchup_stats(season, max_week)
 
         # Extract team vs opponent data
-        team_rush = rush_td_stats[rush_td_stats['team'] == team]
-        opp_rush = rush_td_stats[rush_td_stats['team'] == opponent]
+        team_rush_yds = rush_yards_stats[rush_yards_stats['team'] == team]
+        opp_rush_yds = rush_yards_stats[rush_yards_stats['team'] == opponent]
+
+        team_rush_td = rush_td_stats[rush_td_stats['team'] == team]
+        opp_rush_td = rush_td_stats[rush_td_stats['team'] == opponent]
 
         team_rec = rb_rec_stats[rb_rec_stats['team'] == team]
         opp_rec = rb_rec_stats[rb_rec_stats['team'] == opponent]
@@ -3877,12 +4031,19 @@ def synthesize_rb_matchup(team, opponent, season, max_week=None):
         # Generate individual storylines
         storylines = {}
 
-        if not team_rush.empty and not opp_rush.empty:
-            rush_label, _ = generate_rushing_td_storyline(
-                team_rush.iloc[0]['offense_rush_tds'],
-                opp_rush.iloc[0]['defense_rush_tds_allowed']
+        if not team_rush_yds.empty and not opp_rush_yds.empty:
+            rush_yds_label, _ = generate_rushing_yards_storyline(
+                team_rush_yds.iloc[0]['offense_rush_yards'],
+                opp_rush_yds.iloc[0]['defense_rush_yards_allowed']
             )
-            storylines['rushing_td'] = (rush_label, score_storyline(rush_label))
+            storylines['rushing_yards'] = (rush_yds_label, score_storyline(rush_yds_label))
+
+        if not team_rush_td.empty and not opp_rush_td.empty:
+            rush_td_label, _ = generate_rushing_td_storyline(
+                team_rush_td.iloc[0]['offense_rush_tds'],
+                opp_rush_td.iloc[0]['defense_rush_tds_allowed']
+            )
+            storylines['rushing_td'] = (rush_td_label, score_storyline(rush_td_label))
 
         if not team_rec.empty and not opp_rec.empty:
             rec_label, _ = generate_rb_receiving_storyline(
@@ -3901,10 +4062,11 @@ def synthesize_rb_matchup(team, opponent, season, max_week=None):
                 'weighted_score': 0
             }
 
-        # Calculate weighted score (TDs more valuable than receiving in standard scoring)
+        # Calculate weighted score (Yards=40%, TDs=35%, Receiving=25%)
         weights = {
-            'rushing_td': 0.60,
-            'receiving': 0.40
+            'rushing_yards': 0.40,
+            'rushing_td': 0.35,
+            'receiving': 0.25
         }
 
         total_weight = sum(weights[k] for k in storylines.keys())
@@ -15449,6 +15611,17 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     # Use same upcoming games dataframe
                     render_rushing_td_matchup_chart(selected_season, selected_week, upcoming_games_df)
 
+                # ========== RB RUSHING YARDS MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🏃 **RB Rushing Yards Matchup** - Identify Volume Opportunities", expanded=False):
+                    st.markdown("""
+                    Match RB rushing yards vs defensive rushing yards allowed (API data: `rushing_yards`).
+                    Look for **CEILING EXPLOSION** and **VOLUME SPIKE** matchups for yardage upside.
+                    """)
+
+                    # Use same upcoming games dataframe
+                    render_rushing_yards_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
                 # ========== RB PASS-CATCHING MATCHUP ANALYSIS ==========
                 st.divider()
                 with st.expander("🎯 **RB Pass-Catching Matchup** - Identify PPR RB Value", expanded=False):
@@ -15545,6 +15718,7 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Air Yards vs YAC Matchup Analysis",
             "QB Pressure Matchup Analysis",
             "Rushing TD Efficiency Matchup Analysis",
+            "RB Rushing Yards Matchup Analysis",
             "RB Pass-Catching Matchup Analysis",
             "QB Passing TD Matchup Analysis",
             "QB Passing Yards Matchup Analysis",
@@ -15579,6 +15753,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_qb_pressure_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "Rushing TD Efficiency Matchup Analysis":
         render_rushing_td_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "RB Rushing Yards Matchup Analysis":
+        render_rushing_yards_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "RB Pass-Catching Matchup Analysis":
         render_rb_receiving_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "QB Passing TD Matchup Analysis":
@@ -16672,6 +16848,164 @@ def render_rushing_td_matchup_chart(season: Optional[int], week: Optional[int], 
 
     except Exception as e:
         st.error(f"Error generating rushing TD matchup chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_rushing_yards_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: RB Rushing Yards Matchup Analysis"""
+    st.subheader("🏃 RB Rushing Yards Matchup Analysis")
+    st.markdown("""
+    **Goal:** Match RB rushing yards vs defensive rushing yards allowed (API data: `rushing_yards` per game)
+    - **Top-right quadrant:** 🚀 CEILING EXPLOSION (elite ground game vs run funnel)
+    - **Top-left:** 📈 VOLUME SPIKE (pass-heavy vs run funnel)
+    - **Bottom-right:** 💪 GRIND IT OUT (elite ground game vs elite run defense)
+    - **Bottom-left:** ⚠️ LOW VOLUME (pass-heavy vs elite run defense)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate stats
+        stats = calculate_rushing_yards_matchup_stats(season, week)
+
+        if stats.empty:
+            st.info("No data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = stats[stats['team'] == home_team]
+                away_def = stats[stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_val = home_stats.iloc[0]['offense_rush_yards']
+                    defense_val = away_def.iloc[0]['defense_rush_yards_allowed']
+
+                    storyline, description = generate_rushing_yards_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'offense_rush_yards': offense_val,
+                        'defense_rush_yards_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = stats[stats['team'] == away_team]
+                home_def = stats[stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_val = away_stats.iloc[0]['offense_rush_yards']
+                    defense_val = home_def.iloc[0]['defense_rush_yards_allowed']
+
+                    storyline, description = generate_rushing_yards_storyline(
+                        offense_val, defense_val
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'offense_rush_yards': offense_val,
+                        'defense_rush_yards_allowed': defense_val,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            matchup_df = stats.copy()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['offense_rush_yards'],
+            y=matchup_df['defense_rush_yards_allowed'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['offense_rush_yards'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Rushing Yards per Game")
+            ),
+            text=hover_text,
+            hovertemplate='<b>%{text}</b><br>Rushing Yards per Game: %{x}<br>Rushing Yards Allowed per Game: %{y}<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add team logos
+        for _, row in matchup_df.iterrows():
+            team = row['team']
+            logo_url = get_team_logo_url(team)
+            if logo_url:
+                fig.add_layout_image(
+                    dict(
+                        source=logo_url,
+                        xref="x",
+                        yref="y",
+                        x=row['offense_rush_yards'],
+                        y=row['defense_rush_yards_allowed'],
+                        sizex=0.15 * (matchup_df['offense_rush_yards'].max() - matchup_df['offense_rush_yards'].min()),
+                        sizey=0.15 * (matchup_df['defense_rush_yards_allowed'].max() - matchup_df['defense_rush_yards_allowed'].min()),
+                        xanchor="center",
+                        yanchor="middle",
+                        sizing="contain",
+                        opacity=0.8,
+                        layer="above"
+                    )
+                )
+
+        # Add league average lines
+        avg_offense = matchup_df['offense_rush_yards'].mean()
+        avg_defense = matchup_df['defense_rush_yards_allowed'].mean()
+
+        fig.add_hline(y=avg_defense, line_dash="dash", line_color="gray", annotation_text="Avg Defense")
+        fig.add_vline(x=avg_offense, line_dash="dash", line_color="gray", annotation_text="Avg Offense")
+
+        fig.update_layout(
+            title=f"RB Rushing Yards Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Rushing Yards per Game",
+            yaxis_title="Rushing Yards Allowed per Game",
+            height=600,
+            hovermode='closest'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            st.subheader("Matchup Storylines")
+            display_df = matchup_df[['team', 'opponent', 'location', 'offense_rush_yards', 'defense_rush_yards_allowed', 'storyline', 'description']].copy()
+            display_df.columns = ['Team', 'Opponent', 'Location', 'Rush Yards', 'Yards Allowed', 'Storyline', 'Description']
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    except Exception as e:
+        st.error(f"Error generating chart: {e}")
         import traceback
         st.error(traceback.format_exc())
 

@@ -2630,6 +2630,326 @@ def generate_qb_pressure_storyline(qb_pressure_rate, def_pressure_rate, sacks_pe
 
 
 # ============================================================================
+# Rushing TD Efficiency Matchup Analysis Functions
+# ============================================================================
+
+def calculate_rushing_td_matchup_stats(season, max_week=None):
+    """
+    Calculate Rushing TD matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - offense_rush_tds: Rushing TDs scored per game
+    - offense_rush_td_rate: TD rate (TDs per carry)
+    - defense_rush_tds_allowed: Rushing TDs allowed per game
+    - games: Games played
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive rushing TD stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(rushing_tds) as total_rush_tds,
+            SUM(carries) as total_carries
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'QB', 'WR', 'TE')
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            # Calculate per-game averages and rates
+            offense_df['offense_rush_tds'] = (offense_df['total_rush_tds'] / offense_df['games']).round(2)
+            offense_df['offense_rush_td_rate'] = (
+                (offense_df['total_rush_tds'] / offense_df['total_carries'].replace(0, 1)) * 100
+            ).round(2)
+
+        # Get defensive rushing TD stats (TDs allowed)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(rushing_tds) as total_rush_tds_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'QB', 'WR', 'TE')
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            # Calculate per-game averages
+            defense_df['defense_rush_tds_allowed'] = (
+                defense_df['total_rush_tds_allowed'] / defense_df['games']
+            ).round(2)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'offense_rush_tds', 'offense_rush_td_rate']],
+            defense_df[['team', 'defense_rush_tds_allowed']],
+            on='team',
+            how='outer'
+        )
+
+        # Fill NaN values with 0
+        result_df = result_df.fillna(0)
+
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Rushing TD matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_rushing_td_offense(rush_tds_per_game):
+    """
+    Categorize offensive rushing TD production.
+
+    Benchmarks:
+    - Goal Line Pounder (>0.8 TDs/game): Heavy red zone rushing usage
+    - Balanced Rusher (0.4-0.8 TDs/game): Standard touchdown production
+    - Volume Back (<0.4 TDs/game): Yards but limited TDs
+    """
+    if rush_tds_per_game >= 0.8:
+        return "Goal Line Pounder"
+    elif rush_tds_per_game >= 0.4:
+        return "Balanced Rusher"
+    else:
+        return "Volume Back"
+
+
+def categorize_rushing_td_defense(rush_tds_allowed_per_game):
+    """
+    Categorize defensive rushing TD vulnerability.
+
+    Benchmarks:
+    - TD-Prone (>1.2 TDs/game allowed): Weak goal line defense
+    - Average (0.7-1.2 TDs/game): League standard
+    - Stingy (<0.7 TDs/game): Strong red zone defense
+    """
+    if rush_tds_allowed_per_game >= 1.2:
+        return "TD-Prone"
+    elif rush_tds_allowed_per_game >= 0.7:
+        return "Average"
+    else:
+        return "Stingy"
+
+
+def generate_rushing_td_storyline(offense_rush_tds, defense_rush_tds_allowed):
+    """
+    Generate narrative storyline based on rushing TD production vs defensive vulnerability.
+
+    Favorable Matchups (High TD upside):
+    - Goal Line Pounder vs TD-Prone defense (most explosive)
+    - Volume Back vs TD-Prone defense (breakout potential)
+    - Goal Line Pounder vs Average defense
+
+    Unfavorable Matchups (Limited TD upside):
+    - Goal Line Pounder vs Stingy defense (strength vs strength)
+    - Volume Back vs Stingy defense (worst case)
+    """
+
+    off_category = categorize_rushing_td_offense(offense_rush_tds)
+    def_category = categorize_rushing_td_defense(defense_rush_tds_allowed)
+
+    # EXPLOIT MATCHUPS (High TD upside)
+    if off_category == "Goal Line Pounder" and defense_rush_tds_allowed >= 1.2:
+        return "🎯 EXPLOIT: Goal Line vs TD-Prone", f"Heavy red zone usage ({offense_rush_tds:.1f} TDs/gm) vs weak goal line D ({defense_rush_tds_allowed:.1f} allowed) - Elite TD upside"
+
+    elif off_category == "Volume Back" and defense_rush_tds_allowed >= 1.2:
+        return "🔥 SMASH SPOT: Volume vs Leaky", f"High-touch back faces porous rush defense ({defense_rush_tds_allowed:.1f} TDs allowed) - Breakout TD potential"
+
+    elif off_category == "Goal Line Pounder" and 0.7 <= defense_rush_tds_allowed < 1.2:
+        return "✅ FAVORABLE: Goal Line vs Average", f"TD-dependent back ({offense_rush_tds:.1f} TDs/gm) vs league-average defense - Solid TD odds"
+
+    # TOUGH MATCHUPS (Limited TD upside)
+    elif off_category == "Goal Line Pounder" and defense_rush_tds_allowed < 0.7:
+        return "🛡️ TOUGH: TD-Dependent vs Stingy", f"Goal line specialist vs elite red zone D ({defense_rush_tds_allowed:.1f} allowed) - Limited ceiling"
+
+    elif off_category == "Volume Back" and defense_rush_tds_allowed < 0.7:
+        return "🚧 YARDAGE ONLY: Volume vs Stingy", f"Back gets touches but defense limits TDs ({defense_rush_tds_allowed:.1f} allowed) - Expect yards, not scores"
+
+    # NEUTRAL MATCHUPS
+    elif off_category == "Balanced Rusher":
+        return "⚖️ BALANCED: Standard Rusher", f"Standard TD production ({offense_rush_tds:.1f}/gm) vs defense allowing {defense_rush_tds_allowed:.1f} TDs"
+
+    else:
+        return "⚪ STANDARD: Neutral Matchup", f"Rush TDs: {offense_rush_tds:.1f}/gm vs Def Allows: {defense_rush_tds_allowed:.1f}/gm"
+
+
+# ============================================================================
+# RB Pass-Catching Exploitation Matchup Analysis Functions
+# ============================================================================
+
+def calculate_rb_receiving_matchup_stats(season, max_week=None):
+    """
+    Calculate RB receiving matchup statistics for offense and defense.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - rb_targets_per_game: RB targets per game
+    - rb_receptions_per_game: RB receptions per game
+    - rb_rec_yards_per_game: RB receiving yards per game
+    - defense_rec_to_rb: Receiving yards allowed to RBs per game (from defensive stats)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get offensive RB receiving stats
+        offense_query = f"""
+        SELECT
+            team,
+            COUNT(DISTINCT week) as games,
+            SUM(targets) as total_rb_targets,
+            SUM(receptions) as total_rb_receptions,
+            SUM(receiving_yards) as total_rb_rec_yards
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position = 'RB'
+        GROUP BY team
+        """
+
+        offense_df = pd.read_sql_query(offense_query, conn)
+
+        if not offense_df.empty:
+            # Calculate per-game averages
+            offense_df['rb_targets_per_game'] = (offense_df['total_rb_targets'] / offense_df['games']).round(1)
+            offense_df['rb_receptions_per_game'] = (offense_df['total_rb_receptions'] / offense_df['games']).round(1)
+            offense_df['rb_rec_yards_per_game'] = (offense_df['total_rb_rec_yards'] / offense_df['games']).round(1)
+
+        # Get defensive RB receiving stats (yards allowed to RBs)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(receiving_yards) as total_rec_yards_to_rb
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position = 'RB'
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            # Calculate per-game averages
+            defense_df['defense_rec_to_rb'] = (
+                defense_df['total_rec_yards_to_rb'] / defense_df['games']
+            ).round(1)
+
+        # Merge offense and defense stats
+        result_df = pd.merge(
+            offense_df[['team', 'rb_targets_per_game', 'rb_receptions_per_game', 'rb_rec_yards_per_game']],
+            defense_df[['team', 'defense_rec_to_rb']],
+            on='team',
+            how='outer'
+        )
+
+        # Fill NaN values with 0
+        result_df = result_df.fillna(0)
+
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating RB receiving matchup stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_rb_receiving_offense(rb_targets_per_game):
+    """
+    Categorize offensive RB receiving usage.
+
+    Benchmarks:
+    - Bell Cow Pass-Catcher (>6 targets/game): Heavily involved in passing game
+    - Situational Receiver (3-6 targets/game): Third-down/passing situations
+    - Ground-Only (<3 targets/game): Limited passing work
+    """
+    if rb_targets_per_game >= 6:
+        return "Bell Cow Pass-Catcher"
+    elif rb_targets_per_game >= 3:
+        return "Situational Receiver"
+    else:
+        return "Ground-Only"
+
+
+def categorize_rb_receiving_defense(rec_yards_to_rb_per_game):
+    """
+    Categorize defensive RB receiving vulnerability.
+
+    Benchmarks:
+    - RB-Vulnerable (>45 yds/game to RBs): Struggles covering backs
+    - Average (30-45 yds/game): League standard
+    - Lockdown LBs (<30 yds/game): Elite RB coverage
+    """
+    if rec_yards_to_rb_per_game >= 45:
+        return "RB-Vulnerable"
+    elif rec_yards_to_rb_per_game >= 30:
+        return "Average"
+    else:
+        return "Lockdown LBs"
+
+
+def generate_rb_receiving_storyline(rb_targets_per_game, defense_rec_to_rb):
+    """
+    Generate narrative storyline based on RB receiving usage vs defensive vulnerability to RB targets.
+
+    Favorable Matchups (PPR gold):
+    - Bell Cow Pass-Catcher vs RB-Vulnerable defense
+    - Situational Receiver vs RB-Vulnerable defense
+    - Bell Cow Pass-Catcher vs Average defense
+
+    Unfavorable Matchups (Limited PPR value):
+    - Bell Cow Pass-Catcher vs Lockdown LBs
+    - Situational Receiver vs Lockdown LBs
+    """
+
+    off_category = categorize_rb_receiving_offense(rb_targets_per_game)
+    def_category = categorize_rb_receiving_defense(defense_rec_to_rb)
+
+    # EXPLOIT MATCHUPS (PPR gold)
+    if off_category == "Bell Cow Pass-Catcher" and defense_rec_to_rb >= 45:
+        return "🎯 PPR SMASH: Pass-Catcher vs RB-Vulnerable", f"RB averages {rb_targets_per_game:.1f} targets vs defense allowing {defense_rec_to_rb:.1f} rec yds to RBs - PPR gem"
+
+    elif off_category == "Situational Receiver" and defense_rec_to_rb >= 45:
+        return "💰 CHECKDOWN CITY: Passing Situations", f"RB gets {rb_targets_per_game:.1f} targets in passing downs vs vulnerable coverage ({defense_rec_to_rb:.1f} yds allowed) - Volume spike"
+
+    elif off_category == "Bell Cow Pass-Catcher" and 30 <= defense_rec_to_rb < 45:
+        return "✅ SOLID FLOOR: Pass-Catcher vs Average", f"High-target RB ({rb_targets_per_game:.1f}/gm) vs league-average coverage - Safe PPR floor"
+
+    # TOUGH MATCHUPS (Limited PPR value)
+    elif off_category == "Bell Cow Pass-Catcher" and defense_rec_to_rb < 30:
+        return "🚫 AVOID: Pass-Catcher vs Lockdown LBs", f"Primary receiving role neutralized vs elite RB coverage ({defense_rec_to_rb:.1f} yds allowed) - Fade in PPR"
+
+    elif off_category == "Situational Receiver" and defense_rec_to_rb < 30:
+        return "🛡️ LIMITED: Situational vs Lockdown", f"Limited targets ({rb_targets_per_game:.1f}/gm) vs strong coverage ({defense_rec_to_rb:.1f} yds) - Low ceiling"
+
+    # NEUTRAL/GROUND-ONLY MATCHUPS
+    elif off_category == "Ground-Only":
+        return "🚧 GROUND GAME: Rushing Specialist", f"RB rarely targeted ({rb_targets_per_game:.1f}/gm) - Non-factor in passing game"
+
+    else:
+        return "⚪ STANDARD: Neutral Matchup", f"RB Targets: {rb_targets_per_game:.1f}/gm vs Def Allows: {defense_rec_to_rb:.1f} yds to RBs"
+
+
+# ============================================================================
 # Projection Accuracy Tracking Functions
 # ============================================================================
 
@@ -13921,6 +14241,28 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     # Use same upcoming games dataframe
                     render_qb_pressure_matchup_chart(selected_season, selected_week, upcoming_games_df)
 
+                # ========== RUSHING TD EFFICIENCY MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🏈 **Rushing TD Efficiency Matchup** - Identify RB Touchdown Opportunities", expanded=False):
+                    st.markdown("""
+                    Identify RBs with high touchdown upside by matching rushing TD production vs defensive vulnerability.
+                    Look for **EXPLOIT** and **SMASH SPOT** matchups for fantasy RB starts.
+                    """)
+
+                    # Use same upcoming games dataframe
+                    render_rushing_td_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
+                # ========== RB PASS-CATCHING MATCHUP ANALYSIS ==========
+                st.divider()
+                with st.expander("🎯 **RB Pass-Catching Matchup** - Identify PPR RB Value", expanded=False):
+                    st.markdown("""
+                    Identify pass-catching RBs in favorable PPR matchups vs defenses vulnerable to RB targets.
+                    Look for **PPR SMASH** and **CHECKDOWN CITY** matchups for PPR league plays.
+                    """)
+
+                    # Use same upcoming games dataframe
+                    render_rb_receiving_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
             else:
                 st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")
 
@@ -13948,6 +14290,8 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
             "Defense Yards Allowed (Pass vs Rush)",
             "Air Yards vs YAC Matchup Analysis",
             "QB Pressure Matchup Analysis",
+            "Rushing TD Efficiency Matchup Analysis",
+            "RB Pass-Catching Matchup Analysis",
             "Power Rating vs Offensive Yards",
             "RB Efficiency (Rush Yards vs TDs)",
             "RB Yards per Carry",
@@ -13975,6 +14319,10 @@ def render_charts_view(season: Optional[int], week: Optional[int]):
         render_air_yac_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "QB Pressure Matchup Analysis":
         render_qb_pressure_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "Rushing TD Efficiency Matchup Analysis":
+        render_rushing_td_matchup_chart(season, week, upcoming_games=None)
+    elif chart_type == "RB Pass-Catching Matchup Analysis":
+        render_rb_receiving_matchup_chart(season, week, upcoming_games=None)
     elif chart_type == "Power Rating vs Offensive Yards":
         render_power_rating_yards_chart(season, week)
     elif chart_type == "RB Efficiency (Rush Yards vs TDs)":
@@ -14852,6 +15200,417 @@ def render_qb_pressure_matchup_chart(season: Optional[int], week: Optional[int],
 
     except Exception as e:
         st.error(f"Error generating QB pressure matchup chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_rushing_td_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: Rushing TD Efficiency Matchup Analysis"""
+    st.subheader("🏈 Rushing TD Efficiency Matchup Analysis")
+    st.markdown("""
+    **Goal:** Identify RBs with high touchdown upside based on rushing TD production vs defensive vulnerability.
+    - **Top-right quadrant:** 🎯 EXPLOIT (high TD production vs TD-prone defense)
+    - **Top-left:** 💎 VALUE (low TD team vs TD-prone defense - breakout potential)
+    - **Bottom-right:** 🛡️ TOUGH (high TD production vs stingy defense)
+    - **Bottom-left:** ⚖️ NEUTRAL (balanced matchup)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate rushing TD matchup stats
+        td_stats = calculate_rushing_td_matchup_stats(season, week)
+
+        if td_stats.empty:
+            st.info("No rushing TD data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team offense vs Away team defense
+                home_stats = td_stats[td_stats['team'] == home_team]
+                away_def = td_stats[td_stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    offense_rush_tds = home_stats.iloc[0]['offense_rush_tds']
+                    defense_rush_tds_allowed = away_def.iloc[0]['defense_rush_tds_allowed']
+
+                    storyline, description = generate_rushing_td_storyline(
+                        offense_rush_tds, defense_rush_tds_allowed
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'offense_rush_tds': offense_rush_tds,
+                        'defense_rush_tds_allowed': defense_rush_tds_allowed,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team offense vs Home team defense
+                away_stats = td_stats[td_stats['team'] == away_team]
+                home_def = td_stats[td_stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    offense_rush_tds = away_stats.iloc[0]['offense_rush_tds']
+                    defense_rush_tds_allowed = home_def.iloc[0]['defense_rush_tds_allowed']
+
+                    storyline, description = generate_rushing_td_storyline(
+                        offense_rush_tds, defense_rush_tds_allowed
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'offense_rush_tds': offense_rush_tds,
+                        'defense_rush_tds_allowed': defense_rush_tds_allowed,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            # Show all teams (not matchup-specific)
+            matchup_df = td_stats.copy()
+            # Use league average for defensive TD allowed
+            avg_def_tds = td_stats['defense_rush_tds_allowed'].mean()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No rushing TD matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['offense_rush_tds'],
+            y=matchup_df['defense_rush_tds_allowed'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['offense_rush_tds'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Off Rush TDs/Gm"),
+                opacity=0.6,
+                line=dict(width=2, color='white')
+            ),
+            text=hover_text,
+            customdata=matchup_df[['offense_rush_tds', 'defense_rush_tds_allowed'] +
+                                  (['storyline'] if 'storyline' in matchup_df.columns else [])].values if 'storyline' in matchup_df.columns else matchup_df[['offense_rush_tds', 'defense_rush_tds_allowed']].values,
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Offense Rush TDs/Gm: %{x:.2f}<br>' +
+                         'Def Rush TDs Allowed/Gm: %{y:.2f}<br>' +
+                         ('%{customdata[2]}<br>' if 'storyline' in matchup_df.columns else '') +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_off_tds = matchup_df['offense_rush_tds'].mean()
+        avg_def_tds = matchup_df['defense_rush_tds_allowed'].mean()
+
+        fig.add_hline(y=avg_def_tds, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Def TDs Allowed", annotation_position="right")
+        fig.add_vline(x=avg_off_tds, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Off TDs", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=matchup_df['offense_rush_tds'].max() * 0.95, y=matchup_df['defense_rush_tds_allowed'].max() * 0.95,
+                          text="🎯 EXPLOIT", showarrow=False, font=dict(size=14, color="green"))
+        fig.add_annotation(x=matchup_df['offense_rush_tds'].min() * 1.05, y=matchup_df['defense_rush_tds_allowed'].max() * 0.95,
+                          text="💎 BREAKOUT", showarrow=False, font=dict(size=14, color="blue"))
+        fig.add_annotation(x=matchup_df['offense_rush_tds'].max() * 0.95, y=matchup_df['defense_rush_tds_allowed'].min() * 1.05,
+                          text="🛡️ TOUGH", showarrow=False, font=dict(size=14, color="orange"))
+        fig.add_annotation(x=matchup_df['offense_rush_tds'].min() * 1.05, y=matchup_df['defense_rush_tds_allowed'].min() * 1.05,
+                          text="⚖️ NEUTRAL", showarrow=False, font=dict(size=14, color="gray"))
+
+        # Calculate logo sizes based on data range
+        x_range = matchup_df['offense_rush_tds'].max() - matchup_df['offense_rush_tds'].min()
+        y_range = matchup_df['defense_rush_tds_allowed'].max() - matchup_df['defense_rush_tds_allowed'].min()
+        logo_size_x = max(x_range * 0.08, 0.1)
+        logo_size_y = max(y_range * 0.08, 0.1)
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in matchup_df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team']),
+                xref="x",
+                yref="y",
+                x=row['offense_rush_tds'],
+                y=row['defense_rush_tds_allowed'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"Rushing TD Efficiency Matchup ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Offense Rushing TDs per Game",
+            yaxis_title="Defense Rushing TDs Allowed per Game",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            with st.expander("📋 View Rushing TD Matchup Details"):
+                display_df = matchup_df[['team', 'opponent', 'location', 'offense_rush_tds',
+                                        'defense_rush_tds_allowed', 'storyline', 'description']].copy()
+                display_df.columns = ['Team', 'Opponent', 'Location', 'Off Rush TDs/Gm',
+                                     'Def TDs Allowed/Gm', 'Storyline', 'Description']
+                display_df = display_df.round({'Off Rush TDs/Gm': 2, 'Def TDs Allowed/Gm': 2})
+                display_df = display_df.sort_values('Off Rush TDs/Gm', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                # Highlight EXPLOIT matchups
+                exploit = display_df[display_df['Storyline'].str.contains('EXPLOIT|SMASH')]
+                if not exploit.empty:
+                    st.success(f"**{len(exploit)} Favorable TD Matchup(s):** High RB touchdown upside")
+                    for _, row in exploit.head(3).iterrows():
+                        st.markdown(f"- **{row['Team']} vs {row['Opponent']}**: {row['Description']}")
+                else:
+                    st.info("No standout TD exploit matchups this week")
+
+                # Highlight TOUGH matchups
+                tough = display_df[display_df['Storyline'].str.contains('TOUGH|YARDAGE')]
+                if not tough.empty:
+                    st.warning(f"**{len(tough)} Tough TD Matchup(s):** Limited scoring potential")
+                    for _, row in tough.head(3).iterrows():
+                        st.markdown(f"- **{row['Team']} vs {row['Opponent']}**: {row['Description']}")
+
+    except Exception as e:
+        st.error(f"Error generating rushing TD matchup chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_rb_receiving_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: RB Pass-Catching Exploitation Matchup Analysis"""
+    st.subheader("🎯 RB Pass-Catching Matchup Analysis")
+    st.markdown("""
+    **Goal:** Identify pass-catching RBs in favorable PPR matchups vs defenses vulnerable to RB targets.
+    - **Top-right quadrant:** 🎯 PPR SMASH (high-target RB vs RB-vulnerable defense)
+    - **Top-left:** 💰 OPPORTUNITY (low-target team vs vulnerable coverage - volume spike)
+    - **Bottom-right:** 🚫 AVOID (high-target RB vs lockdown LB coverage)
+    - **Bottom-left:** ⚖️ NEUTRAL (balanced matchup)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate RB receiving matchup stats
+        rb_stats = calculate_rb_receiving_matchup_stats(season, week)
+
+        if rb_stats.empty:
+            st.info("No RB receiving data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            for _, game in upcoming_games.iterrows():
+                home_team = game['home_team']
+                away_team = game['away_team']
+
+                # Home team RBs vs Away team defense
+                home_stats = rb_stats[rb_stats['team'] == home_team]
+                away_def = rb_stats[rb_stats['team'] == away_team]
+
+                if not home_stats.empty and not away_def.empty:
+                    rb_targets_per_game = home_stats.iloc[0]['rb_targets_per_game']
+                    defense_rec_to_rb = away_def.iloc[0]['defense_rec_to_rb']
+
+                    storyline, description = generate_rb_receiving_storyline(
+                        rb_targets_per_game, defense_rec_to_rb
+                    )
+
+                    matchup_data.append({
+                        'team': home_team,
+                        'opponent': away_team,
+                        'location': 'Home',
+                        'rb_targets_per_game': rb_targets_per_game,
+                        'defense_rec_to_rb': defense_rec_to_rb,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+                # Away team RBs vs Home team defense
+                away_stats = rb_stats[rb_stats['team'] == away_team]
+                home_def = rb_stats[rb_stats['team'] == home_team]
+
+                if not away_stats.empty and not home_def.empty:
+                    rb_targets_per_game = away_stats.iloc[0]['rb_targets_per_game']
+                    defense_rec_to_rb = home_def.iloc[0]['defense_rec_to_rb']
+
+                    storyline, description = generate_rb_receiving_storyline(
+                        rb_targets_per_game, defense_rec_to_rb
+                    )
+
+                    matchup_data.append({
+                        'team': away_team,
+                        'opponent': home_team,
+                        'location': 'Away',
+                        'rb_targets_per_game': rb_targets_per_game,
+                        'defense_rec_to_rb': defense_rec_to_rb,
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            # Show all teams (not matchup-specific)
+            matchup_df = rb_stats.copy()
+            avg_def_rec = rb_stats['defense_rec_to_rb'].mean()
+            matchup_df['opponent'] = 'Avg'
+            matchup_df['location'] = 'N/A'
+
+        if matchup_df.empty:
+            st.info("No RB receiving matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add invisible markers for hover functionality
+        hover_text = matchup_df['team'] if 'opponent' not in matchup_df.columns or matchup_df['opponent'].iloc[0] == 'Avg' else matchup_df['team'] + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['rb_targets_per_game'],
+            y=matchup_df['defense_rec_to_rb'],
+            mode='markers',
+            marker=dict(
+                size=15,
+                color=matchup_df['rb_targets_per_game'],
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(title="RB Targets/Gm"),
+                opacity=0.6,
+                line=dict(width=2, color='white')
+            ),
+            text=hover_text,
+            customdata=matchup_df[['rb_targets_per_game', 'defense_rec_to_rb'] +
+                                  (['storyline'] if 'storyline' in matchup_df.columns else [])].values if 'storyline' in matchup_df.columns else matchup_df[['rb_targets_per_game', 'defense_rec_to_rb']].values,
+            hovertemplate='<b>%{text}</b><br>' +
+                         'RB Targets/Gm: %{x:.1f}<br>' +
+                         'Def Rec Yds to RBs: %{y:.1f}<br>' +
+                         ('%{customdata[2]}<br>' if 'storyline' in matchup_df.columns else '') +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_rb_targets = matchup_df['rb_targets_per_game'].mean()
+        avg_def_rec = matchup_df['defense_rec_to_rb'].mean()
+
+        fig.add_hline(y=avg_def_rec, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Def Rec to RBs", annotation_position="right")
+        fig.add_vline(x=avg_rb_targets, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg RB Targets", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=matchup_df['rb_targets_per_game'].max() * 0.95, y=matchup_df['defense_rec_to_rb'].max() * 0.95,
+                          text="🎯 PPR SMASH", showarrow=False, font=dict(size=14, color="green"))
+        fig.add_annotation(x=matchup_df['rb_targets_per_game'].min() * 1.05, y=matchup_df['defense_rec_to_rb'].max() * 0.95,
+                          text="💰 OPPORTUNITY", showarrow=False, font=dict(size=14, color="blue"))
+        fig.add_annotation(x=matchup_df['rb_targets_per_game'].max() * 0.95, y=matchup_df['defense_rec_to_rb'].min() * 1.05,
+                          text="🚫 AVOID", showarrow=False, font=dict(size=14, color="red"))
+        fig.add_annotation(x=matchup_df['rb_targets_per_game'].min() * 1.05, y=matchup_df['defense_rec_to_rb'].min() * 1.05,
+                          text="⚖️ NEUTRAL", showarrow=False, font=dict(size=14, color="gray"))
+
+        # Calculate logo sizes
+        x_range = matchup_df['rb_targets_per_game'].max() - matchup_df['rb_targets_per_game'].min()
+        y_range = matchup_df['defense_rec_to_rb'].max() - matchup_df['defense_rec_to_rb'].min()
+        logo_size_x = max(x_range * 0.08, 0.5)
+        logo_size_y = max(y_range * 0.08, 2.0)
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in matchup_df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team']),
+                xref="x",
+                yref="y",
+                x=row['rb_targets_per_game'],
+                y=row['defense_rec_to_rb'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
+        fig.update_layout(
+            title=f"RB Pass-Catching Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="RB Targets per Game",
+            yaxis_title="Defense Rec Yards to RBs (per game)",
+            height=600,
+            hovermode='closest',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            with st.expander("📋 View RB Receiving Matchup Details"):
+                display_df = matchup_df[['team', 'opponent', 'location', 'rb_targets_per_game',
+                                        'defense_rec_to_rb', 'storyline', 'description']].copy()
+                display_df.columns = ['Team', 'Opponent', 'Location', 'RB Targets/Gm',
+                                     'Def Rec Yds to RBs', 'Storyline', 'Description']
+                display_df = display_df.round({'RB Targets/Gm': 1, 'Def Rec Yds to RBs': 1})
+                display_df = display_df.sort_values('RB Targets/Gm', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                # Highlight PPR SMASH matchups
+                smash = display_df[display_df['Storyline'].str.contains('PPR SMASH|CHECKDOWN')]
+                if not smash.empty:
+                    st.success(f"**{len(smash)} PPR Smash Matchup(s):** Pass-catching RBs in favorable spots")
+                    for _, row in smash.head(3).iterrows():
+                        st.markdown(f"- **{row['Team']} vs {row['Opponent']}**: {row['Description']}")
+                else:
+                    st.info("No standout PPR RB matchups this week")
+
+                # Highlight AVOID matchups
+                avoid = display_df[display_df['Storyline'].str.contains('AVOID|LIMITED')]
+                if not avoid.empty:
+                    st.warning(f"**{len(avoid)} Tough Coverage Matchup(s):** RBs face elite LB coverage")
+                    for _, row in avoid.head(3).iterrows():
+                        st.markdown(f"- **{row['Team']} vs {row['Opponent']}**: {row['Description']}")
+
+    except Exception as e:
+        st.error(f"Error generating RB receiving matchup chart: {e}")
         import traceback
         st.error(traceback.format_exc())
 

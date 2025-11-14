@@ -2717,10 +2717,10 @@ def categorize_rushing_td_offense(rush_tds_per_game):
     """
     Categorize offensive rushing TD production.
 
-    Benchmarks:
-    - Goal Line Pounder (>0.8 TDs/game): Heavy red zone rushing usage
+    Benchmarks (based on API rushing_tds metric):
+    - Goal Line Pounder (>0.8 TDs/game): Elite TD scoring rate
     - Balanced Rusher (0.4-0.8 TDs/game): Standard touchdown production
-    - Volume Back (<0.4 TDs/game): Yards but limited TDs
+    - Volume Back (<0.4 TDs/game): High touches but limited TD conversion
     """
     if rush_tds_per_game >= 0.8:
         return "Goal Line Pounder"
@@ -2734,10 +2734,10 @@ def categorize_rushing_td_defense(rush_tds_allowed_per_game):
     """
     Categorize defensive rushing TD vulnerability.
 
-    Benchmarks:
-    - TD-Prone (>1.2 TDs/game allowed): Weak goal line defense
-    - Average (0.7-1.2 TDs/game): League standard
-    - Stingy (<0.7 TDs/game): Strong red zone defense
+    Benchmarks (based on API rushing_tds allowed):
+    - TD-Prone (>1.2 TDs/game allowed): Allows high TD rate to opposing rushers
+    - Average (0.7-1.2 TDs/game): League standard TD prevention
+    - Stingy (<0.7 TDs/game): Elite at limiting rushing TDs
     """
     if rush_tds_allowed_per_game >= 1.2:
         return "TD-Prone"
@@ -2766,20 +2766,20 @@ def generate_rushing_td_storyline(offense_rush_tds, defense_rush_tds_allowed):
 
     # EXPLOIT MATCHUPS (High TD upside)
     if off_category == "Goal Line Pounder" and defense_rush_tds_allowed >= 1.2:
-        return "🎯 EXPLOIT: Goal Line vs TD-Prone", f"Heavy red zone usage ({offense_rush_tds:.1f} TDs/gm) vs weak goal line D ({defense_rush_tds_allowed:.1f} allowed) - Elite TD upside"
+        return "🎯 EXPLOIT: High TD Rate vs TD-Prone", f"Elite TD scorer ({offense_rush_tds:.1f} TDs/gm) vs defense allowing {defense_rush_tds_allowed:.1f} TDs/gm - Elite TD upside"
 
     elif off_category == "Volume Back" and defense_rush_tds_allowed >= 1.2:
-        return "🔥 SMASH SPOT: Volume vs Leaky", f"High-touch back faces porous rush defense ({defense_rush_tds_allowed:.1f} TDs allowed) - Breakout TD potential"
+        return "🔥 SMASH SPOT: Volume vs Leaky", f"High-touch back faces porous rush defense ({defense_rush_tds_allowed:.1f} TDs allowed/gm) - Breakout TD potential"
 
     elif off_category == "Goal Line Pounder" and 0.7 <= defense_rush_tds_allowed < 1.2:
-        return "✅ FAVORABLE: Goal Line vs Average", f"TD-dependent back ({offense_rush_tds:.1f} TDs/gm) vs league-average defense - Solid TD odds"
+        return "✅ FAVORABLE: High TD Rate vs Average", f"TD-dependent back ({offense_rush_tds:.1f} TDs/gm) vs league-average defense ({defense_rush_tds_allowed:.1f} allowed/gm) - Solid TD odds"
 
     # TOUGH MATCHUPS (Limited TD upside)
     elif off_category == "Goal Line Pounder" and defense_rush_tds_allowed < 0.7:
-        return "🛡️ TOUGH: TD-Dependent vs Stingy", f"Goal line specialist vs elite red zone D ({defense_rush_tds_allowed:.1f} allowed) - Limited ceiling"
+        return "🛡️ TOUGH: TD-Dependent vs Stingy", f"High TD rate ({offense_rush_tds:.1f}/gm) vs stingy defense ({defense_rush_tds_allowed:.1f} allowed/gm) - Limited ceiling"
 
     elif off_category == "Volume Back" and defense_rush_tds_allowed < 0.7:
-        return "🚧 YARDAGE ONLY: Volume vs Stingy", f"Back gets touches but defense limits TDs ({defense_rush_tds_allowed:.1f} allowed) - Expect yards, not scores"
+        return "🚧 YARDAGE ONLY: Volume vs Stingy", f"Back gets touches but defense limits TDs ({defense_rush_tds_allowed:.1f} allowed/gm) - Expect yards, not scores"
 
     # NEUTRAL MATCHUPS
     elif off_category == "Balanced Rusher":
@@ -14245,8 +14245,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 st.divider()
                 with st.expander("🏈 **Rushing TD Efficiency Matchup** - Identify RB Touchdown Opportunities", expanded=False):
                     st.markdown("""
-                    Identify RBs with high touchdown upside by matching rushing TD production vs defensive vulnerability.
-                    Look for **EXPLOIT** and **SMASH SPOT** matchups for fantasy RB starts.
+                    Match team rushing TD scoring rates vs defensive TD prevention (API data: `rushing_tds`).
+                    Look for **EXPLOIT** and **SMASH SPOT** matchups where high-scoring offenses face TD-vulnerable defenses.
                     """)
 
                     # Use same upcoming games dataframe
@@ -15208,10 +15208,10 @@ def render_rushing_td_matchup_chart(season: Optional[int], week: Optional[int], 
     """Chart: Rushing TD Efficiency Matchup Analysis"""
     st.subheader("🏈 Rushing TD Efficiency Matchup Analysis")
     st.markdown("""
-    **Goal:** Identify RBs with high touchdown upside based on rushing TD production vs defensive vulnerability.
-    - **Top-right quadrant:** 🎯 EXPLOIT (high TD production vs TD-prone defense)
-    - **Top-left:** 💎 VALUE (low TD team vs TD-prone defense - breakout potential)
-    - **Bottom-right:** 🛡️ TOUGH (high TD production vs stingy defense)
+    **Goal:** Match team rushing TD scoring rates vs defensive TD vulnerability (API data: `rushing_tds` per game).
+    - **Top-right quadrant:** 🎯 EXPLOIT (high TD rate vs TD-prone defense)
+    - **Top-left:** 💎 VALUE (low TD rate vs TD-prone defense - breakout potential)
+    - **Bottom-right:** 🛡️ TOUGH (high TD rate vs stingy defense)
     - **Bottom-left:** ⚖️ NEUTRAL (balanced matchup)
     """)
 

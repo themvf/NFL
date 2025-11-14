@@ -3734,14 +3734,19 @@ def synthesize_qb_matchup(team, opponent, season, max_week=None):
     """
     try:
         # Calculate all QB-related matchup stats
-        pressure_stats = calculate_qb_pressure_stats(season, max_week)
+        qb_pressure_stats = calculate_qb_pressure_stats(season, max_week)
+        def_pressure_stats = calculate_defense_pressure_stats(season, max_week)
         td_stats = calculate_passing_td_matchup_stats(season, max_week)
         yards_stats = calculate_passing_yards_matchup_stats(season, max_week)
         efficiency_stats = calculate_qb_td_rate_vs_int_stats(season, max_week)
 
         # Extract team vs opponent data
-        team_pressure = pressure_stats[pressure_stats['team'] == team]
-        opp_pressure = pressure_stats[pressure_stats['team'] == opponent]
+        # For QB pressure: Get starting QB (player-level data)
+        team_qbs = qb_pressure_stats[qb_pressure_stats['team'] == team]
+        team_qb = team_qbs.sort_values('games', ascending=False).iloc[0] if not team_qbs.empty else None
+
+        # For defense pressure: Get team-level data
+        opp_def = def_pressure_stats[def_pressure_stats['team'] == opponent]
 
         team_td = td_stats[td_stats['team'] == team]
         opp_td = td_stats[td_stats['team'] == opponent]
@@ -3755,10 +3760,11 @@ def synthesize_qb_matchup(team, opponent, season, max_week=None):
         # Generate individual storylines
         storylines = {}
 
-        if not team_pressure.empty and not opp_pressure.empty:
+        if team_qb is not None and not opp_def.empty:
             pressure_label, _ = generate_qb_pressure_storyline(
-                team_pressure.iloc[0]['qb_sack_rate'],
-                opp_pressure.iloc[0]['defense_sacks_per_game']
+                team_qb['pressure_rate'],
+                opp_def.iloc[0]['pressures_per_game'],
+                team_qb['sacks_per_pressure']
             )
             storylines['pressure'] = (pressure_label, score_storyline(pressure_label))
 

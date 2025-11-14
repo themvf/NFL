@@ -3624,6 +3624,521 @@ def generate_qb_efficiency_storyline(qb_yards, qb_int_rate, def_yards_allowed, d
 
 
 # ============================================================================
+# Comprehensive Matchup Recommendation System
+# ============================================================================
+
+def score_storyline(label):
+    """
+    Convert storyline label to numeric score (1-5 scale).
+
+    Used for weighted averaging across multiple matchup dimensions.
+
+    Args:
+        label (str): Storyline label like "🎯 TD SMASH SPOT" or "🛡️ TOUGH"
+
+    Returns:
+        int: Score from 1 (worst) to 5 (best)
+    """
+    label_upper = label.upper()
+
+    # Elite/Exploit matchups (5 points)
+    if any(keyword in label_upper for keyword in ['EXPLOIT', 'SMASH', 'ELITE', 'EXPLOSION', 'SAFE CEILING']):
+        return 5
+
+    # Favorable/Value matchups (4 points)
+    elif any(keyword in label_upper for keyword in ['FAVORABLE', 'SOLID', 'VALUE', 'SNEAKY', 'OPPORTUNITY', 'SPIKE']):
+        return 4
+
+    # Neutral/Balanced matchups (3 points)
+    elif any(keyword in label_upper for keyword in ['BALANCED', 'NEUTRAL', 'STANDARD', 'AVERAGE']):
+        return 3
+
+    # Tough/Risky matchups (2 points)
+    elif any(keyword in label_upper for keyword in ['TOUGH', 'RISKY', 'LIMITED', 'GRIND', 'BOOM-BUST']):
+        return 2
+
+    # Avoid/Danger matchups (1 point)
+    elif any(keyword in label_upper for keyword in ['AVOID', 'DANGER', 'WALL', 'TRAP', 'YARDAGE ONLY', 'GROUND GAME']):
+        return 1
+
+    # Default to neutral if no keywords match
+    else:
+        return 3
+
+
+def get_top_players(team, position, season, max_week=None):
+    """
+    Get top 1-2 players for a team/position from rosters table.
+
+    Args:
+        team (str): Team abbreviation
+        position (str): 'QB', 'RB', 'WR', or 'TE'
+        season (int): Season year
+        max_week (int, optional): Max week to consider
+
+    Returns:
+        list: List of player display names (max 2 players)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Get top players by position
+        # For QB: usually only 1 starter
+        # For RB/WR: get top 2 by depth chart or recent usage
+
+        query = f"""
+        SELECT DISTINCT player_display_name
+        FROM rosters
+        WHERE team = ?
+        AND position = ?
+        AND season = ?
+        LIMIT 2
+        """
+
+        df = pd.read_sql_query(query, conn, params=(team, position, season))
+        conn.close()
+
+        if df.empty:
+            return []
+
+        return df['player_display_name'].tolist()
+
+    except Exception as e:
+        # If rosters table doesn't exist or has issues, return empty list
+        return []
+
+
+def synthesize_qb_matchup(team, opponent, season, max_week=None):
+    """
+    Synthesize QB matchup by combining multiple storylines.
+
+    Combines:
+    - QB Pressure (sacks/pressure rate)
+    - Passing TD matchup
+    - Passing Yards matchup
+    - QB Efficiency vs INT Risk
+
+    Args:
+        team (str): Offensive team
+        opponent (str): Defensive team
+        season (int): Season year
+        max_week (int, optional): Max week to consider
+
+    Returns:
+        dict with keys:
+        - 'rating': str ('ELITE', 'FAVORABLE', 'NEUTRAL', 'AVOID')
+        - 'summary': str (narrative summary)
+        - 'players': list of player names
+        - 'key_factors': list of (storyline_label, score) tuples
+        - 'weighted_score': float (for sorting)
+    """
+    try:
+        # Calculate all QB-related matchup stats
+        pressure_stats = calculate_qb_pressure_stats(season, max_week)
+        td_stats = calculate_passing_td_matchup_stats(season, max_week)
+        yards_stats = calculate_passing_yards_matchup_stats(season, max_week)
+        efficiency_stats = calculate_qb_td_rate_vs_int_stats(season, max_week)
+
+        # Extract team vs opponent data
+        team_pressure = pressure_stats[pressure_stats['team'] == team]
+        opp_pressure = pressure_stats[pressure_stats['team'] == opponent]
+
+        team_td = td_stats[td_stats['team'] == team]
+        opp_td = td_stats[td_stats['team'] == opponent]
+
+        team_yards = yards_stats[yards_stats['team'] == team]
+        opp_yards = yards_stats[yards_stats['team'] == opponent]
+
+        team_eff = efficiency_stats[efficiency_stats['team'] == team]
+        opp_eff = efficiency_stats[efficiency_stats['team'] == opponent]
+
+        # Generate individual storylines
+        storylines = {}
+
+        if not team_pressure.empty and not opp_pressure.empty:
+            pressure_label, _ = generate_qb_pressure_storyline(
+                team_pressure.iloc[0]['qb_sack_rate'],
+                opp_pressure.iloc[0]['defense_sacks_per_game']
+            )
+            storylines['pressure'] = (pressure_label, score_storyline(pressure_label))
+
+        if not team_td.empty and not opp_td.empty:
+            td_label, _ = generate_passing_td_storyline(
+                team_td.iloc[0]['offense_pass_tds'],
+                opp_td.iloc[0]['defense_pass_tds_allowed']
+            )
+            storylines['td'] = (td_label, score_storyline(td_label))
+
+        if not team_yards.empty and not opp_yards.empty:
+            yards_label, _ = generate_passing_yards_storyline(
+                team_yards.iloc[0]['offense_pass_yards'],
+                opp_yards.iloc[0]['defense_pass_yards_allowed']
+            )
+            storylines['yards'] = (yards_label, score_storyline(yards_label))
+
+        if not team_eff.empty and not opp_eff.empty:
+            eff_label, _ = generate_qb_td_rate_vs_int_storyline(
+                team_eff.iloc[0]['qb_td_rate'],
+                opp_eff.iloc[0]['defense_ints_per_game']
+            )
+            storylines['efficiency'] = (eff_label, score_storyline(eff_label))
+
+        # If no data, return default
+        if not storylines:
+            return {
+                'rating': 'N/A',
+                'summary': 'Insufficient data for QB matchup analysis',
+                'players': [],
+                'key_factors': [],
+                'weighted_score': 0
+            }
+
+        # Calculate weighted score
+        weights = {
+            'pressure': 0.20,
+            'td': 0.35,
+            'yards': 0.25,
+            'efficiency': 0.20
+        }
+
+        total_weight = sum(weights[k] for k in storylines.keys())
+        weighted_score = sum(storylines[k][1] * weights.get(k, 0) for k in storylines.keys()) / total_weight
+
+        # Determine overall rating
+        if weighted_score >= 4.5:
+            rating = 'ELITE'
+        elif weighted_score >= 3.5:
+            rating = 'FAVORABLE'
+        elif weighted_score >= 2.5:
+            rating = 'NEUTRAL'
+        else:
+            rating = 'AVOID'
+
+        # Get top QB players
+        players = get_top_players(team, 'QB', season, max_week)
+
+        # Generate narrative summary (simplified for now - will enhance in Phase 2)
+        key_factors = [(label, score) for label, score in storylines.values()]
+        summary = f"{rating} QB matchup vs {opponent}. " + ", ".join([label for label, _ in key_factors[:2]])
+
+        return {
+            'rating': rating,
+            'summary': summary,
+            'players': players,
+            'key_factors': key_factors,
+            'weighted_score': weighted_score
+        }
+
+    except Exception as e:
+        return {
+            'rating': 'ERROR',
+            'summary': f'Error analyzing QB matchup: {str(e)}',
+            'players': [],
+            'key_factors': [],
+            'weighted_score': 0
+        }
+
+
+def synthesize_rb_matchup(team, opponent, season, max_week=None):
+    """
+    Synthesize RB matchup by combining rushing TD and receiving storylines.
+
+    Combines:
+    - Rushing TD Efficiency
+    - RB Pass-Catching (PPR value)
+
+    Args:
+        team (str): Offensive team
+        opponent (str): Defensive team
+        season (int): Season year
+        max_week (int, optional): Max week to consider
+
+    Returns:
+        dict with same structure as synthesize_qb_matchup()
+    """
+    try:
+        # Calculate RB-related matchup stats
+        rush_td_stats = calculate_rushing_td_matchup_stats(season, max_week)
+        rb_rec_stats = calculate_rb_receiving_matchup_stats(season, max_week)
+
+        # Extract team vs opponent data
+        team_rush = rush_td_stats[rush_td_stats['team'] == team]
+        opp_rush = rush_td_stats[rush_td_stats['team'] == opponent]
+
+        team_rec = rb_rec_stats[rb_rec_stats['team'] == team]
+        opp_rec = rb_rec_stats[rb_rec_stats['team'] == opponent]
+
+        # Generate individual storylines
+        storylines = {}
+
+        if not team_rush.empty and not opp_rush.empty:
+            rush_label, _ = generate_rushing_td_storyline(
+                team_rush.iloc[0]['offense_rush_tds'],
+                opp_rush.iloc[0]['defense_rush_tds_allowed']
+            )
+            storylines['rushing_td'] = (rush_label, score_storyline(rush_label))
+
+        if not team_rec.empty and not opp_rec.empty:
+            rec_label, _ = generate_rb_receiving_storyline(
+                team_rec.iloc[0]['rb_targets_per_game'],
+                opp_rec.iloc[0]['defense_rec_to_rb']
+            )
+            storylines['receiving'] = (rec_label, score_storyline(rec_label))
+
+        # If no data, return default
+        if not storylines:
+            return {
+                'rating': 'N/A',
+                'summary': 'Insufficient data for RB matchup analysis',
+                'players': [],
+                'key_factors': [],
+                'weighted_score': 0
+            }
+
+        # Calculate weighted score (TDs more valuable than receiving in standard scoring)
+        weights = {
+            'rushing_td': 0.60,
+            'receiving': 0.40
+        }
+
+        total_weight = sum(weights[k] for k in storylines.keys())
+        weighted_score = sum(storylines[k][1] * weights.get(k, 0) for k in storylines.keys()) / total_weight
+
+        # Determine overall rating
+        if weighted_score >= 4.5:
+            rating = 'ELITE'
+        elif weighted_score >= 3.5:
+            rating = 'FAVORABLE'
+        elif weighted_score >= 2.5:
+            rating = 'NEUTRAL'
+        else:
+            rating = 'AVOID'
+
+        # Get top RB players
+        players = get_top_players(team, 'RB', season, max_week)
+
+        # Generate narrative summary
+        key_factors = [(label, score) for label, score in storylines.values()]
+        summary = f"{rating} RB matchup vs {opponent}. " + ", ".join([label for label, _ in key_factors])
+
+        return {
+            'rating': rating,
+            'summary': summary,
+            'players': players,
+            'key_factors': key_factors,
+            'weighted_score': weighted_score
+        }
+
+    except Exception as e:
+        return {
+            'rating': 'ERROR',
+            'summary': f'Error analyzing RB matchup: {str(e)}',
+            'players': [],
+            'key_factors': [],
+            'weighted_score': 0
+        }
+
+
+def synthesize_wr_matchup(team, opponent, season, max_week=None):
+    """
+    Synthesize WR/TE matchup using Air Yards vs YAC storyline.
+
+    Args:
+        team (str): Offensive team
+        opponent (str): Defensive team
+        season (int): Season year
+        max_week (int, optional): Max week to consider
+
+    Returns:
+        dict with same structure as synthesize_qb_matchup()
+    """
+    try:
+        # Calculate WR-related matchup stats
+        air_yac_stats = calculate_air_yac_matchup_stats(season, max_week)
+
+        # Extract team vs opponent data
+        team_data = air_yac_stats[air_yac_stats['team'] == team]
+        opp_data = air_yac_stats[air_yac_stats['team'] == opponent]
+
+        # Generate storyline
+        if not team_data.empty and not opp_data.empty:
+            air_yac_label, _ = generate_air_yac_storyline(
+                team_data.iloc[0]['offense_air_yards_per_game'],
+                opp_data.iloc[0]['defense_air_yards_allowed_per_game']
+            )
+            score = score_storyline(air_yac_label)
+
+            # Determine rating based on single storyline score
+            if score >= 4.5:
+                rating = 'ELITE'
+            elif score >= 3.5:
+                rating = 'FAVORABLE'
+            elif score >= 2.5:
+                rating = 'NEUTRAL'
+            else:
+                rating = 'AVOID'
+
+            # Get top WR players
+            players = get_top_players(team, 'WR', season, max_week)
+
+            # Generate narrative summary
+            summary = f"{rating} WR matchup vs {opponent}. {air_yac_label}"
+
+            return {
+                'rating': rating,
+                'summary': summary,
+                'players': players,
+                'key_factors': [(air_yac_label, score)],
+                'weighted_score': float(score)
+            }
+        else:
+            return {
+                'rating': 'N/A',
+                'summary': 'Insufficient data for WR matchup analysis',
+                'players': [],
+                'key_factors': [],
+                'weighted_score': 0
+            }
+
+    except Exception as e:
+        return {
+            'rating': 'ERROR',
+            'summary': f'Error analyzing WR matchup: {str(e)}',
+            'players': [],
+            'key_factors': [],
+            'weighted_score': 0
+        }
+
+
+def format_player_list(players):
+    """
+    Format player names for display.
+
+    Args:
+        players (list): List of player display names
+
+    Returns:
+        str: Formatted string like "(Lamar Jackson)" or "(D.Henry, T.Pollard)"
+    """
+    if not players:
+        return ""
+    elif len(players) == 1:
+        return f"({players[0]})"
+    else:
+        # Abbreviate first names for space
+        short_names = [p.split()[0][0] + "." + " ".join(p.split()[1:]) if len(p.split()) > 1 else p for p in players[:2]]
+        return f"({', '.join(short_names)})"
+
+
+def format_rating_badge(rating):
+    """
+    Return colored emoji badge for rating.
+
+    Args:
+        rating (str): 'ELITE', 'FAVORABLE', 'NEUTRAL', 'AVOID', or 'N/A'
+
+    Returns:
+        str: Emoji + rating text
+    """
+    badges = {
+        'ELITE': '🟢 ELITE',
+        'FAVORABLE': '🟡 FAVORABLE',
+        'NEUTRAL': '⚪ NEUTRAL',
+        'AVOID': '🔴 AVOID',
+        'N/A': '⚫ N/A',
+        'ERROR': '❌ ERROR'
+    }
+    return badges.get(rating, '⚪ ' + rating)
+
+
+def render_matchup_recommendations_table(season, week, upcoming_games_df):
+    """
+    Render comprehensive matchup recommendations table.
+
+    Synthesizes all storylines into position-specific ratings displayed in a table.
+
+    Args:
+        season (int): Season year
+        week (int): Week number
+        upcoming_games_df (DataFrame): Upcoming games with home_team, away_team columns
+    """
+    if upcoming_games_df is None or upcoming_games_df.empty:
+        st.info("No upcoming games available for matchup recommendations.")
+        return
+
+    try:
+        summary_data = []
+
+        for _, game in upcoming_games_df.iterrows():
+            home_team = game['home_team']
+            away_team = game['away_team']
+
+            # Synthesize matchups for both teams
+            home_qb = synthesize_qb_matchup(home_team, away_team, season, week)
+            home_rb = synthesize_rb_matchup(home_team, away_team, season, week)
+            home_wr = synthesize_wr_matchup(home_team, away_team, season, week)
+
+            away_qb = synthesize_qb_matchup(away_team, home_team, season, week)
+            away_rb = synthesize_rb_matchup(away_team, home_team, season, week)
+            away_wr = synthesize_wr_matchup(away_team, home_team, season, week)
+
+            # Determine best opportunity for home team
+            home_scores = {
+                'QB': home_qb['weighted_score'],
+                'RB': home_rb['weighted_score'],
+                'WR': home_wr['weighted_score']
+            }
+            home_best = max(home_scores, key=home_scores.get) if max(home_scores.values()) > 0 else 'N/A'
+
+            # Determine best opportunity for away team
+            away_scores = {
+                'QB': away_qb['weighted_score'],
+                'RB': away_rb['weighted_score'],
+                'WR': away_wr['weighted_score']
+            }
+            away_best = max(away_scores, key=away_scores.get) if max(away_scores.values()) > 0 else 'N/A'
+
+            # Add home team row
+            summary_data.append({
+                'Game': f"{away_team} @ {home_team}",
+                'Team': home_team,
+                'QB': format_rating_badge(home_qb['rating']) + " " + format_player_list(home_qb['players']),
+                'RB': format_rating_badge(home_rb['rating']) + " " + format_player_list(home_rb['players']),
+                'WR': format_rating_badge(home_wr['rating']) + " " + format_player_list(home_wr['players']),
+                'Best': home_best,
+                'Summary': home_qb['summary'][:80] + "..." if len(home_qb['summary']) > 80 else home_qb['summary']
+            })
+
+            # Add away team row
+            summary_data.append({
+                'Game': f"{away_team} @ {home_team}",
+                'Team': away_team,
+                'QB': format_rating_badge(away_qb['rating']) + " " + format_player_list(away_qb['players']),
+                'RB': format_rating_badge(away_rb['rating']) + " " + format_player_list(away_rb['players']),
+                'WR': format_rating_badge(away_wr['rating']) + " " + format_player_list(away_wr['players']),
+                'Best': away_best,
+                'Summary': away_qb['summary'][:80] + "..." if len(away_qb['summary']) > 80 else away_qb['summary']
+            })
+
+        # Create DataFrame
+        summary_df = pd.DataFrame(summary_data)
+
+        # Display table
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.caption("💡 **Tip:** Ratings combine all relevant matchup storylines for each position using weighted scoring.")
+
+    except Exception as e:
+        st.error(f"Error rendering matchup recommendations: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+# ============================================================================
 # Projection Accuracy Tracking Functions
 # ============================================================================
 
@@ -14976,6 +15491,19 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     """)
 
                     render_qb_efficiency_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
+                    # ========== COMPREHENSIVE MATCHUP RECOMMENDATIONS ==========
+                    st.divider()
+                    st.header("📊 Comprehensive Matchup Recommendations")
+                    st.markdown("""
+                    Synthesizes all 8 matchup storylines into actionable position-specific insights.
+                    - **🟢 ELITE:** Must-start with top-tier upside
+                    - **🟡 FAVORABLE:** Good play with solid floor
+                    - **⚪ NEUTRAL:** Game script dependent
+                    - **🔴 AVOID:** Bench or pivot to better matchup
+                    """)
+
+                    render_matchup_recommendations_table(selected_season, selected_week, upcoming_games_df)
 
             else:
                 st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")

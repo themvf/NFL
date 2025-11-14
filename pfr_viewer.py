@@ -3969,8 +3969,10 @@ def synthesize_wr_matchup(team, opponent, season, max_week=None):
         # Generate storyline
         if not team_data.empty and not opp_data.empty:
             air_yac_label, _ = generate_air_yac_storyline(
-                team_data.iloc[0]['offense_air_yards_per_game'],
-                opp_data.iloc[0]['defense_air_yards_allowed_per_game']
+                team_data.iloc[0]['offense_air_share'],
+                opp_data.iloc[0]['defense_yac_share'],
+                opp_data.iloc[0]['defense_air_share'],
+                team_data.iloc[0]['offense_yac_share']
             )
             score = score_storyline(air_yac_label)
 

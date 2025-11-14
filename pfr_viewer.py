@@ -14695,6 +14695,29 @@ def render_qb_pressure_matchup_chart(season: Optional[int], week: Optional[int],
         fig.add_annotation(x=matchup_df['qb_pressure_rate'].min() * 1.05, y=matchup_df['def_pressure_rate'].min() * 1.05,
                           text="✅ Clean Pocket", showarrow=False, font=dict(size=14, color="green"))
 
+        # Calculate logo sizes based on data range
+        x_range = matchup_df['qb_pressure_rate'].max() - matchup_df['qb_pressure_rate'].min()
+        y_range = matchup_df['def_pressure_rate'].max() - matchup_df['def_pressure_rate'].min()
+        logo_size_x = max(x_range * 0.06, 1.5)  # At least 1.5% wide
+        logo_size_y = max(y_range * 0.06, 0.5)  # At least 0.5 pressures tall
+
+        # Build layout with team logo images
+        layout_images = []
+        for idx, row in matchup_df.iterrows():
+            layout_images.append(dict(
+                source=get_team_logo_url(row['team']),
+                xref="x",
+                yref="y",
+                x=row['qb_pressure_rate'],
+                y=row['def_pressure_rate'],
+                sizex=logo_size_x,
+                sizey=logo_size_y,
+                xanchor="center",
+                yanchor="middle",
+                layer="above",
+                opacity=0.9
+            ))
+
         fig.update_layout(
             title=f"QB Pressure Matchup Analysis ({season} Season{f', Week {week}' if week else ''})",
             xaxis_title="QB Pressure Rate (%)",
@@ -14702,7 +14725,8 @@ def render_qb_pressure_matchup_chart(season: Optional[int], week: Optional[int],
             height=600,
             hovermode='closest',
             plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)'
+            paper_bgcolor='rgba(0,0,0,0)',
+            images=layout_images
         )
 
         st.plotly_chart(fig, use_container_width=True)

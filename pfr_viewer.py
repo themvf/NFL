@@ -3291,7 +3291,7 @@ def calculate_qb_td_rate_vs_int_stats(season, max_week=None):
         SELECT
             team,
             COUNT(DISTINCT week) as games,
-            SUM(CAST(def_interceptions AS REAL)) as total_ints
+            SUM(CAST(def_ints AS REAL)) as total_ints
         FROM pfr_advstats_def_week
         WHERE season = {season}
         {week_filter}
@@ -3343,7 +3343,7 @@ def categorize_defensive_int_rate(ints_per_game):
     """
     Categorize defensive INT creation.
 
-    Benchmarks (based on pfr_advstats_def_week.def_interceptions):
+    Benchmarks (based on pfr_advstats_def_week.def_ints):
     - Ball Hawk Defense (≥1.2 INTs/game): Aggressive turnover creation
     - Average Turnover Creation (0.7-1.2 INTs/game): League standard
     - Passive Coverage (<0.7 INTs/game): Limited turnover generation
@@ -3484,7 +3484,7 @@ def calculate_qb_efficiency_matchup_stats(season, max_week=None):
         SELECT
             team,
             COUNT(DISTINCT week) as games,
-            SUM(CAST(def_interceptions AS REAL)) as total_ints,
+            SUM(CAST(def_ints AS REAL)) as total_ints,
             SUM(CAST(def_sacks AS REAL)) as total_sacks
         FROM pfr_advstats_def_week
         WHERE season = {season}

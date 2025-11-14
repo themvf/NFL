@@ -15492,18 +15492,22 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                     render_qb_efficiency_matchup_chart(selected_season, selected_week, upcoming_games_df)
 
-                    # ========== COMPREHENSIVE MATCHUP RECOMMENDATIONS ==========
-                    st.divider()
-                    st.header("📊 Comprehensive Matchup Recommendations")
-                    st.markdown("""
-                    Synthesizes all 8 matchup storylines into actionable position-specific insights.
-                    - **🟢 ELITE:** Must-start with top-tier upside
-                    - **🟡 FAVORABLE:** Good play with solid floor
-                    - **⚪ NEUTRAL:** Game script dependent
-                    - **🔴 AVOID:** Bench or pivot to better matchup
-                    """)
+                # ========== COMPREHENSIVE MATCHUP RECOMMENDATIONS ==========
+                st.divider()
+                st.header("📊 Comprehensive Matchup Recommendations")
+                st.markdown("""
+                Synthesizes all 8 matchup storylines into actionable position-specific insights.
+                - **🟢 ELITE:** Must-start with top-tier upside
+                - **🟡 FAVORABLE:** Good play with solid floor
+                - **⚪ NEUTRAL:** Game script dependent
+                - **🔴 AVOID:** Bench or pivot to better matchup
+                """)
 
-                    render_matchup_recommendations_table(selected_season, selected_week, upcoming_games_df)
+                # Get upcoming games for matchup recommendations
+                upcoming_games_df = df[['Home Team', 'Away Team']].copy()
+                upcoming_games_df.columns = ['home_team', 'away_team']
+
+                render_matchup_recommendations_table(selected_season, selected_week, upcoming_games_df)
 
             else:
                 st.info("Not enough data to generate projections for this week. Make sure player stats are available for previous weeks.")

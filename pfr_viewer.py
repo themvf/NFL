@@ -3817,7 +3817,7 @@ def score_storyline(label):
 
 def get_top_players(team, position, season, max_week=None):
     """
-    Get top 1-2 players for a team/position from rosters table.
+    Get top 1-2 players for a team/position from rosters or player_stats table.
 
     Args:
         team (str): Team abbreviation
@@ -3831,11 +3831,8 @@ def get_top_players(team, position, season, max_week=None):
     try:
         conn = sqlite3.connect(DB_PATH)
 
-        # Get top players by position
-        # For QB: usually only 1 starter
-        # For RB/WR: get top 2 by depth chart or recent usage
-
-        query = f"""
+        # Try rosters table first
+        query_roster = f"""
         SELECT DISTINCT player_display_name
         FROM rosters
         WHERE team = ?
@@ -3844,16 +3841,50 @@ def get_top_players(team, position, season, max_week=None):
         LIMIT 2
         """
 
-        df = pd.read_sql_query(query, conn, params=(team, position, season))
+        df = pd.read_sql_query(query_roster, conn, params=(team, position, season))
+
+        # If rosters table is empty, try player_stats table with actual usage
+        if df.empty:
+            week_filter = f"AND week <= {max_week}" if max_week else ""
+
+            # Get players who actually played, sorted by total usage
+            if position == 'QB':
+                stat_col = 'passing_attempts'
+            elif position == 'RB':
+                stat_col = 'rushing_attempts'
+            else:  # WR, TE
+                stat_col = 'targets'
+
+            query_stats = f"""
+            SELECT player_display_name, SUM({stat_col}) as total_usage
+            FROM player_stats
+            WHERE team = ?
+            AND position = ?
+            AND season = ?
+            {week_filter}
+            GROUP BY player_display_name
+            ORDER BY total_usage DESC
+            LIMIT 2
+            """
+
+            df = pd.read_sql_query(query_stats, conn, params=(team, position, season))
+
         conn.close()
 
         if df.empty:
             return []
 
-        return df['player_display_name'].tolist()
+        # Return just the names (drop total_usage column if it exists)
+        if 'player_display_name' in df.columns:
+            return df['player_display_name'].tolist()
+        else:
+            return []
 
     except Exception as e:
-        # If rosters table doesn't exist or has issues, return empty list
+        # Log error for debugging but don't crash
+        import traceback
+        print(f"Error in get_top_players({team}, {position}, {season}): {e}")
+        print(traceback.format_exc())
         return []
 
 
@@ -3959,13 +3990,15 @@ def synthesize_qb_matchup(team, opponent, season, max_week=None):
         total_weight = sum(weights[k] for k in storylines.keys())
         weighted_score = sum(storylines[k][1] * weights.get(k, 0) for k in storylines.keys()) / total_weight
 
-        # Determine overall rating
-        if weighted_score >= 4.5:
-            rating = 'ELITE'
-        elif weighted_score >= 3.5:
-            rating = 'FAVORABLE'
-        elif weighted_score >= 2.5:
+        # Determine overall rating (5-level system)
+        if weighted_score >= 4.25:
+            rating = 'SMASH'
+        elif weighted_score >= 3.75:
+            rating = 'GOOD'
+        elif weighted_score >= 2.75:
             rating = 'NEUTRAL'
+        elif weighted_score >= 2.0:
+            rating = 'RISKY'
         else:
             rating = 'AVOID'
 
@@ -4072,13 +4105,15 @@ def synthesize_rb_matchup(team, opponent, season, max_week=None):
         total_weight = sum(weights[k] for k in storylines.keys())
         weighted_score = sum(storylines[k][1] * weights.get(k, 0) for k in storylines.keys()) / total_weight
 
-        # Determine overall rating
-        if weighted_score >= 4.5:
-            rating = 'ELITE'
-        elif weighted_score >= 3.5:
-            rating = 'FAVORABLE'
-        elif weighted_score >= 2.5:
+        # Determine overall rating (5-level system)
+        if weighted_score >= 4.25:
+            rating = 'SMASH'
+        elif weighted_score >= 3.75:
+            rating = 'GOOD'
+        elif weighted_score >= 2.75:
             rating = 'NEUTRAL'
+        elif weighted_score >= 2.0:
+            rating = 'RISKY'
         else:
             rating = 'AVOID'
 
@@ -4138,13 +4173,15 @@ def synthesize_wr_matchup(team, opponent, season, max_week=None):
             )
             score = score_storyline(air_yac_label)
 
-            # Determine rating based on single storyline score
-            if score >= 4.5:
-                rating = 'ELITE'
-            elif score >= 3.5:
-                rating = 'FAVORABLE'
-            elif score >= 2.5:
+            # Determine rating based on single storyline score (5-level system)
+            if score >= 4.25:
+                rating = 'SMASH'
+            elif score >= 3.75:
+                rating = 'GOOD'
+            elif score >= 2.75:
                 rating = 'NEUTRAL'
+            elif score >= 2.0:
+                rating = 'RISKY'
             else:
                 rating = 'AVOID'
 
@@ -4205,18 +4242,22 @@ def format_rating_badge(rating):
     Return colored emoji badge for rating.
 
     Args:
-        rating (str): 'ELITE', 'FAVORABLE', 'NEUTRAL', 'AVOID', or 'N/A'
+        rating (str): 'SMASH', 'GOOD', 'NEUTRAL', 'RISKY', 'AVOID', 'N/A', or 'ERROR'
 
     Returns:
         str: Emoji + rating text
     """
     badges = {
-        'ELITE': '🟢 ELITE',
-        'FAVORABLE': '🟡 FAVORABLE',
+        'SMASH': '🟢 SMASH',
+        'GOOD': '🟡 GOOD',
         'NEUTRAL': '⚪ NEUTRAL',
+        'RISKY': '🟠 RISKY',
         'AVOID': '🔴 AVOID',
         'N/A': '⚫ N/A',
-        'ERROR': '❌ ERROR'
+        'ERROR': '❌ ERROR',
+        # Legacy support for old ratings
+        'ELITE': '🟢 SMASH',
+        'FAVORABLE': '🟡 GOOD'
     }
     return badges.get(rating, '⚪ ' + rating)
 
@@ -4258,7 +4299,20 @@ def render_matchup_recommendations_table(season, week, upcoming_games_df):
                 'RB': home_rb['weighted_score'],
                 'WR': home_wr['weighted_score']
             }
-            home_best = max(home_scores, key=home_scores.get) if max(home_scores.values()) > 0 else 'N/A'
+            home_best_pos = max(home_scores, key=home_scores.get) if max(home_scores.values()) > 0 else 'N/A'
+            home_best_score = home_scores.get(home_best_pos, 0)
+
+            # Show scores if positions are close (within 0.3 of each other)
+            sorted_scores = sorted(home_scores.items(), key=lambda x: x[1], reverse=True)
+            if home_best_pos != 'N/A' and len(sorted_scores) > 1 and (sorted_scores[0][1] - sorted_scores[1][1]) < 0.3:
+                home_best = f"{home_best_pos} ({home_best_score:.1f})"
+            else:
+                home_best = home_best_pos
+
+            # Select summary based on best position (use home_best_pos without score)
+            home_position_data = {'QB': home_qb, 'RB': home_rb, 'WR': home_wr}
+            home_best_matchup = home_position_data.get(home_best_pos, home_qb)  # Fallback to QB if N/A
+            home_summary = home_best_matchup['summary'][:80] + "..." if len(home_best_matchup['summary']) > 80 else home_best_matchup['summary']
 
             # Determine best opportunity for away team
             away_scores = {
@@ -4266,7 +4320,20 @@ def render_matchup_recommendations_table(season, week, upcoming_games_df):
                 'RB': away_rb['weighted_score'],
                 'WR': away_wr['weighted_score']
             }
-            away_best = max(away_scores, key=away_scores.get) if max(away_scores.values()) > 0 else 'N/A'
+            away_best_pos = max(away_scores, key=away_scores.get) if max(away_scores.values()) > 0 else 'N/A'
+            away_best_score = away_scores.get(away_best_pos, 0)
+
+            # Show scores if positions are close (within 0.3 of each other)
+            sorted_away_scores = sorted(away_scores.items(), key=lambda x: x[1], reverse=True)
+            if away_best_pos != 'N/A' and len(sorted_away_scores) > 1 and (sorted_away_scores[0][1] - sorted_away_scores[1][1]) < 0.3:
+                away_best = f"{away_best_pos} ({away_best_score:.1f})"
+            else:
+                away_best = away_best_pos
+
+            # Select summary based on best position (use away_best_pos without score)
+            away_position_data = {'QB': away_qb, 'RB': away_rb, 'WR': away_wr}
+            away_best_matchup = away_position_data.get(away_best_pos, away_qb)  # Fallback to QB if N/A
+            away_summary = away_best_matchup['summary'][:80] + "..." if len(away_best_matchup['summary']) > 80 else away_best_matchup['summary']
 
             # Add home team row
             summary_data.append({
@@ -4276,7 +4343,7 @@ def render_matchup_recommendations_table(season, week, upcoming_games_df):
                 'RB': format_rating_badge(home_rb['rating']) + " " + format_player_list(home_rb['players']),
                 'WR': format_rating_badge(home_wr['rating']) + " " + format_player_list(home_wr['players']),
                 'Best': home_best,
-                'Summary': home_qb['summary'][:80] + "..." if len(home_qb['summary']) > 80 else home_qb['summary']
+                'Summary': home_summary
             })
 
             # Add away team row
@@ -4287,7 +4354,7 @@ def render_matchup_recommendations_table(season, week, upcoming_games_df):
                 'RB': format_rating_badge(away_rb['rating']) + " " + format_player_list(away_rb['players']),
                 'WR': format_rating_badge(away_wr['rating']) + " " + format_player_list(away_wr['players']),
                 'Best': away_best,
-                'Summary': away_qb['summary'][:80] + "..." if len(away_qb['summary']) > 80 else away_qb['summary']
+                'Summary': away_summary
             })
 
         # Create DataFrame

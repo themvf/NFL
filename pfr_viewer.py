@@ -2962,6 +2962,160 @@ def generate_rushing_yards_storyline(offense_rush_yards, defense_rush_yards_allo
 
 
 # ============================================================================
+# Player Rush TD vs Defense Analysis Functions
+# ============================================================================
+
+def calculate_player_rush_td_vs_defense_stats(season, max_week=None):
+    """
+    Calculate individual player Rush TDs vs defensive Rush TDs allowed.
+
+    Returns DataFrame with columns:
+    - team: Team abbreviation
+    - player: Player name
+    - position: Player position
+    - player_rush_tds: Player's total rushing TDs
+    - player_games: Games played by player
+    - player_rush_tds_per_game: Player's rushing TDs per game
+    - defense_rush_tds_allowed: Defensive rushing TDs allowed per game
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f"AND week <= {max_week}" if max_week else ""
+
+        # Get player rushing TD stats (RBs and QBs primarily)
+        player_query = f"""
+        SELECT
+            team,
+            player_display_name as player,
+            position,
+            COUNT(DISTINCT week) as player_games,
+            SUM(rushing_tds) as player_rush_tds,
+            SUM(carries) as total_carries
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'QB', 'WR', 'TE')
+        AND carries > 0
+        GROUP BY team, player_display_name, position
+        HAVING SUM(rushing_tds) > 0
+        """
+
+        player_df = pd.read_sql_query(player_query, conn)
+
+        if not player_df.empty:
+            # Calculate per-game averages
+            player_df['player_rush_tds_per_game'] = (
+                player_df['player_rush_tds'] / player_df['player_games']
+            ).round(2)
+
+        # Get defensive rushing TD stats (TDs allowed per game)
+        defense_query = f"""
+        SELECT
+            opponent_team as team,
+            COUNT(DISTINCT week) as games,
+            SUM(rushing_tds) as total_rush_tds_allowed
+        FROM player_stats
+        WHERE season = {season}
+        {week_filter}
+        AND position IN ('RB', 'QB', 'WR', 'TE')
+        GROUP BY opponent_team
+        """
+
+        defense_df = pd.read_sql_query(defense_query, conn)
+
+        if not defense_df.empty:
+            # Calculate per-game averages
+            defense_df['defense_rush_tds_allowed'] = (
+                defense_df['total_rush_tds_allowed'] / defense_df['games']
+            ).round(2)
+
+        # Merge player stats with team defensive stats
+        result_df = pd.merge(
+            player_df[['team', 'player', 'position', 'player_rush_tds', 'player_games', 'player_rush_tds_per_game']],
+            defense_df[['team', 'defense_rush_tds_allowed']],
+            on='team',
+            how='left'
+        )
+
+        # Fill NaN values with league average
+        if not result_df.empty:
+            league_avg_def = defense_df['defense_rush_tds_allowed'].mean()
+            result_df['defense_rush_tds_allowed'] = result_df['defense_rush_tds_allowed'].fillna(league_avg_def)
+
+        conn.close()
+        return result_df
+
+    except Exception as e:
+        st.error(f"Error calculating Player Rush TD vs Defense stats: {e}")
+        return pd.DataFrame()
+
+
+def categorize_player_rush_tds(rush_tds_per_game):
+    """Categorize player rushing TD production."""
+    if rush_tds_per_game >= 0.75:
+        return "Elite TD Scorer"
+    elif rush_tds_per_game >= 0.5:
+        return "Strong TD Producer"
+    elif rush_tds_per_game >= 0.25:
+        return "Moderate TD Threat"
+    else:
+        return "Limited TD Production"
+
+
+def categorize_defense_rush_tds(rush_tds_allowed_per_game):
+    """Categorize defensive rushing TD prevention."""
+    if rush_tds_allowed_per_game >= 1.2:
+        return "TD-Prone Defense"
+    elif rush_tds_allowed_per_game >= 0.8:
+        return "Average TD Defense"
+    else:
+        return "Stingy TD Defense"
+
+
+def generate_player_rush_td_storyline(player_rush_tds_per_game, defense_rush_tds_allowed, player_name, position):
+    """
+    Generate narrative storyline for player rush TD matchup vs defense.
+
+    Best Matchups (High TD probability):
+    - Elite/Strong TD scorer vs TD-Prone Defense
+    - Elite TD scorer vs Average Defense
+
+    Avoid Matchups (Low TD probability):
+    - Limited TD production vs Stingy Defense
+    - Moderate production vs Stingy Defense
+    """
+
+    player_category = categorize_player_rush_tds(player_rush_tds_per_game)
+    def_category = categorize_defense_rush_tds(defense_rush_tds_allowed)
+
+    # SMASH MATCHUPS (Highest TD probability)
+    if player_rush_tds_per_game >= 0.5 and defense_rush_tds_allowed >= 1.2:
+        return "🎯 TD SMASH SPOT", f"{player_name} ({position}) scores {player_rush_tds_per_game:.2f} rush TDs/gm vs defense allowing {defense_rush_tds_allowed:.2f} TDs/gm - Elite TD opportunity"
+
+    elif player_rush_tds_per_game >= 0.75 and defense_rush_tds_allowed >= 0.8:
+        return "✅ GREAT MATCHUP", f"Elite TD scorer {player_name} ({player_rush_tds_per_game:.2f} TDs/gm) vs generous defense ({defense_rush_tds_allowed:.2f} allowed/gm)"
+
+    elif player_rush_tds_per_game >= 0.5 and defense_rush_tds_allowed >= 0.8:
+        return "💎 FAVORABLE", f"{player_name} ({player_rush_tds_per_game:.2f} TDs/gm) has solid TD upside vs defense allowing {defense_rush_tds_allowed:.2f} TDs/gm"
+
+    # TOUGH MATCHUPS (Lower TD probability)
+    elif player_rush_tds_per_game < 0.25 and defense_rush_tds_allowed < 0.8:
+        return "🛑 AVOID", f"{player_name} has limited TD production ({player_rush_tds_per_game:.2f}/gm) vs stingy defense ({defense_rush_tds_allowed:.2f} allowed/gm)"
+
+    elif player_rush_tds_per_game < 0.5 and defense_rush_tds_allowed < 0.8:
+        return "⚠️ TOUGH MATCHUP", f"{player_name} ({player_rush_tds_per_game:.2f} TDs/gm) faces tough TD defense ({defense_rush_tds_allowed:.2f} allowed/gm)"
+
+    elif player_rush_tds_per_game >= 0.75 and defense_rush_tds_allowed < 0.8:
+        return "⚔️ CHALLENGE", f"Elite scorer {player_name} ({player_rush_tds_per_game:.2f} TDs/gm) vs strong TD defense ({defense_rush_tds_allowed:.2f} allowed/gm)"
+
+    # NEUTRAL MATCHUPS
+    else:
+        return "⚖️ BALANCED", f"{player_name} ({player_rush_tds_per_game:.2f} TDs/gm) vs defense allowing {defense_rush_tds_allowed:.2f} TDs/gm"
+
+
+# ============================================================================
 # RB Pass-Catching Exploitation Matchup Analysis Functions
 # ============================================================================
 
@@ -15771,6 +15925,17 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     # Use same upcoming games dataframe
                     render_rushing_td_matchup_chart(selected_season, selected_week, upcoming_games_df)
 
+                # ========== PLAYER RUSH TD VS DEFENSE MATCHUP ==========
+                st.divider()
+                with st.expander("🏃‍♂️ **Player Rush TD vs Defense** - Individual TD Opportunities", expanded=False):
+                    st.markdown("""
+                    Analyze individual player rushing TD rates vs defensive vulnerability.
+                    Identifies **TD SMASH** opportunities where prolific scorers face generous defenses.
+                    """)
+
+                    # Use same upcoming games dataframe
+                    render_player_rush_td_matchup_chart(selected_season, selected_week, upcoming_games_df)
+
                 # ========== RB RUSHING YARDS MATCHUP ANALYSIS ==========
                 st.divider()
                 with st.expander("🏃 **RB Rushing Yards Matchup** - Identify Volume Opportunities", expanded=False):
@@ -17008,6 +17173,188 @@ def render_rushing_td_matchup_chart(season: Optional[int], week: Optional[int], 
 
     except Exception as e:
         st.error(f"Error generating rushing TD matchup chart: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+
+
+def render_player_rush_td_matchup_chart(season: Optional[int], week: Optional[int], upcoming_games=None):
+    """Chart: Player Rush TD vs Defense Analysis"""
+    st.subheader("🏃‍♂️ Player Rush TD vs Defense Matchup")
+    st.markdown("""
+    **Goal:** Identify individual players with high rushing TD probability based on their scoring rate vs defensive vulnerability.
+    - **Top-right quadrant:** 🎯 TD SMASH (elite scorer vs generous defense)
+    - **Top-left:** 💎 BREAKOUT (emerging scorer vs generous defense)
+    - **Bottom-right:** ⚔️ CHALLENGE (elite scorer vs stingy defense)
+    - **Bottom-left:** ⚠️ TOUGH (limited scorer vs stingy defense)
+    """)
+
+    if not season:
+        st.warning("No season data available.")
+        return
+
+    try:
+        # Calculate player rush TD stats
+        player_stats = calculate_player_rush_td_vs_defense_stats(season, week)
+
+        if player_stats.empty:
+            st.info("No player rushing TD data available for selected filters.")
+            return
+
+        # If upcoming games provided, create matchup-specific data
+        if upcoming_games is not None and not upcoming_games.empty:
+            matchup_data = []
+
+            # Get team to opponent mapping
+            team_opponent = {}
+            for _, game in upcoming_games.iterrows():
+                team_opponent[game['home_team']] = game['away_team']
+                team_opponent[game['away_team']] = game['home_team']
+
+            # Filter players whose teams are playing
+            for _, player_row in player_stats.iterrows():
+                team = player_row['team']
+                if team in team_opponent:
+                    opponent = team_opponent[team]
+
+                    # Get opponent's defensive stats
+                    opponent_def_stats = player_stats[player_stats['team'] == opponent]
+                    if not opponent_def_stats.empty:
+                        opp_def_rush_tds = opponent_def_stats.iloc[0]['defense_rush_tds_allowed']
+                    else:
+                        # Use league average if opponent stats not available
+                        opp_def_rush_tds = player_stats['defense_rush_tds_allowed'].mean()
+
+                    storyline, description = generate_player_rush_td_storyline(
+                        player_row['player_rush_tds_per_game'],
+                        opp_def_rush_tds,
+                        player_row['player'],
+                        player_row['position']
+                    )
+
+                    matchup_data.append({
+                        'player': player_row['player'],
+                        'position': player_row['position'],
+                        'team': team,
+                        'opponent': opponent,
+                        'player_rush_tds_per_game': player_row['player_rush_tds_per_game'],
+                        'defense_rush_tds_allowed': opp_def_rush_tds,
+                        'total_tds': player_row['player_rush_tds'],
+                        'games': player_row['player_games'],
+                        'storyline': storyline,
+                        'description': description
+                    })
+
+            matchup_df = pd.DataFrame(matchup_data)
+        else:
+            # Show all players (use their team's defensive stats as baseline)
+            matchup_df = player_stats.copy()
+            matchup_df['opponent'] = 'Avg'
+
+        if matchup_df.empty:
+            st.info("No player TD matchup data available")
+            return
+
+        # Create scatter plot
+        fig = go.Figure()
+
+        # Add scatter points with player names
+        hover_text = matchup_df['player'] + ' (' + matchup_df['position'] + ')' + '<br>' + matchup_df['team']
+        if 'opponent' in matchup_df.columns and matchup_df['opponent'].iloc[0] != 'Avg':
+            hover_text = hover_text + ' vs ' + matchup_df['opponent']
+
+        fig.add_trace(go.Scatter(
+            x=matchup_df['player_rush_tds_per_game'],
+            y=matchup_df['defense_rush_tds_allowed'],
+            mode='markers+text',
+            marker=dict(
+                size=12,
+                color=matchup_df['player_rush_tds_per_game'],
+                colorscale='RdYlGn',
+                showscale=True,
+                colorbar=dict(title="Player<br>TDs/Gm"),
+                opacity=0.7,
+                line=dict(width=1, color='white')
+            ),
+            text=matchup_df['player'].str.split().str[-1],  # Last name only
+            textposition='top center',
+            textfont=dict(size=8, color='black'),
+            customdata=matchup_df[['player', 'position', 'team', 'player_rush_tds_per_game', 'defense_rush_tds_allowed'] +
+                                  (['storyline'] if 'storyline' in matchup_df.columns else [])].values,
+            hovertemplate='<b>%{customdata[0]} (%{customdata[1]})</b><br>' +
+                         'Team: %{customdata[2]}<br>' +
+                         'Player Rush TDs/Gm: %{x:.2f}<br>' +
+                         'Opp Def Rush TDs Allowed/Gm: %{y:.2f}<br>' +
+                         ('%{customdata[5]}<br>' if 'storyline' in matchup_df.columns else '') +
+                         '<extra></extra>',
+            showlegend=False
+        ))
+
+        # Add league average lines
+        avg_player_tds = matchup_df['player_rush_tds_per_game'].mean()
+        avg_def_tds = matchup_df['defense_rush_tds_allowed'].mean()
+
+        fig.add_hline(y=avg_def_tds, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Def TDs Allowed", annotation_position="right")
+        fig.add_vline(x=avg_player_tds, line_dash="dash", line_color="gray", opacity=0.5,
+                     annotation_text="Avg Player TDs", annotation_position="top")
+
+        # Add quadrant labels
+        fig.add_annotation(x=matchup_df['player_rush_tds_per_game'].max() * 0.9,
+                          y=matchup_df['defense_rush_tds_allowed'].max() * 0.95,
+                          text="🎯 TD SMASH", showarrow=False, font=dict(size=12, color="green"))
+        fig.add_annotation(x=matchup_df['player_rush_tds_per_game'].min() * 1.1,
+                          y=matchup_df['defense_rush_tds_allowed'].max() * 0.95,
+                          text="💎 BREAKOUT", showarrow=False, font=dict(size=12, color="blue"))
+        fig.add_annotation(x=matchup_df['player_rush_tds_per_game'].max() * 0.9,
+                          y=matchup_df['defense_rush_tds_allowed'].min() * 1.05,
+                          text="⚔️ CHALLENGE", showarrow=False, font=dict(size=12, color="orange"))
+        fig.add_annotation(x=matchup_df['player_rush_tds_per_game'].min() * 1.1,
+                          y=matchup_df['defense_rush_tds_allowed'].min() * 1.05,
+                          text="⚠️ TOUGH", showarrow=False, font=dict(size=12, color="red"))
+
+        fig.update_layout(
+            title=f"Player Rush TD vs Defense ({season} Season{f', Week {week}' if week else ''})",
+            xaxis_title="Player Rushing TDs per Game",
+            yaxis_title="Opponent Defense Rush TDs Allowed per Game",
+            height=700,
+            hovermode='closest',
+            plot_bgcolor='rgba(240,240,240,0.3)',
+            paper_bgcolor='rgba(0,0,0,0)'
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Show matchup storylines table
+        if 'storyline' in matchup_df.columns:
+            with st.expander("📋 View Player TD Matchup Details"):
+                display_df = matchup_df[['player', 'position', 'team', 'opponent',
+                                        'player_rush_tds_per_game', 'defense_rush_tds_allowed',
+                                        'total_tds', 'games', 'storyline', 'description']].copy()
+                display_df.columns = ['Player', 'Pos', 'Team', 'Opponent',
+                                     'Player TDs/Gm', 'Opp Def TDs Allowed/Gm',
+                                     'Total TDs', 'Games', 'Storyline', 'Description']
+                display_df = display_df.round({'Player TDs/Gm': 2, 'Opp Def TDs Allowed/Gm': 2})
+                display_df = display_df.sort_values('Player TDs/Gm', ascending=False)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                # Highlight SMASH matchups
+                smash = display_df[display_df['Storyline'].str.contains('SMASH|GREAT|FAVORABLE', na=False)]
+                if not smash.empty:
+                    st.success(f"**{len(smash)} Favorable TD Matchup(s):** High TD probability")
+                    for _, row in smash.head(5).iterrows():
+                        st.markdown(f"- **{row['Player']} ({row['Pos']})**: {row['Description']}")
+                else:
+                    st.info("No standout TD smash matchups this week")
+
+                # Highlight AVOID matchups
+                avoid = display_df[display_df['Storyline'].str.contains('AVOID|TOUGH', na=False)]
+                if not avoid.empty:
+                    st.warning(f"**{len(avoid)} Tough TD Matchup(s):** Limited TD upside")
+                    for _, row in avoid.head(3).iterrows():
+                        st.markdown(f"- **{row['Player']} ({row['Pos']})**: {row['Description']}")
+
+    except Exception as e:
+        st.error(f"Error generating player rush TD matchup chart: {e}")
         import traceback
         st.error(traceback.format_exc())
 

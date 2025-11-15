@@ -1949,7 +1949,9 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'last_3_avg_receptions': last_3_games['rec'].mean(),
                     'median_rec': group['rec'].median(),
                     'avg_rec_air_yds': group['receiving_air_yards'].mean(),
-                    'avg_rec_yac': group['receiving_yards_after_catch'].mean()
+                    'avg_rec_yac': group['receiving_yards_after_catch'].mean(),
+                    'avg_targets': group['targets'].mean(),
+                    'total_rec_yds': group['rec_yds'].sum()
                 })
 
             # TE: Moderate targets
@@ -2026,7 +2028,8 @@ def generate_player_projections(season, week, teams_playing):
             'def_ints': sum([d['def_ints'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 8,
             'def_sacks': sum([d['def_sacks'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
             'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15,
-            'def_rush_tds': sum([d['rush_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 1.0
+            'def_rush_tds': sum([d['rush_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 1.0,
+            'def_rec_tds': sum([d['rec_td_to_wr'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 1.0
         }
 
         # Get player medians
@@ -2261,6 +2264,40 @@ def generate_player_projections(season, week, teams_playing):
                 })
 
             elif position == 'WR':
+                # Calculate comprehensive WR matchup score
+                wr_rec_yds_per_game = player['avg_rec_yds']
+                wr_rec_tds_total = player['total_rec_td']
+                wr_targets_per_game = player.get('avg_targets', player['median_targets'])
+                wr_games = player['games_played']
+                def_rec_yds_allowed = opponent_def['rec_to_wr']
+                def_rec_tds_allowed = opponent_def['rec_td_to_wr']
+                def_rec_rank = def_rec_ranking.get(opponent, 16)
+
+                # Calculate target share % (approximate based on typical team targets per game ~35)
+                # More accurate calculation would require team total targets from database
+                wr_total_targets = player['total_targets']
+                typical_team_targets_per_game = 35  # NFL average
+                wr_target_share_pct = (wr_targets_per_game / typical_team_targets_per_game * 100) if typical_team_targets_per_game > 0 else 0
+
+                # Calculate WR Score
+                wr_score = calculate_comprehensive_wr_score(
+                    wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
+                    wr_target_share_pct, wr_games, def_rec_yds_allowed,
+                    def_rec_tds_allowed, def_rec_rank, league_avg['rec_wr'],
+                    league_avg['def_rec_tds']
+                )
+
+                # Calculate per-game rates
+                wr_rec_tds_per_game = wr_rec_tds_total / wr_games if wr_games > 0 else 0
+
+                # Generate tier and recommendation
+                tier, recommendation = generate_comprehensive_wr_storyline(
+                    wr_score, player['player'], wr_rec_yds_per_game, wr_rec_tds_per_game,
+                    wr_targets_per_game, wr_target_share_pct, def_rec_yds_allowed,
+                    def_rec_tds_allowed, def_rec_rank
+                )
+
+                # Legacy multiplier for backwards compatibility
                 multiplier = opponent_def['rec_to_wr'] / league_avg['rec_wr']
                 projected_yds = player['median_rec_yds'] * multiplier
 
@@ -2268,6 +2305,12 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'WR Score': wr_score,
+                    'Tier': tier,
+                    'Rec Yds/Gm': round(wr_rec_yds_per_game, 1),
+                    'Rec TDs/Gm': round(wr_rec_tds_per_game, 2),
+                    'Targets/Gm': round(wr_targets_per_game, 1),
+                    'Target Share %': round(wr_target_share_pct, 1),
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
                     'Median Tgts': round(player['median_targets'], 1),
@@ -2282,7 +2325,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Def Rec Rank': def_rec_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),
-                    'Games': round(float(player['games_played']), 1)
+                    'Games': round(float(player['games_played']), 1),
+                    'Recommendation': recommendation
                 })
 
                 # Calculate defensive TD percentages for WR row in SKILL table
@@ -2296,6 +2340,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (WR)",
                     'Opponent': opponent,
+                    'WR Score': wr_score,
+                    'Tier': tier,
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rush Yds': 0,
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
@@ -2347,11 +2393,13 @@ def generate_player_projections(season, week, teams_playing):
         for pos, data in projections.items():
             if data:
                 df = pd.DataFrame(data)
-                # Use position-specific scoring for QB and RB, otherwise use projected yards/total
+                # Use position-specific scoring for QB, RB, and WR, otherwise use projected yards/total
                 if pos == 'QB' and 'QB Score' in df.columns:
                     sort_col = 'QB Score'
                 elif pos == 'RB' and 'RB Score' in df.columns:
                     sort_col = 'RB Score'
+                elif pos == 'WR' and 'WR Score' in df.columns:
+                    sort_col = 'WR Score'
                 else:
                     sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
                 result[pos] = df.sort_values(sort_col, ascending=False)
@@ -3577,6 +3625,147 @@ def generate_comprehensive_rb_storyline(rb_score, rb_name, rb_rush_yds_per_game,
     else:  # < 35
         tier = "🛑 AVOID"
         recommendation = f"{rb_name} is a fade candidate. Poor production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) vs difficult matchup ({def_desc}). Bench unless desperate for bye week fill-in."
+
+    return tier, recommendation
+
+
+# ============================================================================
+# COMPREHENSIVE WR MATCHUP SCORING SYSTEM
+# ============================================================================
+
+def calculate_comprehensive_wr_score(wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
+                                     wr_target_share_pct, wr_games, def_rec_yds_allowed,
+                                     def_rec_tds_allowed, def_rec_rank, league_avg_rec_yds,
+                                     league_avg_def_rec_tds):
+    """
+    Calculate comprehensive WR matchup score (0-100 scale) based on multiple factors.
+
+    Scoring Components:
+    - Receiving Yards Production: 25 points (balanced yards approach)
+    - Receiving TD Production: 20 points (balanced TDs approach)
+    - Target Volume/Role: 20 points (opportunity analysis)
+    - Target Share %: 10 points (WR1 role identification)
+    - Defensive Receiving Vulnerability: 15 points (pass yards allowed)
+    - Defensive TD Vulnerability: 10 points (receiving TDs allowed to WRs)
+
+    Total: 100 points
+    """
+    score = 0
+
+    # Calculate per-game rates
+    wr_rec_tds_per_game = wr_rec_tds_total / wr_games if wr_games > 0 else 0
+
+    # 1. RECEIVING YARDS PRODUCTION (25 points) - Balanced Yards Approach
+    if wr_rec_yds_per_game >= 90:  # Elite (top 5 - 1500+ yd pace)
+        score += 25
+    elif wr_rec_yds_per_game >= 75:  # Strong (top 12 - 1250+ yd pace)
+        score += 20
+    elif wr_rec_yds_per_game >= 60:  # Average (top 20 - 1000+ yd pace)
+        score += 15
+    elif wr_rec_yds_per_game >= 45:  # Below average (750+ yd pace)
+        score += 10
+    else:  # Limited role (<750 yd pace)
+        score += 5
+
+    # 2. RECEIVING TD PRODUCTION (20 points) - Balanced TDs Approach
+    if wr_rec_tds_per_game >= 0.6:  # Elite (10+ TDs per season)
+        score += 20
+    elif wr_rec_tds_per_game >= 0.4:  # Strong (7+ TDs per season)
+        score += 15
+    elif wr_rec_tds_per_game >= 0.3:  # Average (5+ TDs per season)
+        score += 10
+    elif wr_rec_tds_per_game > 0:  # Occasional (1-4 TDs per season)
+        score += 5
+    # else: 0 points for no TDs
+
+    # 3. TARGET VOLUME/ROLE (20 points) - Opportunity Analysis
+    if wr_targets_per_game >= 10:  # Elite target hog (alpha WR1)
+        score += 20
+    elif wr_targets_per_game >= 8:  # Strong volume (WR1)
+        score += 16
+    elif wr_targets_per_game >= 6:  # Good volume (WR2)
+        score += 12
+    elif wr_targets_per_game >= 4:  # Moderate volume (WR3/FLEX)
+        score += 8
+    else:  # Limited volume (<4 targets)
+        score += 3
+
+    # 4. TARGET SHARE % (10 points) - WR1 Role Identification
+    if wr_target_share_pct >= 25:  # True alpha WR1 (25%+ of team targets)
+        score += 10
+    elif wr_target_share_pct >= 20:  # Strong WR1 (20%+ of team targets)
+        score += 8
+    elif wr_target_share_pct >= 15:  # WR2 role (15%+ of team targets)
+        score += 6
+    elif wr_target_share_pct >= 10:  # WR3 role (10%+ of team targets)
+        score += 3
+    # else: 0 points for low target share
+
+    # 5. DEFENSIVE RECEIVING VULNERABILITY (15 points) - Pass Yards Allowed
+    if def_rec_yds_allowed >= 70:  # Generous pass defense (worst 5)
+        score += 15
+    elif def_rec_yds_allowed >= 65:  # Favorable (bottom 12)
+        score += 12
+    elif def_rec_yds_allowed >= 60:  # Average
+        score += 8
+    else:  # Lockdown (<60 yds allowed to WRs)
+        score += 4
+
+    # 6. DEFENSIVE TD VULNERABILITY (10 points) - Receiving TDs Allowed to WRs
+    if def_rec_tds_allowed >= league_avg_def_rec_tds * 1.3:  # TD-prone (30%+ above avg)
+        score += 10
+    elif def_rec_tds_allowed >= league_avg_def_rec_tds * 0.8:  # Average
+        score += 6
+    else:  # Lockdown (<80% of avg)
+        score += 2
+
+    return round(score, 1)
+
+
+def generate_comprehensive_wr_storyline(wr_score, wr_name, wr_rec_yds_per_game, wr_rec_tds_per_game,
+                                        wr_targets_per_game, wr_target_share_pct, def_rec_yds_allowed,
+                                        def_rec_tds_allowed, def_rec_rank):
+    """
+    Generate comprehensive WR matchup storyline based on score.
+
+    7 Tier System (same as QBs/RBs):
+    - 85-100: 🔥🔥🔥 ELITE SMASH SPOT
+    - 75-84:  🔥🔥 PREMIUM MATCHUP
+    - 65-74:  🔥 SMASH SPOT
+    - 55-64:  ✅ SOLID START
+    - 45-54:  ⚖️ BALANCED
+    - 35-44:  ⚠️ RISKY PLAY
+    - 0-34:   🛑 AVOID
+    """
+    # Build description components
+    rec_yds_desc = f"{wr_rec_yds_per_game:.1f} rec yds/gm"
+    rec_tds_desc = f"{wr_rec_tds_per_game:.2f} rec TDs/gm"
+    targets_desc = f"{wr_targets_per_game:.1f} tgts/gm"
+    target_share_desc = f"{wr_target_share_pct:.1f}% target share"
+    def_desc = f"vs #{def_rec_rank} pass D ({def_rec_yds_allowed:.1f} rec yds allowed, {def_rec_tds_allowed:.1f} rec TDs allowed to WRs)"
+
+    # Determine tier and recommendation
+    if wr_score >= 85:
+        tier = "🔥🔥🔥 ELITE SMASH SPOT"
+        recommendation = f"{wr_name} is a MUST-START WR1. Elite alpha production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}, {target_share_desc}) against exploitable pass defense ({def_desc}). Expect ceiling performance with multiple TD upside."
+    elif wr_score >= 75:
+        tier = "🔥🔥 PREMIUM MATCHUP"
+        recommendation = f"{wr_name} is a premium WR1 play. Strong production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}, {target_share_desc}) with favorable matchup ({def_desc}). High floor and ceiling - start with confidence."
+    elif wr_score >= 65:
+        tier = "🔥 SMASH SPOT"
+        recommendation = f"{wr_name} is a strong start. Solid production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}) in advantageous spot ({def_desc}). Good WR1/WR2 upside play."
+    elif wr_score >= 55:
+        tier = "✅ SOLID START"
+        recommendation = f"{wr_name} is a safe WR2/FLEX. Reliable production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}) vs {def_desc}. Good floor with TD upside."
+    elif wr_score >= 45:
+        tier = "⚖️ BALANCED"
+        recommendation = f"{wr_name} is a neutral matchup ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}) vs {def_desc}. Start based on roster needs and other options. FLEX consideration."
+    elif wr_score >= 35:
+        tier = "⚠️ RISKY PLAY"
+        recommendation = f"{wr_name} has risk factors. Limited production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}) and/or tough matchup ({def_desc}). Boom-bust FLEX play with low floor."
+    else:  # < 35
+        tier = "🛑 AVOID"
+        recommendation = f"{wr_name} is a fade candidate. Poor production ({rec_yds_desc}, {rec_tds_desc}, {targets_desc}) vs difficult matchup ({def_desc}). Bench unless desperate for bye week fill-in."
 
     return tier, recommendation
 
@@ -16307,39 +16496,59 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # WR Tab
                 with proj_tabs[2]:
                     if not projections.get('WR', pd.DataFrame()).empty:
-                        st.markdown("##### Wide Receivers - Matchup-Adjusted Receiving Yard Projections")
+                        st.markdown("##### Wide Receivers - Comprehensive Matchup Analysis")
+                        st.caption("Ranked by WR Score (0-100): Multi-factor evaluation of WR production vs. defensive matchup")
 
-                        wr_df = projections['WR'].head(50).copy()
-                        wr_df['Matchup'] = wr_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+                        wr_df = projections['WR'].head(30).copy()
 
-                        def style_matchup(row):
-                            _, color = get_matchup_rating(row['Multiplier'])
-                            return [color] * len(row) if color else [''] * len(row)
+                        # Style the dataframe with tier-based colors
+                        def style_wr_tier(row):
+                            tier = row['Tier']
+                            if '🔥🔥🔥' in tier:  # ELITE SMASH SPOT
+                                return ['background-color: #0A5F0F; color: white'] * len(row)
+                            elif '🔥🔥' in tier:  # PREMIUM MATCHUP
+                                return ['background-color: #228B22; color: white'] * len(row)
+                            elif '🔥' in tier:  # SMASH SPOT
+                                return ['background-color: #90EE90'] * len(row)
+                            elif '✅' in tier:  # SOLID START
+                                return ['background-color: #E8F5E9'] * len(row)
+                            elif '⚠️' in tier:  # RISKY PLAY
+                                return ['background-color: #FFE4B5'] * len(row)
+                            elif '🛑' in tier:  # AVOID
+                                return ['background-color: #FFB6C1'] * len(row)
+                            else:  # BALANCED
+                                return [''] * len(row)
 
-                        styled_df = wr_df.style.apply(style_matchup, axis=1)
+                        styled_df = wr_df.style.apply(style_wr_tier, axis=1)
 
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
-                                "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
-                                "Median Rec Yds": st.column_config.NumberColumn("Median Rec Yds", format="%.1f"),
-                                "Median Tgts": st.column_config.NumberColumn("Median Tgts", format="%.1f"),
+                                "WR Score": st.column_config.NumberColumn("WR Score", format="%.1f", help="Comprehensive 0-100 score evaluating production + matchup"),
+                                "Tier": st.column_config.TextColumn("Tier", width="medium"),
+                                "Rec Yds/Gm": st.column_config.NumberColumn("Rec Yds/Gm", format="%.1f"),
+                                "Rec TDs/Gm": st.column_config.NumberColumn("Rec TDs/Gm", format="%.2f"),
+                                "Targets/Gm": st.column_config.NumberColumn("Targets/Gm", format="%.1f"),
+                                "Target Share %": st.column_config.NumberColumn("Target Share %", format="%.1f", help="Percentage of team targets"),
                                 "Total Targets": st.column_config.NumberColumn("Total Targets", format="%.0f"),
                                 "Total Receptions": st.column_config.NumberColumn("Total Receptions", format="%.0f"),
-                                "Last 3 Avg Tgts": st.column_config.NumberColumn("Last 3 Avg Tgts", format="%.1f"),
-                                "Last 3 Avg Rec": st.column_config.NumberColumn("Last 3 Avg Rec", format="%.1f"),
-                                "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
                                 "Rec TDs": st.column_config.NumberColumn("Rec TDs", format="%.0f"),
-                                "Def Rec Yds": st.column_config.NumberColumn("Def Rec Yds", format="%.1f"),
+                                "Def Rec Yds": st.column_config.NumberColumn("Def Rec Yds", format="%.1f", help="Rec yards allowed to WRs per game"),
                                 "Def Rec TDs": st.column_config.NumberColumn("Def Rec TDs", format="%.0f"),
                                 "Def Rec Rank": st.column_config.NumberColumn("Def Rec Rank", format="%.0f"),
                                 "Projected Yds": st.column_config.NumberColumn("Projected Yds", format="%.1f"),
-                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
                                 "Games": st.column_config.NumberColumn("Games", format="%.1f")
                             }
                         )
+
+                        # Show storylines/recommendations in expandable section
+                        with st.expander("📊 View Detailed WR Recommendations"):
+                            for _, wr in wr_df.iterrows():
+                                st.markdown(f"**{wr['Player']} ({wr['Team']}) vs {wr['Opponent']}** - Score: {wr['WR Score']}")
+                                st.markdown(f"_{wr['Recommendation']}_")
+                                st.markdown("---")
                     else:
                         st.info("No WR data available for this week")
 

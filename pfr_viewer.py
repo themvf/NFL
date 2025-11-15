@@ -1898,6 +1898,7 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'total_pass_td': group['pass_td'].sum(),
                     'total_rush_td': group['rush_td'].sum(),
                     'total_pass_int': group['pass_int'].sum(),
+                    'total_pass_att': group['pass_att'].sum(),
                     'median_pass_comp_pct': (group['pass_comp'].sum() / group['pass_att'].sum() * 100) if group['pass_att'].sum() > 0 else 0
                 })
 
@@ -2013,7 +2014,10 @@ def generate_player_projections(season, week, teams_playing):
             'rush': sum([d['rush_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 80,
             'rec_rb': sum([d['rec_to_rb'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
             'rec_wr': sum([d['rec_to_wr'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 60,
-            'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40
+            'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40,
+            'def_ints': sum([d['def_ints'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 8,
+            'def_sacks': sum([d['def_sacks'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
+            'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15
         }
 
         # Get player medians
@@ -2073,25 +2077,68 @@ def generate_player_projections(season, week, teams_playing):
                 multiplier = opponent_def['pass_allowed'] / league_avg['pass']
                 projected_yds = player['median_pass_yds'] * multiplier
 
+                # Calculate comprehensive QB score
+                qb_score = calculate_comprehensive_qb_score(
+                    qb_yards_per_game=player['avg_pass_yds'],
+                    qb_tds_total=player['total_pass_td'],
+                    qb_ints_total=player['total_pass_int'],
+                    qb_attempts_total=player['total_pass_att'],
+                    qb_rush_tds_total=player['total_rush_td'],
+                    qb_games=player['games_played'],
+                    def_pass_allowed=opponent_def['pass_allowed'],
+                    def_pass_tds_allowed=opponent_def['pass_td_allowed'],
+                    def_ints=opponent_def['def_ints'],
+                    def_sacks=opponent_def['def_sacks'],
+                    def_hurries=opponent_def['def_hurries'],
+                    def_blitzes=opponent_def['def_blitzes'],
+                    league_avg_pass_yds=league_avg['pass'],
+                    league_avg_pass_tds=league_avg['pass_tds'],
+                    league_avg_def_ints=league_avg['def_ints'],
+                    league_avg_def_sacks=league_avg['def_sacks']
+                )
+
+                # Calculate INT rate
+                int_rate = (player['total_pass_int'] / player['total_pass_att'] * 100) if player['total_pass_att'] > 0 else 0
+                tds_per_game = player['total_pass_td'] / player['games_played'] if player['games_played'] > 0 else 0
+
+                # Generate storyline
+                tier, recommendation = generate_comprehensive_qb_storyline(
+                    qb_score=qb_score,
+                    qb_name=player['player'],
+                    qb_yards_per_game=player['avg_pass_yds'],
+                    qb_tds_per_game=tds_per_game,
+                    qb_int_rate=int_rate,
+                    qb_rush_tds=player['total_rush_td'],
+                    def_pass_allowed=opponent_def['pass_allowed'],
+                    def_sacks=opponent_def['def_sacks']
+                )
+
+                # Calculate pressure score
+                pressure_score = opponent_def['def_sacks'] + (opponent_def['def_hurries'] * 0.5) + (opponent_def['def_blitzes'] * 0.3)
+
                 projections['QB'].append({
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'QB Score': round(qb_score, 1),
+                    'Tier': tier,
                     'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
                     'Pass TDs': int(player['total_pass_td']),
+                    'TDs/Game': round(tds_per_game, 2),
                     'Pass INTs': int(player['total_pass_int']),
+                    'INT Rate %': round(int_rate, 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Def Pass TDs': int(opponent_def['pass_td_allowed']),
                     'Def INTs': int(opponent_def['def_ints']),
-                    'Def Blitzes': int(opponent_def['def_blitzes']),
-                    'Def Hurries': int(opponent_def['def_hurries']),
                     'Def Sacks': int(opponent_def['def_sacks']),
+                    'Pressure Score': round(pressure_score, 1),
                     'Def Pass Rank': def_pass_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),
+                    'Recommendation': recommendation,
                     'Games': round(float(player['games_played']), 1)
                 })
 
@@ -2251,7 +2298,11 @@ def generate_player_projections(season, week, teams_playing):
         for pos, data in projections.items():
             if data:
                 df = pd.DataFrame(data)
-                sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
+                # Use QB Score for QB position, otherwise use projected yards/total
+                if pos == 'QB' and 'QB Score' in df.columns:
+                    sort_col = 'QB Score'
+                else:
+                    sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
                 result[pos] = df.sort_values(sort_col, ascending=False)
             else:
                 result[pos] = pd.DataFrame()
@@ -3113,6 +3164,230 @@ def generate_player_rush_td_storyline(player_rush_tds_per_game, defense_rush_tds
     # NEUTRAL MATCHUPS
     else:
         return "⚖️ BALANCED", f"{player_name} ({player_rush_tds_per_game:.2f} TDs/gm) vs defense allowing {defense_rush_tds_allowed:.2f} TDs/gm"
+
+
+# ============================================================================
+# Comprehensive QB Matchup Scoring System
+# ============================================================================
+
+def calculate_comprehensive_qb_score(qb_yards_per_game, qb_tds_total, qb_ints_total, qb_attempts_total,
+                                     qb_rush_tds_total, qb_games, def_pass_allowed, def_pass_tds_allowed,
+                                     def_ints, def_sacks, def_hurries, def_blitzes,
+                                     league_avg_pass_yds, league_avg_pass_tds, league_avg_def_ints, league_avg_def_sacks):
+    """
+    Calculate comprehensive QB matchup score (0-100 scale) based on multiple factors.
+
+    Scoring Components:
+    - Passing Yards Production: 20 points (top 5 = 20pts, top 12 = 15pts, top 20 = 10pts, rest scaled)
+    - Passing TD Production: 20 points (top 5 = 20pts, top 12 = 15pts, top 20 = 10pts, rest scaled)
+    - INT Avoidance: 15 points (< 1.5% = 15pts, 1.5-2.5% = 10pts, > 2.5% = 5pts)
+    - Rushing TD Bonus: 10 points (10+ rush TDs = 10pts, 5-9 = 7pts, 1-4 = 3pts, 0 = 0pts)
+    - Defensive Pass Yards Allowed: 15 points (≥ 250 = 15pts, ≥ 240 = 12pts, ≥ 230 = 8pts, < 220 = 3pts)
+    - Defensive Pressure: 10 points (low sacks+hurries = 10pts, scaled down for high pressure)
+    - Defensive Turnover Creation: 10 points (low INTs = 10pts, scaled down for ball hawks)
+
+    Args:
+        qb_yards_per_game: QB's avg passing yards per game
+        qb_tds_total: QB's total passing TDs
+        qb_ints_total: QB's total interceptions
+        qb_attempts_total: QB's total pass attempts
+        qb_rush_tds_total: QB's total rushing TDs (bonus)
+        qb_games: Number of games played
+        def_pass_allowed: Opponent's avg pass yards allowed per game
+        def_pass_tds_allowed: Opponent's total pass TDs allowed
+        def_ints: Opponent's total interceptions forced
+        def_sacks: Opponent's total sacks
+        def_hurries: Opponent's total QB hurries
+        def_blitzes: Opponent's total blitzes
+        league_avg_pass_yds: League average passing yards per game
+        league_avg_pass_tds: League average passing TDs total
+        league_avg_def_ints: League average defensive INTs
+        league_avg_def_sacks: League average defensive sacks
+
+    Returns:
+        float: Score from 0-100
+    """
+    score = 0
+
+    # 1. PASSING YARDS PRODUCTION (20 points)
+    if qb_yards_per_game >= 275:  # Elite (top 5)
+        score += 20
+    elif qb_yards_per_game >= 250:  # Strong (top 12)
+        score += 15
+    elif qb_yards_per_game >= 225:  # Average (top 20)
+        score += 10
+    elif qb_yards_per_game >= 200:  # Below average
+        score += 5
+    # else: 0 points
+
+    # 2. PASSING TD PRODUCTION (20 points)
+    tds_per_game = qb_tds_total / qb_games if qb_games > 0 else 0
+    if tds_per_game >= 2.0:  # Elite (top 5)
+        score += 20
+    elif tds_per_game >= 1.5:  # Strong (top 12)
+        score += 15
+    elif tds_per_game >= 1.0:  # Average (top 20)
+        score += 10
+    elif tds_per_game >= 0.5:  # Below average
+        score += 5
+    # else: 0 points
+
+    # 3. INT AVOIDANCE (15 points) - Lower is better
+    int_rate = (qb_ints_total / qb_attempts_total * 100) if qb_attempts_total > 0 else 3.0
+    if int_rate <= 1.5:  # Safe
+        score += 15
+    elif int_rate <= 2.5:  # Average
+        score += 10
+    else:  # Risky (> 2.5%)
+        score += 5
+
+    # 4. RUSHING TD BONUS (10 points)
+    if qb_rush_tds_total >= 10:  # Elite dual-threat (Hurts, Allen, Daniels)
+        score += 10
+    elif qb_rush_tds_total >= 5:  # Strong dual-threat
+        score += 7
+    elif qb_rush_tds_total >= 1:  # Occasional rusher
+        score += 3
+    # else: 0 points
+
+    # 5. DEFENSIVE PASS YARDS ALLOWED (15 points) - Higher is better for QB
+    if def_pass_allowed >= 250:  # Generous (bottom 10 defense)
+        score += 15
+    elif def_pass_allowed >= 240:  # Favorable (bottom 20)
+        score += 12
+    elif def_pass_allowed >= 230:  # Slightly above average
+        score += 8
+    elif def_pass_allowed >= 220:  # Average
+        score += 5
+    else:  # Stingy (< 220)
+        score += 3
+
+    # 6. DEFENSIVE PRESSURE (10 points) - Lower pressure is better for QB
+    pressure_score = def_sacks + (def_hurries * 0.5) + (def_blitzes * 0.3)
+    if pressure_score < 20:  # Low pressure defense
+        score += 10
+    elif pressure_score < 30:  # Average pressure
+        score += 7
+    elif pressure_score < 40:  # High pressure
+        score += 4
+    else:  # Very high pressure
+        score += 2
+
+    # 7. DEFENSIVE TURNOVER CREATION (10 points) - Lower INTs is better for QB
+    if def_ints < league_avg_def_ints * 0.8:  # Passive secondary
+        score += 10
+    elif def_ints < league_avg_def_ints * 1.0:  # Average
+        score += 7
+    elif def_ints < league_avg_def_ints * 1.2:  # Ball hawks
+        score += 4
+    else:  # Elite INT defense
+        score += 2
+
+    return round(score, 1)
+
+
+def categorize_qb_passing_yards(yards_per_game):
+    """Categorize QB by passing yards per game."""
+    if yards_per_game >= 275:
+        return "🔥 Elite", "elite"
+    elif yards_per_game >= 250:
+        return "✅ Strong", "strong"
+    elif yards_per_game >= 225:
+        return "⚖️ Average", "average"
+    else:
+        return "⚠️ Limited", "limited"
+
+
+def categorize_qb_passing_tds(tds_per_game):
+    """Categorize QB by passing TDs per game."""
+    if tds_per_game >= 2.0:
+        return "🔥 Elite", "elite"
+    elif tds_per_game >= 1.5:
+        return "✅ Strong", "strong"
+    elif tds_per_game >= 1.0:
+        return "⚖️ Average", "average"
+    else:
+        return "⚠️ Limited", "limited"
+
+
+def categorize_qb_int_rate(int_rate):
+    """Categorize QB by interception rate (lower is better)."""
+    if int_rate <= 1.5:
+        return "✅ Safe", "safe"
+    elif int_rate <= 2.5:
+        return "⚖️ Average", "average"
+    else:
+        return "⚠️ Risky", "risky"
+
+
+def categorize_defense_pass_allowed(pass_allowed):
+    """Categorize defense by passing yards allowed (higher is better for QB)."""
+    if pass_allowed >= 250:
+        return "🎯 Generous", "generous"
+    elif pass_allowed >= 240:
+        return "✅ Favorable", "favorable"
+    elif pass_allowed >= 230:
+        return "⚖️ Average", "average"
+    else:
+        return "🛡️ Stingy", "stingy"
+
+
+def categorize_defense_pressure(sacks, hurries, blitzes):
+    """Categorize defense by pressure (lower is better for QB)."""
+    pressure_score = sacks + (hurries * 0.5) + (blitzes * 0.3)
+    if pressure_score < 20:
+        return "✅ Low Pressure", "low"
+    elif pressure_score < 30:
+        return "⚖️ Average Pressure", "average"
+    else:
+        return "⚠️ High Pressure", "high"
+
+
+def generate_comprehensive_qb_storyline(qb_score, qb_name, qb_yards_per_game, qb_tds_per_game,
+                                       qb_int_rate, qb_rush_tds, def_pass_allowed, def_sacks):
+    """
+    Generate comprehensive QB matchup storyline based on score.
+
+    7 Tier System:
+    - 85-100: 🔥🔥🔥 ELITE SMASH SPOT
+    - 75-84:  🔥🔥 PREMIUM MATCHUP
+    - 65-74:  🔥 SMASH SPOT
+    - 55-64:  ✅ SOLID START
+    - 45-54:  ⚖️ BALANCED
+    - 35-44:  ⚠️ RISKY PLAY
+    - 0-34:   🛑 AVOID
+    """
+    # Build description components
+    yards_desc = f"{qb_yards_per_game:.1f} yds/gm"
+    tds_desc = f"{qb_tds_per_game:.2f} TDs/gm"
+    int_desc = f"{qb_int_rate:.1f}% INT"
+    rush_td_desc = f", {qb_rush_tds} rush TDs" if qb_rush_tds > 0 else ""
+    def_desc = f"vs {def_pass_allowed:.1f} yds allowed, {def_sacks} sacks"
+
+    # Determine tier and recommendation
+    if qb_score >= 85:
+        tier = "🔥🔥🔥 ELITE SMASH SPOT"
+        recommendation = f"{qb_name} is a MUST-START QB1. Elite production ({yards_desc}, {tds_desc}{rush_td_desc}) against exploitable defense ({def_desc}). Expect ceiling performance."
+    elif qb_score >= 75:
+        tier = "🔥🔥 PREMIUM MATCHUP"
+        recommendation = f"{qb_name} is a premium QB1 play. Strong production ({yards_desc}, {tds_desc}{rush_td_desc}) with favorable matchup ({def_desc}). High floor and ceiling."
+    elif qb_score >= 65:
+        tier = "🔥 SMASH SPOT"
+        recommendation = f"{qb_name} is a strong start. Solid production ({yards_desc}, {tds_desc}{rush_td_desc}) in advantageous spot ({def_desc}). Good upside play."
+    elif qb_score >= 55:
+        tier = "✅ SOLID START"
+        recommendation = f"{qb_name} is a safe QB1/QB2. Reliable production ({yards_desc}, {tds_desc}{rush_td_desc}) vs {def_desc}. Good floor with TD upside."
+    elif qb_score >= 45:
+        tier = "⚖️ BALANCED"
+        recommendation = f"{qb_name} is a neutral matchup ({yards_desc}, {tds_desc}{rush_td_desc}) vs {def_desc}. Start based on roster needs and other options."
+    elif qb_score >= 35:
+        tier = "⚠️ RISKY PLAY"
+        recommendation = f"{qb_name} has risk factors. Limited production ({yards_desc}, {tds_desc}, {int_desc}{rush_td_desc}) and/or tough matchup ({def_desc}). Boom-bust QB2."
+    else:  # < 35
+        tier = "🛑 AVOID"
+        recommendation = f"{qb_name} is a fade candidate. Poor production ({yards_desc}, {tds_desc}, {int_desc}{rush_td_desc}) vs difficult matchup ({def_desc}). Bench if possible."
+
+    return tier, recommendation
 
 
 # ============================================================================
@@ -15718,43 +15993,59 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # QB Tab
                 with proj_tabs[0]:
                     if not projections.get('QB', pd.DataFrame()).empty:
-                        st.markdown("##### Quarterbacks - Matchup-Adjusted Passing Yard Projections")
+                        st.markdown("##### Quarterbacks - Comprehensive Matchup Analysis")
+                        st.caption("Ranked by QB Score (0-100): Multi-factor evaluation of QB production vs. defensive matchup")
 
                         qb_df = projections['QB'].head(30).copy()
 
-                        # Add matchup rating column
-                        qb_df['Matchup'] = qb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+                        # Style the dataframe with tier-based colors
+                        def style_qb_tier(row):
+                            tier = row['Tier']
+                            if '🔥🔥🔥' in tier:  # ELITE SMASH SPOT
+                                return ['background-color: #0A5F0F; color: white'] * len(row)
+                            elif '🔥🔥' in tier:  # PREMIUM MATCHUP
+                                return ['background-color: #228B22; color: white'] * len(row)
+                            elif '🔥' in tier:  # SMASH SPOT
+                                return ['background-color: #90EE90'] * len(row)
+                            elif '✅' in tier:  # SOLID START
+                                return ['background-color: #E8F5E9'] * len(row)
+                            elif '⚠️' in tier:  # RISKY PLAY
+                                return ['background-color: #FFE4B5'] * len(row)
+                            elif '🛑' in tier:  # AVOID
+                                return ['background-color: #FFB6C1'] * len(row)
+                            else:  # BALANCED
+                                return [''] * len(row)
 
-                        # Style the dataframe with colors
-                        def style_matchup(row):
-                            _, color = get_matchup_rating(row['Multiplier'])
-                            return [color] * len(row) if color else [''] * len(row)
-
-                        styled_df = qb_df.style.apply(style_matchup, axis=1)
+                        styled_df = qb_df.style.apply(style_qb_tier, axis=1)
 
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
+                                "QB Score": st.column_config.NumberColumn("QB Score", format="%.1f", help="Comprehensive 0-100 score evaluating production + matchup"),
+                                "Tier": st.column_config.TextColumn("Tier", width="medium"),
                                 "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
-                                "Median Pass Yds": st.column_config.NumberColumn("Median Pass Yds", format="%.1f"),
+                                "TDs/Game": st.column_config.NumberColumn("TDs/Game", format="%.2f"),
+                                "INT Rate %": st.column_config.NumberColumn("INT Rate %", format="%.1f", help="Interceptions per 100 attempts"),
                                 "Pass TDs": st.column_config.NumberColumn("Pass TDs", format="%.0f"),
                                 "Pass INTs": st.column_config.NumberColumn("Pass INTs", format="%.0f"),
                                 "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
-                                "Rush Yds": st.column_config.NumberColumn("Rush Yds", format="%.1f"),
-                                "Def Allows": st.column_config.NumberColumn("Def Allows", format="%.1f"),
-                                "Def Pass TDs": st.column_config.NumberColumn("Def Pass TDs", format="%.0f"),
-                                "Def INTs": st.column_config.NumberColumn("Def INTs", format="%.0f"),
-                                "Def Blitzes": st.column_config.NumberColumn("Def Blitzes", format="%.0f"),
-                                "Def Hurries": st.column_config.NumberColumn("Def Hurries", format="%.0f"),
+                                "Def Allows": st.column_config.NumberColumn("Def Allows", format="%.1f", help="Pass yards allowed per game"),
                                 "Def Sacks": st.column_config.NumberColumn("Def Sacks", format="%.0f"),
-                                "Def Pass Rank": st.column_config.NumberColumn("Def Pass Rank", format="%.0f"),
+                                "Def INTs": st.column_config.NumberColumn("Def INTs", format="%.0f"),
+                                "Pressure Score": st.column_config.NumberColumn("Pressure Score", format="%.1f", help="Sacks + 0.5*Hurries + 0.3*Blitzes"),
                                 "Projected Yds": st.column_config.NumberColumn("Projected Yds", format="%.1f"),
-                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
                                 "Games": st.column_config.NumberColumn("Games", format="%.1f")
                             }
                         )
+
+                        # Show storylines/recommendations in expandable section
+                        with st.expander("📊 View Detailed QB Recommendations"):
+                            for _, qb in qb_df.iterrows():
+                                st.markdown(f"**{qb['Player']} ({qb['Team']}) vs {qb['Opponent']}** - Score: {qb['QB Score']}")
+                                st.markdown(f"_{qb['Recommendation']}_")
+                                st.markdown("---")
                     else:
                         st.info("No QB data available for this week")
 

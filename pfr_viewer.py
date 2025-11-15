@@ -2190,6 +2190,7 @@ def generate_player_projections(season, week, teams_playing):
                 proj_rush = player['median_rush_yds'] * rush_mult
                 proj_rec = player['median_rec_yds'] * rec_mult
                 proj_total = proj_rush + proj_rec
+                avg_mult = (rush_mult + rec_mult) / 2
                 combined_median = player['median_rush_yds'] + player['median_rec_yds']
 
                 # Get RB ranking and opponent quality

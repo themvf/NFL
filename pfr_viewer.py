@@ -2124,6 +2124,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Total Median': round(combined_median, 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
+                    'Total TDs': int(player['total_rush_td'] + player['total_rec_td']),
                     'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
                     'Def Avg Opp RB Rank': round(avg_opp_rank, 1) if avg_opp_rank > 0 else 0,
                     'Def Rush TDs': int(opponent_def['rush_td_allowed']),
@@ -2132,6 +2133,13 @@ def generate_player_projections(season, week, teams_playing):
                     'Multiplier': round(avg_mult, 1),
                     'Games': round(float(player['games_played']), 1)
                 })
+
+                # Calculate defensive TD percentages for RB row in SKILL table
+                def_rush_tds = int(opponent_def['rush_td_allowed'])
+                def_rec_tds = int(opponent_def['rec_td_to_wr'])
+                def_total_tds = def_rush_tds + def_rec_tds
+                pct_rush_tds = round((def_rush_tds / def_total_tds * 100), 1) if def_total_tds > 0 else 0
+                pct_rec_tds = round((def_rec_tds / def_total_tds * 100), 1) if def_total_tds > 0 else 0
 
                 projections['SKILL'].append({
                     'Player': player['player'],
@@ -2145,7 +2153,11 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
-                    'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),
+                    'Def Total TDs': def_total_tds,
+                    'Def Rush TDs': def_rush_tds,
+                    'Def Rec TDs': def_rec_tds,
+                    '% Rush TDs': pct_rush_tds,
+                    '% Rec TDs': pct_rec_tds,
                     'Def Total Rank': def_total_ranking.get(opponent, 16),
                     'Projected Yds': round(proj_total, 1),
                     'Multiplier': round(avg_mult, 1),
@@ -2177,6 +2189,13 @@ def generate_player_projections(season, week, teams_playing):
                     'Games': round(float(player['games_played']), 1)
                 })
 
+                # Calculate defensive TD percentages for WR row in SKILL table
+                def_rush_tds_wr = int(opponent_def['rush_td_allowed'])
+                def_rec_tds_wr = int(opponent_def['rec_td_to_wr'])
+                def_total_tds_wr = def_rush_tds_wr + def_rec_tds_wr
+                pct_rush_tds_wr = round((def_rush_tds_wr / def_total_tds_wr * 100), 1) if def_total_tds_wr > 0 else 0
+                pct_rec_tds_wr = round((def_rec_tds_wr / def_total_tds_wr * 100), 1) if def_total_tds_wr > 0 else 0
+
                 projections['SKILL'].append({
                     'Player': player['player'],
                     'Team': f"{player['team']} (WR)",
@@ -2189,7 +2208,11 @@ def generate_player_projections(season, week, teams_playing):
                     'Avg YAC': round(player.get('avg_rec_yac', 0), 1),
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
-                    'Def Total TDs': int(opponent_def['rush_td_allowed'] + opponent_def['rec_td_to_wr']),
+                    'Def Total TDs': def_total_tds_wr,
+                    'Def Rush TDs': def_rush_tds_wr,
+                    'Def Rec TDs': def_rec_tds_wr,
+                    '% Rush TDs': pct_rush_tds_wr,
+                    '% Rec TDs': pct_rec_tds_wr,
                     'Def Total Rank': def_total_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
                     'Multiplier': round(multiplier, 1),

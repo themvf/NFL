@@ -15603,7 +15603,23 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
-                            hide_index=True
+                            hide_index=True,
+                            column_config={
+                                "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
+                                "Median Rush": st.column_config.NumberColumn("Median Rush", format="%.1f"),
+                                "Median Rec": st.column_config.NumberColumn("Median Rec", format="%.1f"),
+                                "Total Median": st.column_config.NumberColumn("Total Median", format="%.1f"),
+                                "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
+                                "Rec TDs": st.column_config.NumberColumn("Rec TDs", format="%.0f"),
+                                "Total TDs": st.column_config.NumberColumn("Total TDs", format="%.0f"),
+                                "Def Rush Yds": st.column_config.NumberColumn("Def Rush Yds", format="%.1f"),
+                                "Def Avg Opp RB Rank": st.column_config.NumberColumn("Def Avg Opp RB Rank", format="%.1f"),
+                                "Def Rush TDs": st.column_config.NumberColumn("Def Rush TDs", format="%.0f"),
+                                "Def Rush Rank": st.column_config.NumberColumn("Def Rush Rank", format="%.0f"),
+                                "Projected Total": st.column_config.NumberColumn("Projected Total", format="%.1f"),
+                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
+                                "Games": st.column_config.NumberColumn("Games", format="%.1f")
+                            }
                         )
                     else:
                         st.info("No RB data available for this week")
@@ -15647,7 +15663,26 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
-                            hide_index=True
+                            hide_index=True,
+                            column_config={
+                                "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
+                                "Median Rush Yds": st.column_config.NumberColumn("Median Rush Yds", format="%.1f"),
+                                "Median Rec Yds": st.column_config.NumberColumn("Median Rec Yds", format="%.1f"),
+                                "Median Yds": st.column_config.NumberColumn("Median Yds", format="%.1f"),
+                                "Avg Air Yds": st.column_config.NumberColumn("Avg Air Yds", format="%.1f"),
+                                "Avg YAC": st.column_config.NumberColumn("Avg YAC", format="%.1f"),
+                                "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
+                                "Rec TDs": st.column_config.NumberColumn("Rec TDs", format="%.0f"),
+                                "Def Total TDs": st.column_config.NumberColumn("Def Total TDs", format="%.0f"),
+                                "Def Rush TDs": st.column_config.NumberColumn("Def Rush TDs", format="%.0f"),
+                                "Def Rec TDs": st.column_config.NumberColumn("Def Rec TDs", format="%.0f"),
+                                "% Rush TDs": st.column_config.NumberColumn("% Rush TDs", format="%.1f"),
+                                "% Rec TDs": st.column_config.NumberColumn("% Rec TDs", format="%.1f"),
+                                "Def Total Rank": st.column_config.NumberColumn("Def Total Rank", format="%.0f"),
+                                "Projected Yds": st.column_config.NumberColumn("Projected Yds", format="%.1f"),
+                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
+                                "Games": st.column_config.NumberColumn("Games", format="%.1f")
+                            }
                         )
                     else:
                         st.info("No skill position data available for this week")

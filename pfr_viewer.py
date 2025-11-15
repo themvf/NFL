@@ -1917,7 +1917,15 @@ def calculate_player_medians(season, max_week, teams_playing=None):
                     'total_rec_td': group['rec_td'].sum(),
                     'median_targets': group['targets'].median(),
                     'avg_rec_air_yds': group['receiving_air_yards'].mean(),
-                    'avg_rec_yac': group['receiving_yards_after_catch'].mean()
+                    'avg_rec_yac': group['receiving_yards_after_catch'].mean(),
+                    # Additional stats for comprehensive RB scoring
+                    'total_rush_yds': group['rush_yds'].sum(),
+                    'total_rec_yds': group['rec_yds'].sum(),
+                    'total_carries': group['rush_att'].sum(),
+                    'total_targets': group['targets'].sum(),
+                    'total_receptions': group['rec'].sum(),
+                    'avg_rush_yds': group['rush_yds'].mean(),
+                    'avg_targets': group['targets'].mean()
                 })
 
             # WR: High targets, low rushing
@@ -2017,7 +2025,8 @@ def generate_player_projections(season, week, teams_playing):
             'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40,
             'def_ints': sum([d['def_ints'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 8,
             'def_sacks': sum([d['def_sacks'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
-            'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15
+            'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15,
+            'def_rush_tds': sum([d['rush_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 1.0
         }
 
         # Get player medians
@@ -2143,16 +2152,44 @@ def generate_player_projections(season, week, teams_playing):
                 })
 
             elif position == 'RB':
+                # Calculate comprehensive RB score
+                rb_score = calculate_comprehensive_rb_score(
+                    rb_rush_yds_per_game=player['avg_rush_yds'],
+                    rb_rush_tds_total=player['total_rush_td'],
+                    rb_rec_tds_total=player['total_rec_td'],
+                    rb_targets_per_game=player['avg_targets'],
+                    rb_games=player['games_played'],
+                    def_rush_allowed=opponent_def['rush_allowed'],
+                    def_rush_tds_allowed=opponent_def['rush_td_allowed'],
+                    league_avg_rush_yds=league_avg['rush'],
+                    league_avg_def_rush_tds=league_avg['def_rush_tds']
+                )
+
+                # Calculate per-game rates
+                rb_rush_tds_per_game = player['total_rush_td'] / player['games_played'] if player['games_played'] > 0 else 0
+                rb_rec_tds_per_game = player['total_rec_td'] / player['games_played'] if player['games_played'] > 0 else 0
+                rb_total_tds_per_game = rb_rush_tds_per_game + rb_rec_tds_per_game
+                rb_touches_per_game = (player['total_carries'] + player['total_targets']) / player['games_played'] if player['games_played'] > 0 else 0
+
+                # Generate storyline
+                tier, recommendation = generate_comprehensive_rb_storyline(
+                    rb_score=rb_score,
+                    rb_name=player['player'],
+                    rb_rush_yds_per_game=player['avg_rush_yds'],
+                    rb_rush_tds_per_game=rb_rush_tds_per_game,
+                    rb_rec_tds_per_game=rb_rec_tds_per_game,
+                    rb_targets_per_game=player['avg_targets'],
+                    rb_total_tds_per_game=rb_total_tds_per_game,
+                    def_rush_allowed=opponent_def['rush_allowed'],
+                    def_rush_tds_allowed=opponent_def['rush_td_allowed']
+                )
+
+                # Keep old projection logic for backward compatibility
                 rush_mult = opponent_def['rush_allowed'] / league_avg['rush']
                 rec_mult = opponent_def['rec_to_rb'] / league_avg['rec_rb']
-
                 proj_rush = player['median_rush_yds'] * rush_mult
                 proj_rec = player['median_rec_yds'] * rec_mult
                 proj_total = proj_rush + proj_rec
-
-                avg_mult = (rush_mult + rec_mult) / 2
-
-                # Calculate combined median total yards
                 combined_median = player['median_rush_yds'] + player['median_rec_yds']
 
                 # Get RB ranking and opponent quality
@@ -2161,9 +2198,22 @@ def generate_player_projections(season, week, teams_playing):
                 avg_opp_rank = opp_quality.get('avg_opponent_rank', 0)
 
                 projections['RB'].append({
+                    'RB Score': round(rb_score, 1),
+                    'Tier': tier,
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
+                    'Rush Yds/Gm': round(player['avg_rush_yds'], 1),
+                    'Rec Yds/Gm': round(player.get('total_rec_yds', 0) / player['games_played'], 1) if player['games_played'] > 0 else 0,
+                    'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
+                    'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),
+                    'Total TDs/Gm': round(rb_total_tds_per_game, 2),
+                    'Targets/Gm': round(player['avg_targets'], 1),
+                    'Touches/Gm': round(rb_touches_per_game, 1),
+                    'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
+                    'Def Rush TDs': round(opponent_def['rush_td_allowed'], 1),
+                    'Recommendation': recommendation,
+                    # Keep legacy columns for backward compatibility
                     'RB Rank': rb_rank,
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush': round(player['median_rush_yds'], 1),
@@ -2172,12 +2222,10 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs': int(player['total_rush_td']),
                     'Rec TDs': int(player['total_rec_td']),
                     'Total TDs': int(player['total_rush_td'] + player['total_rec_td']),
-                    'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
                     'Def Avg Opp RB Rank': round(avg_opp_rank, 1) if avg_opp_rank > 0 else 0,
-                    'Def Rush TDs': int(opponent_def['rush_td_allowed']),
                     'Def Rush Rank': def_rush_ranking.get(opponent, 16),
                     'Projected Total': round(proj_total, 1),
-                    'Multiplier': round(avg_mult, 1),
+                    'Multiplier': round((rush_mult + rec_mult) / 2, 1),
                     'Games': round(float(player['games_played']), 1)
                 })
 
@@ -2298,9 +2346,11 @@ def generate_player_projections(season, week, teams_playing):
         for pos, data in projections.items():
             if data:
                 df = pd.DataFrame(data)
-                # Use QB Score for QB position, otherwise use projected yards/total
+                # Use position-specific scoring for QB and RB, otherwise use projected yards/total
                 if pos == 'QB' and 'QB Score' in df.columns:
                     sort_col = 'QB Score'
+                elif pos == 'RB' and 'RB Score' in df.columns:
+                    sort_col = 'RB Score'
                 else:
                     sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
                 result[pos] = df.sort_values(sort_col, ascending=False)
@@ -3386,6 +3436,146 @@ def generate_comprehensive_qb_storyline(qb_score, qb_name, qb_yards_per_game, qb
     else:  # < 35
         tier = "🛑 AVOID"
         recommendation = f"{qb_name} is a fade candidate. Poor production ({yards_desc}, {tds_desc}, {int_desc}{rush_td_desc}) vs difficult matchup ({def_desc}). Bench if possible."
+
+    return tier, recommendation
+
+
+# ============================================================================
+# COMPREHENSIVE RB MATCHUP SCORING SYSTEM
+# ============================================================================
+
+def calculate_comprehensive_rb_score(rb_rush_yds_per_game, rb_rush_tds_total, rb_rec_tds_total,
+                                     rb_targets_per_game, rb_games, def_rush_allowed,
+                                     def_rush_tds_allowed, league_avg_rush_yds, league_avg_def_rush_tds):
+    """
+    Calculate comprehensive RB matchup score (0-100 scale) based on multiple factors.
+
+    Scoring Components:
+    - Rushing Yards Production: 25 points (balanced approach)
+    - Rushing TD Production: 20 points (balanced approach)
+    - Receiving Role/PPR Value: 20 points (full receiving analysis)
+    - Receiving TD Bonus: 10 points (dual-threat backs)
+    - Defensive Rush Defense: 15 points (rush yards allowed primary factor)
+    - Defensive TD Vulnerability: 10 points (TD-prone defenses)
+
+    Total: 100 points
+    """
+    score = 0
+
+    # Calculate per-game rates
+    rb_rush_tds_per_game = rb_rush_tds_total / rb_games if rb_games > 0 else 0
+    rb_rec_tds_per_game = rb_rec_tds_total / rb_games if rb_games > 0 else 0
+    rb_total_tds_per_game = rb_rush_tds_per_game + rb_rec_tds_per_game
+
+    # 1. RUSHING YARDS PRODUCTION (25 points) - Balanced Yards Approach
+    if rb_rush_yds_per_game >= 100:  # Elite (top 5)
+        score += 25
+    elif rb_rush_yds_per_game >= 80:  # Strong (top 12)
+        score += 20
+    elif rb_rush_yds_per_game >= 60:  # Average (top 20)
+        score += 15
+    elif rb_rush_yds_per_game >= 40:  # Below average
+        score += 10
+    else:  # Limited role
+        score += 5
+
+    # 2. RUSHING TD PRODUCTION (20 points) - Balanced TDs Approach
+    if rb_rush_tds_per_game >= 0.6:  # Elite (10+ per season)
+        score += 20
+    elif rb_rush_tds_per_game >= 0.4:  # Strong (7+ per season)
+        score += 15
+    elif rb_rush_tds_per_game >= 0.2:  # Average (3+ per season)
+        score += 10
+    elif rb_rush_tds_per_game > 0:  # Occasional
+        score += 5
+    # else: 0 points for no TDs
+
+    # 3. RECEIVING ROLE/PPR VALUE (20 points) - Full Receiving Analysis
+    if rb_targets_per_game >= 5:  # Elite pass-catching back (CMC, Kamara type)
+        score += 20
+    elif rb_targets_per_game >= 3:  # Strong receiving role (Gibbs, Bijan type)
+        score += 15
+    elif rb_targets_per_game >= 2:  # Moderate receiving (Most RB1s)
+        score += 10
+    elif rb_targets_per_game >= 1:  # Limited receiving
+        score += 5
+    # else: 0 points for no targets
+
+    # 4. RECEIVING TD BONUS (10 points) - Dual-Threat Back Bonus
+    if rb_rec_tds_per_game >= 0.3:  # Elite (5+ rec TDs per season)
+        score += 10
+    elif rb_rec_tds_per_game >= 0.1:  # Strong (2+ rec TDs per season)
+        score += 7
+    elif rb_rec_tds_per_game > 0:  # Occasional
+        score += 3
+    # else: 0 points for no rec TDs
+
+    # 5. DEFENSIVE RUSH DEFENSE (15 points) - Rush Yards Allowed Primary Factor
+    if def_rush_allowed >= 110:  # Generous run defense (worst 5)
+        score += 15
+    elif def_rush_allowed >= 95:  # Favorable (bottom 12)
+        score += 12
+    elif def_rush_allowed >= 80:  # Average
+        score += 8
+    else:  # Stingy (<80 yds allowed)
+        score += 4
+
+    # 6. DEFENSIVE TD VULNERABILITY (10 points) - TD-Prone Defenses
+    if def_rush_tds_allowed >= league_avg_def_rush_tds * 1.2:  # TD-prone (20%+ above avg)
+        score += 10
+    elif def_rush_tds_allowed >= league_avg_def_rush_tds * 0.8:  # Average
+        score += 6
+    else:  # Lockdown (<80% of avg)
+        score += 2
+
+    return round(score, 1)
+
+
+def generate_comprehensive_rb_storyline(rb_score, rb_name, rb_rush_yds_per_game, rb_rush_tds_per_game,
+                                       rb_rec_tds_per_game, rb_targets_per_game, rb_total_tds_per_game,
+                                       def_rush_allowed, def_rush_tds_allowed):
+    """
+    Generate comprehensive RB matchup storyline based on score.
+
+    7 Tier System (same as QBs):
+    - 85-100: 🔥🔥🔥 ELITE SMASH SPOT
+    - 75-84:  🔥🔥 PREMIUM MATCHUP
+    - 65-74:  🔥 SMASH SPOT
+    - 55-64:  ✅ SOLID START
+    - 45-54:  ⚖️ BALANCED
+    - 35-44:  ⚠️ RISKY PLAY
+    - 0-34:   🛑 AVOID
+    """
+    # Build description components
+    rush_yds_desc = f"{rb_rush_yds_per_game:.1f} rush yds/gm"
+    rush_tds_desc = f"{rb_rush_tds_per_game:.2f} rush TDs/gm"
+    rec_tds_desc = f"{rb_rec_tds_per_game:.2f} rec TDs/gm" if rb_rec_tds_per_game > 0 else ""
+    targets_desc = f"{rb_targets_per_game:.1f} tgts/gm"
+    total_tds_desc = f"{rb_total_tds_per_game:.2f} total TDs/gm"
+    def_desc = f"vs {def_rush_allowed:.1f} rush yds allowed, {def_rush_tds_allowed:.1f} rush TDs allowed"
+
+    # Determine tier and recommendation
+    if rb_score >= 85:
+        tier = "🔥🔥🔥 ELITE SMASH SPOT"
+        recommendation = f"{rb_name} is a MUST-START RB1. Elite workhorse production ({rush_yds_desc}, {total_tds_desc}, {targets_desc}) against exploitable run defense ({def_desc}). Expect ceiling performance with multiple TD upside."
+    elif rb_score >= 75:
+        tier = "🔥🔥 PREMIUM MATCHUP"
+        recommendation = f"{rb_name} is a premium RB1 play. Strong production ({rush_yds_desc}, {total_tds_desc}, {targets_desc}) with favorable matchup ({def_desc}). High floor and ceiling - start with confidence."
+    elif rb_score >= 65:
+        tier = "🔥 SMASH SPOT"
+        recommendation = f"{rb_name} is a strong start. Solid production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) in advantageous spot ({def_desc}). Good RB1/RB2 upside play."
+    elif rb_score >= 55:
+        tier = "✅ SOLID START"
+        recommendation = f"{rb_name} is a safe RB2/FLEX. Reliable production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) vs {def_desc}. Good floor with TD upside."
+    elif rb_score >= 45:
+        tier = "⚖️ BALANCED"
+        recommendation = f"{rb_name} is a neutral matchup ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) vs {def_desc}. Start based on roster needs and other options. FLEX consideration."
+    elif rb_score >= 35:
+        tier = "⚠️ RISKY PLAY"
+        recommendation = f"{rb_name} has risk factors. Limited production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) and/or tough matchup ({def_desc}). Boom-bust FLEX play with low floor."
+    else:  # < 35
+        tier = "🛑 AVOID"
+        recommendation = f"{rb_name} is a fade candidate. Poor production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) vs difficult matchup ({def_desc}). Bench unless desperate for bye week fill-in."
 
     return tier, recommendation
 
@@ -16052,38 +16242,64 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # RB Tab
                 with proj_tabs[1]:
                     if not projections.get('RB', pd.DataFrame()).empty:
-                        st.markdown("##### Running Backs - Matchup-Adjusted Total Yard Projections")
+                        st.markdown("##### Running Backs - Comprehensive Matchup Analysis")
+                        st.caption("Ranked by RB Score (0-100): Multi-factor evaluation of rushing production + receiving role + TD scoring vs defensive matchup quality")
 
-                        rb_df = projections['RB'].head(50).copy()
-                        rb_df['Matchup'] = rb_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+                        rb_df = projections['RB'].head(30).copy()
 
-                        def style_matchup(row):
-                            _, color = get_matchup_rating(row['Multiplier'])
-                            return [color] * len(row) if color else [''] * len(row)
+                        # Style with tier-based colors (same as QB)
+                        def style_rb_tier(row):
+                            tier = row['Tier']
+                            if '🔥🔥🔥' in tier:  # ELITE SMASH SPOT
+                                return ['background-color: #0A5F0F; color: white'] * len(row)
+                            elif '🔥🔥' in tier:  # PREMIUM MATCHUP
+                                return ['background-color: #228B22; color: white'] * len(row)
+                            elif '🔥' in tier:  # SMASH SPOT
+                                return ['background-color: #90EE90'] * len(row)
+                            elif '✅' in tier:  # SOLID START
+                                return ['background-color: #E8F5E9'] * len(row)
+                            elif '⚖️' in tier:  # BALANCED
+                                return [''] * len(row)
+                            elif '⚠️' in tier:  # RISKY PLAY
+                                return ['background-color: #FFE4B5'] * len(row)
+                            elif '🛑' in tier:  # AVOID
+                                return ['background-color: #FFB6C1'] * len(row)
+                            else:
+                                return [''] * len(row)
 
-                        styled_df = rb_df.style.apply(style_matchup, axis=1)
+                        styled_df = rb_df.style.apply(style_rb_tier, axis=1)
 
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
-                                "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
-                                "Median Rush": st.column_config.NumberColumn("Median Rush", format="%.1f"),
-                                "Median Rec": st.column_config.NumberColumn("Median Rec", format="%.1f"),
-                                "Total Median": st.column_config.NumberColumn("Total Median", format="%.1f"),
-                                "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
-                                "Rec TDs": st.column_config.NumberColumn("Rec TDs", format="%.0f"),
-                                "Total TDs": st.column_config.NumberColumn("Total TDs", format="%.0f"),
+                                "RB Score": st.column_config.NumberColumn("RB Score", format="%.1f",
+                                    help="Comprehensive 0-100 score: rush yards (25pts) + rush TDs (20pts) + receiving role (20pts) + rec TDs (10pts) + defensive matchup (25pts)"),
+                                "Tier": st.column_config.TextColumn("Tier", width="medium"),
+                                "Player": st.column_config.TextColumn("Player"),
+                                "Team": st.column_config.TextColumn("Team"),
+                                "Opponent": st.column_config.TextColumn("Opp"),
+                                "Rush Yds/Gm": st.column_config.NumberColumn("Rush Yds/Gm", format="%.1f"),
+                                "Rec Yds/Gm": st.column_config.NumberColumn("Rec Yds/Gm", format="%.1f"),
+                                "Rush TDs/Gm": st.column_config.NumberColumn("Rush TDs/Gm", format="%.2f"),
+                                "Rec TDs/Gm": st.column_config.NumberColumn("Rec TDs/Gm", format="%.2f"),
+                                "Total TDs/Gm": st.column_config.NumberColumn("Total TDs/Gm", format="%.2f"),
+                                "Targets/Gm": st.column_config.NumberColumn("Targets/Gm", format="%.1f",
+                                    help="Targets per game (PPR value indicator)"),
+                                "Touches/Gm": st.column_config.NumberColumn("Touches/Gm", format="%.1f",
+                                    help="Carries + Targets per game (total opportunity)"),
                                 "Def Rush Yds": st.column_config.NumberColumn("Def Rush Yds", format="%.1f"),
-                                "Def Avg Opp RB Rank": st.column_config.NumberColumn("Def Avg Opp RB Rank", format="%.1f"),
-                                "Def Rush TDs": st.column_config.NumberColumn("Def Rush TDs", format="%.0f"),
-                                "Def Rush Rank": st.column_config.NumberColumn("Def Rush Rank", format="%.0f"),
-                                "Projected Total": st.column_config.NumberColumn("Projected Total", format="%.1f"),
-                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
-                                "Games": st.column_config.NumberColumn("Games", format="%.1f")
+                                "Def Rush TDs": st.column_config.NumberColumn("Def Rush TDs", format="%.1f")
                             }
                         )
+
+                        # Show storylines/recommendations in expandable section
+                        with st.expander("📊 View Detailed RB Recommendations"):
+                            for _, rb in rb_df.iterrows():
+                                st.markdown(f"**{rb['Player']} ({rb['Team']}) vs {rb['Opponent']}** - Score: {rb['RB Score']}")
+                                st.markdown(f"_{rb['Recommendation']}_")
+                                st.markdown("---")
                     else:
                         st.info("No RB data available for this week")
 

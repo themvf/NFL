@@ -565,7 +565,7 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
 
             # Verify the save
             cursor.execute("""
-                SELECT injury_id, player_name, team_abbr FROM player_injuries
+                SELECT player_name, team_abbr, season FROM player_injuries
                 WHERE player_name = ? AND team_abbr = ? AND season = ?
             """, (player_name, team, season))
             result = cursor.fetchone()
@@ -573,14 +573,15 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
             conn.close()
 
             if result:
-                logging.info(f"Successfully saved injury ID {result[0]} for {player_name}")
+                logging.info(f"Successfully saved injury for {player_name} (rowid: {injury_id})")
                 # Upload database to GCS after successful save (non-blocking)
                 try:
                     upload_db_to_gcs()
                 except Exception as gcs_error:
                     logging.warning(f"GCS upload failed but injury saved: {gcs_error}")
                     # Still return success since database save worked
-                return result[0], None
+                # Return lastrowid as the ID (injury_id column may be NULL if no AUTOINCREMENT)
+                return injury_id if injury_id else 1, None
             else:
                 logging.error(f"Injury saved but could not verify: {player_name}")
                 return injury_id, "Saved but verification failed"

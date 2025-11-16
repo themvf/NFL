@@ -574,8 +574,12 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
 
             if result:
                 logging.info(f"Successfully saved injury ID {result[0]} for {player_name}")
-                # Upload database to GCS after successful save
-                upload_db_to_gcs()
+                # Upload database to GCS after successful save (non-blocking)
+                try:
+                    upload_db_to_gcs()
+                except Exception as gcs_error:
+                    logging.warning(f"GCS upload failed but injury saved: {gcs_error}")
+                    # Still return success since database save worked
                 return result[0], None
             else:
                 logging.error(f"Injury saved but could not verify: {player_name}")
@@ -15840,8 +15844,23 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                             # Show detailed error
                             st.error(f"❌ Failed to save injury for {inj_player}")
                             if error_msg:
-                                st.error(f"Error details: {error_msg}")
-                            st.warning("Please check the log file (nfl_app.log) for more details")
+                                st.error(f"**Error details:** {error_msg}")
+                            else:
+                                st.error("**Error details:** No error message returned (check database table schema)")
+
+                            # Show debug information
+                            with st.expander("🔍 Debug Information"):
+                                st.code(f"""
+Player: {inj_player}
+Team: {inj_team}
+Season: {inj_season}
+Injury Type: {inj_type}
+Start Week: {inj_start_week}
+End Week: {inj_end_week}
+Description: {inj_description if inj_description else 'None'}
+                                """.strip())
+
+                            st.warning("Please check the log file (nfl_app.log) for more details or try with a different player name")
 
             # Show success message if it exists
             if 'injury_success' in st.session_state:

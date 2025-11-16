@@ -7570,6 +7570,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
     # Quick matchup selector for specific week
     st.subheader("🗓️ Quick Week Matchup Selector")
 
+    # Initialize session state for team selections if not exists
+    if 'comparison_team1_idx' not in st.session_state:
+        st.session_state.comparison_team1_idx = 0
+    if 'comparison_team2_idx' not in st.session_state:
+        st.session_state.comparison_team2_idx = min(1, len(teams)-1)
+
     # Get available weeks and matchups from schedule
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -7624,34 +7630,39 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             key="quick_matchup_game"
                         )
 
-                    # Set team1 and team2 based on selected matchup
+                    # Update session state based on selected matchup
                     selected_matchup = matchup_options[selected_matchup_idx]
-                    team1_default = teams.index(selected_matchup['away']) if selected_matchup['away'] in teams else 0
-                    team2_default = teams.index(selected_matchup['home']) if selected_matchup['home'] in teams else min(1, len(teams)-1)
-                else:
-                    team1_default = 0
-                    team2_default = min(1, len(teams)-1)
-            else:
-                team1_default = 0
-                team2_default = min(1, len(teams)-1)
-        else:
-            team1_default = 0
-            team2_default = min(1, len(teams)-1)
+                    if selected_matchup['away'] in teams:
+                        st.session_state.comparison_team1_idx = teams.index(selected_matchup['away'])
+                    if selected_matchup['home'] in teams:
+                        st.session_state.comparison_team2_idx = teams.index(selected_matchup['home'])
 
         conn.close()
     except Exception as e:
         st.warning(f"Could not load week matchups: {e}")
-        team1_default = 0
-        team2_default = min(1, len(teams)-1)
 
     st.divider()
     st.subheader("📊 Team Selection")
 
     col1, col2 = st.columns(2)
     with col1:
-        team1 = st.selectbox("Team 1", teams, index=team1_default, key="team1")
+        team1 = st.selectbox(
+            "Team 1",
+            teams,
+            index=st.session_state.comparison_team1_idx,
+            key="team1"
+        )
+        # Update session state when manually changed
+        st.session_state.comparison_team1_idx = teams.index(team1)
     with col2:
-        team2 = st.selectbox("Team 2", teams, index=team2_default, key="team2")
+        team2 = st.selectbox(
+            "Team 2",
+            teams,
+            index=st.session_state.comparison_team2_idx,
+            key="team2"
+        )
+        # Update session state when manually changed
+        st.session_state.comparison_team2_idx = teams.index(team2)
 
     # Query team game stats
     sql = "SELECT * FROM box_score_summary WHERE season=? AND team IN (?, ?)"

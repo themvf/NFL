@@ -1199,7 +1199,7 @@ def get_player_current_team(player_name, season, as_of_week=None):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        sql = "SELECT recent_team FROM player_stats WHERE player_display_name = ? AND season = ?"
+        sql = "SELECT team FROM player_stats WHERE player_display_name = ? AND season = ?"
         params = [player_name, season]
 
         if as_of_week:

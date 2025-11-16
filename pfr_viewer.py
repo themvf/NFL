@@ -7589,7 +7589,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         available_weeks = weeks_df['week'].tolist() if not weeks_df.empty else []
 
         if available_weeks:
-            col_week, col_matchup = st.columns([1, 3])
+            col_week, col_matchup, col_button = st.columns([1, 3, 1])
 
             with col_week:
                 selected_matchup_week = st.selectbox(
@@ -7630,12 +7630,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             key="quick_matchup_game"
                         )
 
-                    # Update session state based on selected matchup
-                    selected_matchup = matchup_options[selected_matchup_idx]
-                    if selected_matchup['away'] in teams:
-                        st.session_state.comparison_team1_idx = teams.index(selected_matchup['away'])
-                    if selected_matchup['home'] in teams:
-                        st.session_state.comparison_team2_idx = teams.index(selected_matchup['home'])
+                    with col_button:
+                        st.write("")  # Spacing
+                        if st.button("Load Matchup", type="primary", use_container_width=True):
+                            # Update session state based on selected matchup
+                            selected_matchup = matchup_options[selected_matchup_idx]
+                            if selected_matchup['away'] in teams:
+                                st.session_state.comparison_team1_idx = teams.index(selected_matchup['away'])
+                            if selected_matchup['home'] in teams:
+                                st.session_state.comparison_team2_idx = teams.index(selected_matchup['home'])
+                            st.rerun()
 
         conn.close()
     except Exception as e:

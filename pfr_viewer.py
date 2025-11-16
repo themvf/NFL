@@ -15722,7 +15722,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                             st.markdown(f"**Notes:** {trans['notes']}")
 
                     with col_actions:
-                        if st.button("🗑️ Delete", key=f"delete_trans_{trans['transaction_id']}"):
+                        if st.button("🗑️ Delete", key=f"delete_trans_{idx}_{trans['transaction_id']}"):
                             if delete_transaction(trans['transaction_id']):
                                 st.success("Transaction deleted!")
                                 st.rerun()
@@ -15935,7 +15935,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                             st.markdown(f"**Last Updated:** {inj['updated_at']}")
 
                         with col_actions:
-                            if st.button("🗑️ Remove", key=f"delete_inj_{inj['injury_id']}"):
+                            if st.button("🗑️ Remove", key=f"delete_inj_{idx}_{inj['injury_id']}"):
                                 if remove_persistent_injury(inj['player_name'], inj['team_abbr'], inj['season']):
                                     st.success("Injury removed!")
                                     st.rerun()

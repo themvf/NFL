@@ -1195,11 +1195,11 @@ def get_player_current_team(player_name, season, as_of_week=None):
         if result:
             return result[0]  # to_team (None if released)
 
-        # No transaction found - infer from game data
+        # No transaction found - infer from game data (use player_stats for consistency)
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        sql = "SELECT team FROM player_box_score WHERE player = ? AND season = ?"
+        sql = "SELECT recent_team FROM player_stats WHERE player_display_name = ? AND season = ?"
         params = [player_name, season]
 
         if as_of_week:
@@ -15746,9 +15746,9 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
             if 'injury_form_counter' not in st.session_state:
                 st.session_state.injury_form_counter = 0
 
-            # Get all unique players from the season
+            # Get all unique players from the season (using player_stats table for consistency with projections)
             if season:
-                players_query = f"SELECT DISTINCT player FROM player_box_score WHERE season = {season} ORDER BY player"
+                players_query = f"SELECT DISTINCT player_display_name as player FROM player_stats WHERE season = {season} ORDER BY player_display_name"
                 players_df = query(players_query)
                 all_players = players_df['player'].tolist() if not players_df.empty else []
             else:

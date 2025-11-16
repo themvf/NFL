@@ -7567,11 +7567,91 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         st.warning("Need at least 2 teams for comparison.")
         return
 
+    # Quick matchup selector for specific week
+    st.subheader("🗓️ Quick Week Matchup Selector")
+
+    # Get available weeks and matchups from schedule
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        weeks_query = f"""
+            SELECT DISTINCT week
+            FROM schedules
+            WHERE season = {season} AND game_type = 'REG'
+            ORDER BY week
+        """
+        weeks_df = pd.read_sql_query(weeks_query, conn)
+        available_weeks = weeks_df['week'].tolist() if not weeks_df.empty else []
+
+        if available_weeks:
+            col_week, col_matchup = st.columns([1, 3])
+
+            with col_week:
+                selected_matchup_week = st.selectbox(
+                    "Select Week",
+                    ["Manual Selection"] + available_weeks,
+                    key="quick_matchup_week",
+                    help="Choose a week to see matchups, or 'Manual Selection' to pick teams manually"
+                )
+
+            # If a week is selected, show matchups for that week
+            if selected_matchup_week != "Manual Selection":
+                matchups_query = f"""
+                    SELECT home_team, away_team, game_id, gameday
+                    FROM schedules
+                    WHERE season = {season} AND week = {selected_matchup_week} AND game_type = 'REG'
+                    ORDER BY gameday
+                """
+                matchups_df = pd.read_sql_query(matchups_query, conn)
+
+                if not matchups_df.empty:
+                    # Create matchup options list
+                    matchup_options = []
+                    for _, game in matchups_df.iterrows():
+                        matchup_str = f"{game['away_team']} @ {game['home_team']}"
+                        if pd.notna(game['gameday']):
+                            matchup_str += f" ({game['gameday']})"
+                        matchup_options.append({
+                            'display': matchup_str,
+                            'away': game['away_team'],
+                            'home': game['home_team']
+                        })
+
+                    with col_matchup:
+                        selected_matchup_idx = st.selectbox(
+                            "Select Matchup",
+                            range(len(matchup_options)),
+                            format_func=lambda x: matchup_options[x]['display'],
+                            key="quick_matchup_game"
+                        )
+
+                    # Set team1 and team2 based on selected matchup
+                    selected_matchup = matchup_options[selected_matchup_idx]
+                    team1_default = teams.index(selected_matchup['away']) if selected_matchup['away'] in teams else 0
+                    team2_default = teams.index(selected_matchup['home']) if selected_matchup['home'] in teams else min(1, len(teams)-1)
+                else:
+                    team1_default = 0
+                    team2_default = min(1, len(teams)-1)
+            else:
+                team1_default = 0
+                team2_default = min(1, len(teams)-1)
+        else:
+            team1_default = 0
+            team2_default = min(1, len(teams)-1)
+
+        conn.close()
+    except Exception as e:
+        st.warning(f"Could not load week matchups: {e}")
+        team1_default = 0
+        team2_default = min(1, len(teams)-1)
+
+    st.divider()
+    st.subheader("📊 Team Selection")
+
     col1, col2 = st.columns(2)
     with col1:
-        team1 = st.selectbox("Team 1", teams, index=0, key="team1")
+        team1 = st.selectbox("Team 1", teams, index=team1_default, key="team1")
     with col2:
-        team2 = st.selectbox("Team 2", teams, index=min(1, len(teams)-1), key="team2")
+        team2 = st.selectbox("Team 2", teams, index=team2_default, key="team2")
 
     # Query team game stats
     sql = "SELECT * FROM box_score_summary WHERE season=? AND team IN (?, ?)"

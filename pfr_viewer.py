@@ -1637,22 +1637,30 @@ def calculate_defensive_stats(season, max_week):
 
             # Rush yards and TDs allowed (opponent RBs only, excludes QBs)
             # Only count players with 50+ total touches to exclude QB scrambles
+            # Calculate per-game totals (all RBs combined), then average across games
             rush_query = f"""
                 SELECT
-                    AVG(ps.rushing_yards) as avg_rush_allowed,
-                    SUM(ps.rushing_tds) as total_rush_td_allowed
-                FROM player_stats ps
-                INNER JOIN (
-                    SELECT player_display_name, team
-                    FROM player_stats
-                    WHERE season = {season} AND week < {max_week} AND carries >= 5
-                    GROUP BY player_display_name, team
-                    HAVING SUM(carries + targets) >= 50
-                ) qualified_rbs
-                ON ps.player_display_name = qualified_rbs.player_display_name
-                   AND ps.team = qualified_rbs.team
-                WHERE ps.season = {season} AND ps.week < {max_week}
-                  AND ps.opponent_team = '{team}'
+                    AVG(game_yards) as avg_rush_allowed,
+                    SUM(game_tds) as total_rush_td_allowed
+                FROM (
+                    SELECT
+                        ps.week,
+                        SUM(ps.rushing_yards) as game_yards,
+                        SUM(ps.rushing_tds) as game_tds
+                    FROM player_stats ps
+                    INNER JOIN (
+                        SELECT player_display_name, team
+                        FROM player_stats
+                        WHERE season = {season} AND week < {max_week} AND carries >= 5
+                        GROUP BY player_display_name, team
+                        HAVING SUM(carries + targets) >= 50
+                    ) qualified_rbs
+                    ON ps.player_display_name = qualified_rbs.player_display_name
+                       AND ps.team = qualified_rbs.team
+                    WHERE ps.season = {season} AND ps.week < {max_week}
+                      AND ps.opponent_team = '{team}'
+                    GROUP BY ps.week
+                ) per_game
             """
             rush_df = pd.read_sql_query(rush_query, conn)
 

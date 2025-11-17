@@ -8231,172 +8231,244 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     st.divider()
 
-    # Defensive Performance Charts
-    st.markdown("### 📊 Defensive Performance Visualization")
-    st.caption("Visual analysis of defensive trends over the season")
+    # Advanced Defensive Metrics Visualization
+    st.markdown("### 🛡️ Advanced Defensive Analysis")
+    st.caption("Pass rush pressure, blitz effectiveness, and defensive efficiency metrics")
 
     try:
-        # Get week-by-week defensive data for both teams
-        # Defensive stats = opponent offensive stats (what the defense allowed)
+        # Query advanced defensive metrics from pfr_advstats_def_week table
         conn = sqlite3.connect(DB_PATH)
-        week_filter = f" AND g.week < {week}" if week else ""
+        week_filter = f" AND week <= {week}" if week else ""
 
-        # Query defensive stats by week for Team 1 (opponent's offensive stats)
-        t1_weekly_def_query = f"""
+        adv_def_query = f"""
             SELECT
-                g.week,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team1}' THEN tgs_away.pass_yds
-                    ELSE tgs_home.pass_yds
-                END) as pass_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team1}' THEN tgs_away.rush_yds
-                    ELSE tgs_home.rush_yds
-                END) as rush_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team1}' THEN (tgs_away.pass_yds + tgs_away.rush_yds)
-                    ELSE (tgs_home.pass_yds + tgs_home.rush_yds)
-                END) as total_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team1}' THEN g.away_score
-                    ELSE g.home_score
-                END) as pts_allowed
-            FROM games g
-            LEFT JOIN team_game_summary tgs_home ON g.game_id = tgs_home.game_id AND g.home_team_abbr = tgs_home.team_abbr
-            LEFT JOIN team_game_summary tgs_away ON g.game_id = tgs_away.game_id AND g.away_team_abbr = tgs_away.team_abbr
-            WHERE g.season = {season}{week_filter}
-              AND (g.home_team_abbr = '{team1}' OR g.away_team_abbr = '{team1}')
-              AND g.home_score IS NOT NULL
-            GROUP BY g.week
-            ORDER BY g.week
+                team,
+                COUNT(DISTINCT game_id) as games,
+                ROUND(SUM(COALESCE(def_sacks, 0)), 1) as total_sacks,
+                ROUND(SUM(COALESCE(def_times_hurried, 0)), 1) as total_hurries,
+                ROUND(SUM(COALESCE(def_times_hitqb, 0)), 1) as total_qb_hits,
+                ROUND(SUM(COALESCE(def_times_blitzed, 0)), 1) as total_blitzes,
+                ROUND(SUM(COALESCE(def_sacks, 0)) / NULLIF(COUNT(DISTINCT game_id), 0), 2) as sacks_per_game,
+                ROUND(SUM(COALESCE(def_times_hurried, 0)) / NULLIF(COUNT(DISTINCT game_id), 0), 2) as hurries_per_game,
+                ROUND(SUM(COALESCE(def_times_hitqb, 0)) / NULLIF(COUNT(DISTINCT game_id), 0), 2) as qb_hits_per_game,
+                ROUND(SUM(COALESCE(def_times_blitzed, 0)) / NULLIF(COUNT(DISTINCT game_id), 0), 2) as blitzes_per_game,
+                ROUND(
+                    (SUM(COALESCE(def_sacks, 0)) +
+                     SUM(COALESCE(def_times_hurried, 0)) +
+                     SUM(COALESCE(def_times_hitqb, 0))) / NULLIF(COUNT(DISTINCT game_id), 0), 2
+                ) as pressure_plays_per_game,
+                ROUND(AVG(COALESCE(def_passer_rating_allowed, 0)), 1) as passer_rating_allowed,
+                ROUND(AVG(COALESCE(def_missed_tackle_pct, 0)) * 100, 1) as missed_tackle_pct
+            FROM pfr_advstats_def_week
+            WHERE season = {season}{week_filter}
+              AND team IN ('{team1}', '{team2}')
+            GROUP BY team
+            ORDER BY sacks_per_game DESC
         """
-        t1_weekly_def = pd.read_sql_query(t1_weekly_def_query, conn)
 
-        # Query defensive stats by week for Team 2 (opponent's offensive stats)
-        t2_weekly_def_query = f"""
-            SELECT
-                g.week,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team2}' THEN tgs_away.pass_yds
-                    ELSE tgs_home.pass_yds
-                END) as pass_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team2}' THEN tgs_away.rush_yds
-                    ELSE tgs_home.rush_yds
-                END) as rush_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team2}' THEN (tgs_away.pass_yds + tgs_away.rush_yds)
-                    ELSE (tgs_home.pass_yds + tgs_home.rush_yds)
-                END) as total_yds_allowed,
-                AVG(CASE
-                    WHEN g.home_team_abbr = '{team2}' THEN g.away_score
-                    ELSE g.home_score
-                END) as pts_allowed
-            FROM games g
-            LEFT JOIN team_game_summary tgs_home ON g.game_id = tgs_home.game_id AND g.home_team_abbr = tgs_home.team_abbr
-            LEFT JOIN team_game_summary tgs_away ON g.game_id = tgs_away.game_id AND g.away_team_abbr = tgs_away.team_abbr
-            WHERE g.season = {season}{week_filter}
-              AND (g.home_team_abbr = '{team2}' OR g.away_team_abbr = '{team2}')
-              AND g.home_score IS NOT NULL
-            GROUP BY g.week
-            ORDER BY g.week
-        """
-        t2_weekly_def = pd.read_sql_query(t2_weekly_def_query, conn)
+        adv_def_stats = pd.read_sql_query(adv_def_query, conn)
         conn.close()
 
-        if not t1_weekly_def.empty and not t2_weekly_def.empty:
-            # Create defensive comparison chart
-            fig_def_compare = go.Figure()
+        if not adv_def_stats.empty and len(adv_def_stats) == 2:
+            # Separate data for each team
+            t1_data = adv_def_stats[adv_def_stats['team'] == team1].iloc[0] if team1 in adv_def_stats['team'].values else None
+            t2_data = adv_def_stats[adv_def_stats['team'] == team2].iloc[0] if team2 in adv_def_stats['team'].values else None
 
-            # Team 1 defensive yards allowed
-            fig_def_compare.add_trace(go.Bar(
-                name=f'{team1} Pass Yds Allowed',
-                x=t1_weekly_def['week'],
-                y=t1_weekly_def['pass_yds_allowed'],
-                marker_color='#ff6b6b',
-                opacity=0.7
-            ))
+            if t1_data is not None and t2_data is not None:
+                # CHART 1: Pass Rush Pressure Comparison (Grouped Bar Chart)
+                st.markdown("#### 🔥 Pass Rush Pressure Metrics")
 
-            fig_def_compare.add_trace(go.Bar(
-                name=f'{team1} Rush Yds Allowed',
-                x=t1_weekly_def['week'],
-                y=t1_weekly_def['rush_yds_allowed'],
-                marker_color='#feca57',
-                opacity=0.7
-            ))
+                fig_pressure = go.Figure()
 
-            # Team 2 defensive yards allowed
-            fig_def_compare.add_trace(go.Bar(
-                name=f'{team2} Pass Yds Allowed',
-                x=t2_weekly_def['week'],
-                y=t2_weekly_def['pass_yds_allowed'],
-                marker_color='#48dbfb',
-                opacity=0.7
-            ))
+                categories = ['Sacks/Game', 'QB Hurries/Game', 'QB Hits/Game']
+                t1_values = [t1_data['sacks_per_game'], t1_data['hurries_per_game'], t1_data['qb_hits_per_game']]
+                t2_values = [t2_data['sacks_per_game'], t2_data['hurries_per_game'], t2_data['qb_hits_per_game']]
 
-            fig_def_compare.add_trace(go.Bar(
-                name=f'{team2} Rush Yds Allowed',
-                x=t2_weekly_def['week'],
-                y=t2_weekly_def['rush_yds_allowed'],
-                marker_color='#0abde3',
-                opacity=0.7
-            ))
+                fig_pressure.add_trace(go.Bar(
+                    name=team1,
+                    x=categories,
+                    y=t1_values,
+                    marker_color='#e74c3c',
+                    text=[f'{v:.2f}' for v in t1_values],
+                    textposition='outside'
+                ))
 
-            fig_def_compare.update_layout(
-                title="Defensive Yards Allowed Breakdown by Week",
-                xaxis_title="Week",
-                yaxis_title="Yards Allowed",
-                barmode='group',
-                height=450,
-                hovermode='x unified',
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
+                fig_pressure.add_trace(go.Bar(
+                    name=team2,
+                    x=categories,
+                    y=t2_values,
+                    marker_color='#3498db',
+                    text=[f'{v:.2f}' for v in t2_values],
+                    textposition='outside'
+                ))
 
-            st.plotly_chart(fig_def_compare, use_container_width=True)
+                fig_pressure.update_layout(
+                    title=f"Pass Rush Pressure Comparison ({season} Season)",
+                    xaxis_title="Metric",
+                    yaxis_title="Per Game Average",
+                    barmode='group',
+                    height=400,
+                    hovermode='x unified',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
 
-            # Points Allowed Trend Chart
-            fig_pts_def = go.Figure()
+                st.plotly_chart(fig_pressure, use_container_width=True)
 
-            fig_pts_def.add_trace(go.Scatter(
-                x=t1_weekly_def['week'],
-                y=t1_weekly_def['pts_allowed'],
-                mode='lines+markers',
-                name=f'{team1} Pts Allowed',
-                line=dict(color='#ee5a6f', width=3),
-                marker=dict(size=10)
-            ))
+                # Display summary metrics
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric(
+                        f"{team1} Total Pressure Plays/Game",
+                        f"{t1_data['pressure_plays_per_game']:.2f}",
+                        help="Combined sacks + hurries + QB hits per game"
+                    )
+                with col2:
+                    st.metric(
+                        f"{team2} Total Pressure Plays/Game",
+                        f"{t2_data['pressure_plays_per_game']:.2f}",
+                        help="Combined sacks + hurries + QB hits per game"
+                    )
 
-            fig_pts_def.add_trace(go.Scatter(
-                x=t2_weekly_def['week'],
-                y=t2_weekly_def['pts_allowed'],
-                mode='lines+markers',
-                name=f'{team2} Pts Allowed',
-                line=dict(color='#1dd1a1', width=3),
-                marker=dict(size=10)
-            ))
+                st.divider()
 
-            # Add league average reference line
-            league_avg_pts = (t1_weekly_def['pts_allowed'].mean() + t2_weekly_def['pts_allowed'].mean()) / 2
-            fig_pts_def.add_hline(
-                y=league_avg_pts,
-                line_dash="dash",
-                line_color="gray",
-                annotation_text=f"Avg ({league_avg_pts:.1f})",
-                annotation_position="right"
-            )
+                # CHART 2: Blitz Effectiveness Scatter Plot
+                st.markdown("#### ⚡ Blitz Effectiveness Analysis")
 
-            fig_pts_def.update_layout(
-                title="Defensive Points Allowed Trend",
-                xaxis_title="Week",
-                yaxis_title="Points Allowed",
-                height=400,
-                hovermode='x unified'
-            )
+                fig_blitz = go.Figure()
 
-            st.plotly_chart(fig_pts_def, use_container_width=True)
+                # Add data points for both teams
+                fig_blitz.add_trace(go.Scatter(
+                    x=[t1_data['blitzes_per_game']],
+                    y=[t1_data['sacks_per_game']],
+                    mode='markers+text',
+                    name=team1,
+                    marker=dict(size=20, color='#e74c3c'),
+                    text=[team1],
+                    textposition='top center',
+                    textfont=dict(size=14, color='#e74c3c', family='Arial Black'),
+                    hovertemplate=f'<b>{team1}</b><br>Blitzes/Game: %{{x:.2f}}<br>Sacks/Game: %{{y:.2f}}<extra></extra>'
+                ))
+
+                fig_blitz.add_trace(go.Scatter(
+                    x=[t2_data['blitzes_per_game']],
+                    y=[t2_data['sacks_per_game']],
+                    mode='markers+text',
+                    name=team2,
+                    marker=dict(size=20, color='#3498db'),
+                    text=[team2],
+                    textposition='top center',
+                    textfont=dict(size=14, color='#3498db', family='Arial Black'),
+                    hovertemplate=f'<b>{team2}</b><br>Blitzes/Game: %{{x:.2f}}<br>Sacks/Game: %{{y:.2f}}<extra></extra>'
+                ))
+
+                # Add average reference lines
+                avg_blitzes = (t1_data['blitzes_per_game'] + t2_data['blitzes_per_game']) / 2
+                avg_sacks = (t1_data['sacks_per_game'] + t2_data['sacks_per_game']) / 2
+
+                fig_blitz.add_hline(y=avg_sacks, line_dash="dash", line_color="gray",
+                                   annotation_text=f"Avg Sacks ({avg_sacks:.2f})", annotation_position="right")
+                fig_blitz.add_vline(x=avg_blitzes, line_dash="dash", line_color="gray",
+                                   annotation_text=f"Avg Blitzes ({avg_blitzes:.2f})", annotation_position="top")
+
+                fig_blitz.update_layout(
+                    title="Blitz Frequency vs Sack Production",
+                    xaxis_title="Blitzes Per Game",
+                    yaxis_title="Sacks Per Game",
+                    height=450,
+                    showlegend=False
+                )
+
+                st.plotly_chart(fig_blitz, use_container_width=True)
+
+                # Interpretation
+                st.caption("""
+                **💡 Interpretation:**
+                - **Top-right:** High blitz rate + high sack production (aggressive & effective)
+                - **Top-left:** Low blitz rate + high sack production (efficient pass rush without blitzing)
+                - **Bottom-right:** High blitz rate + low sack production (blitzing without results)
+                - **Bottom-left:** Low blitz rate + low sack production (conservative approach)
+                """)
+
+                st.divider()
+
+                # CHART 3: Defensive Efficiency Metrics (Horizontal Bar Chart)
+                st.markdown("#### 💎 Defensive Efficiency Metrics")
+
+                fig_efficiency = go.Figure()
+
+                # Passer Rating Allowed (lower is better - invert for visualization)
+                fig_efficiency.add_trace(go.Bar(
+                    name='QB Rating Allowed',
+                    y=[team1, team2],
+                    x=[t1_data['passer_rating_allowed'], t2_data['passer_rating_allowed']],
+                    orientation='h',
+                    marker_color=['#e74c3c', '#3498db'],
+                    text=[f"{t1_data['passer_rating_allowed']:.1f}", f"{t2_data['passer_rating_allowed']:.1f}"],
+                    textposition='outside',
+                    hovertemplate='%{y}<br>QB Rating Allowed: %{x:.1f}<extra></extra>'
+                ))
+
+                fig_efficiency.update_layout(
+                    title="QB Passer Rating Allowed (Lower is Better)",
+                    xaxis_title="Passer Rating",
+                    yaxis_title="Team",
+                    height=250,
+                    showlegend=False,
+                    xaxis=dict(autorange='reversed')  # Reverse so lower (better) appears on right
+                )
+
+                st.plotly_chart(fig_efficiency, use_container_width=True)
+
+                # Missed Tackle Percentage
+                fig_tackles = go.Figure()
+
+                fig_tackles.add_trace(go.Bar(
+                    name='Missed Tackle %',
+                    y=[team1, team2],
+                    x=[t1_data['missed_tackle_pct'], t2_data['missed_tackle_pct']],
+                    orientation='h',
+                    marker_color=['#e74c3c', '#3498db'],
+                    text=[f"{t1_data['missed_tackle_pct']:.1f}%", f"{t2_data['missed_tackle_pct']:.1f}%"],
+                    textposition='outside',
+                    hovertemplate='%{y}<br>Missed Tackle %: %{x:.1f}%<extra></extra>'
+                ))
+
+                fig_tackles.update_layout(
+                    title="Missed Tackle Percentage (Lower is Better)",
+                    xaxis_title="Missed Tackle %",
+                    yaxis_title="Team",
+                    height=250,
+                    showlegend=False,
+                    xaxis=dict(autorange='reversed')  # Reverse so lower (better) appears on right
+                )
+
+                st.plotly_chart(fig_tackles, use_container_width=True)
+
+                # Summary metrics in columns
+                st.markdown("##### 📊 Defensive Summary")
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    better_pressure = team1 if t1_data['pressure_plays_per_game'] > t2_data['pressure_plays_per_game'] else team2
+                    st.info(f"**Pass Rush Leader:** {better_pressure}")
+
+                with col2:
+                    better_coverage = team1 if t1_data['passer_rating_allowed'] < t2_data['passer_rating_allowed'] else team2
+                    st.info(f"**Coverage Leader:** {better_coverage}")
+
+                with col3:
+                    better_tackling = team1 if t1_data['missed_tackle_pct'] < t2_data['missed_tackle_pct'] else team2
+                    st.info(f"**Tackling Leader:** {better_tackling}")
+
+            else:
+                st.info("Advanced defensive data available for only one team")
+        else:
+            st.info("Advanced defensive metrics not available for selected teams/season")
 
     except Exception as e:
-        st.caption(f"⚠️ Defensive charts unavailable: {e}")
+        st.caption(f"⚠️ Advanced defensive charts unavailable: {e}")
+        import traceback
+        st.error(traceback.format_exc())
 
     st.divider()
 

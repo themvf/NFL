@@ -9044,6 +9044,191 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     st.divider()
 
+    # Enhanced Defensive Analysis Section
+    st.subheader("🛡️ Comprehensive Defensive Analysis")
+    st.caption("Detailed defensive metrics including pressure, turnovers, and rankings")
+
+    # Calculate defensive stats using NFLverse data (always available)
+    def calculate_team_defensive_metrics(team, season, week):
+        """Calculate defensive metrics from team_game_summary and player_stats tables."""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+
+            # Build week filter
+            week_filter = f" AND week < {week}" if week else ""
+
+            # Query defensive stats from team_game_summary (opponent stats)
+            defense_query = f"""
+                SELECT
+                    AVG(pass_yds) as avg_pass_yds_allowed,
+                    AVG(rush_yds) as avg_rush_yds_allowed,
+                    AVG(yards_total) as avg_total_yds_allowed,
+                    AVG(points) as avg_pts_allowed,
+                    COUNT(*) as games
+                FROM team_game_summary
+                WHERE season = {season}{week_filter}
+                  AND opponent_team = '{team}'
+            """
+            def_df = pd.read_sql_query(defense_query, conn)
+
+            # Query turnover stats from player_stats (defensive players against this team)
+            turnover_query = f"""
+                SELECT
+                    SUM(CASE WHEN position = 'DB' OR position = 'LB' OR position = 'DL'
+                             THEN COALESCE(interceptions, 0) ELSE 0 END) as total_ints,
+                    COUNT(DISTINCT week) as games_played
+                FROM player_stats
+                WHERE season = {season}{week_filter}
+                  AND opponent_team = '{team}'
+            """
+            turnover_df = pd.read_sql_query(turnover_query, conn)
+
+            conn.close()
+
+            # Calculate metrics
+            games = def_df['games'].iloc[0] if not def_df.empty and def_df['games'].iloc[0] > 0 else 0
+
+            if games > 0:
+                return {
+                    'games': games,
+                    'avg_pass_yds_allowed': def_df['avg_pass_yds_allowed'].iloc[0],
+                    'avg_rush_yds_allowed': def_df['avg_rush_yds_allowed'].iloc[0],
+                    'avg_total_yds_allowed': def_df['avg_total_yds_allowed'].iloc[0],
+                    'avg_pts_allowed': def_df['avg_pts_allowed'].iloc[0],
+                    'total_ints': turnover_df['total_ints'].iloc[0] if not turnover_df.empty else 0,
+                    'ints_per_game': turnover_df['total_ints'].iloc[0] / games if not turnover_df.empty and games > 0 else 0
+                }
+            else:
+                return {'games': 0}
+
+        except Exception as e:
+            return {'games': 0}
+
+    # Get comprehensive defensive metrics for both teams
+    t1_def_metrics = calculate_team_defensive_metrics(team1, season, week)
+    t2_def_metrics = calculate_team_defensive_metrics(team2, season, week)
+
+    if t1_def_metrics['games'] > 0 and t2_def_metrics['games'] > 0:
+        # Display defensive metrics in expandable sections
+        with st.expander("🎯 Pass Defense Metrics", expanded=True):
+            pass_col1, pass_col2, pass_col3 = st.columns(3)
+
+            with pass_col1:
+                st.markdown(f"**{team1} Pass Defense**")
+                st.metric("Pass Yds Allowed/Gm", f"{t1_def_metrics['avg_pass_yds_allowed']:.1f}")
+                st.metric("INTs/Game", f"{t1_def_metrics['ints_per_game']:.2f}")
+
+            with pass_col3:
+                st.markdown(f"**{team2} Pass Defense**")
+                st.metric("Pass Yds Allowed/Gm", f"{t2_def_metrics['avg_pass_yds_allowed']:.1f}")
+                st.metric("INTs/Game", f"{t2_def_metrics['ints_per_game']:.2f}")
+
+            with pass_col2:
+                st.markdown("**Advantage**")
+                # Lower is better for defense
+                pass_yds_diff = t2_def_metrics['avg_pass_yds_allowed'] - t1_def_metrics['avg_pass_yds_allowed']
+                leader = team1 if pass_yds_diff > 0 else team2
+                st.metric("Pass D", leader, f"{abs(pass_yds_diff):.1f} yds/gm better")
+
+                ints_diff = t1_def_metrics['ints_per_game'] - t2_def_metrics['ints_per_game']
+                int_leader = team1 if ints_diff > 0 else team2
+                st.metric("Takeaways", int_leader, f"{abs(ints_diff):+.2f} INT/gm")
+
+        with st.expander("🏃 Run Defense Metrics"):
+            run_col1, run_col2, run_col3 = st.columns(3)
+
+            with run_col1:
+                st.markdown(f"**{team1} Run Defense**")
+                st.metric("Rush Yds Allowed/Gm", f"{t1_def_metrics['avg_rush_yds_allowed']:.1f}")
+
+            with run_col3:
+                st.markdown(f"**{team2} Run Defense**")
+                st.metric("Rush Yds Allowed/Gm", f"{t2_def_metrics['avg_rush_yds_allowed']:.1f}")
+
+            with run_col2:
+                st.markdown("**Advantage**")
+                run_yds_diff = t2_def_metrics['avg_rush_yds_allowed'] - t1_def_metrics['avg_rush_yds_allowed']
+                run_leader = team1 if run_yds_diff > 0 else team2
+                st.metric("Run D", run_leader, f"{abs(run_yds_diff):.1f} yds/gm better")
+
+        with st.expander("📊 Overall Defensive Efficiency"):
+            eff_col1, eff_col2, eff_col3 = st.columns(3)
+
+            with eff_col1:
+                st.markdown(f"**{team1} Defense**")
+                st.metric("Total Yds Allowed/Gm", f"{t1_def_metrics['avg_total_yds_allowed']:.1f}")
+                st.metric("Points Allowed/Gm", f"{t1_def_metrics['avg_pts_allowed']:.1f}")
+
+            with eff_col3:
+                st.markdown(f"**{team2} Defense**")
+                st.metric("Total Yds Allowed/Gm", f"{t2_def_metrics['avg_total_yds_allowed']:.1f}")
+                st.metric("Points Allowed/Gm", f"{t2_def_metrics['avg_pts_allowed']:.1f}")
+
+            with eff_col2:
+                st.markdown("**Advantage**")
+                total_yds_diff = t2_def_metrics['avg_total_yds_allowed'] - t1_def_metrics['avg_total_yds_allowed']
+                total_leader = team1 if total_yds_diff > 0 else team2
+                st.metric("Total D", total_leader, f"{abs(total_yds_diff):.1f} yds/gm")
+
+                pts_diff = t2_def_metrics['avg_pts_allowed'] - t1_def_metrics['avg_pts_allowed']
+                pts_leader = team1 if pts_diff > 0 else team2
+                st.metric("Scoring D", pts_leader, f"{abs(pts_diff):.1f} pts/gm")
+
+        # Defensive Rankings
+        st.markdown("### 📈 Defensive Rankings")
+        st.caption("League rankings based on yards allowed (1 = best defense)")
+
+        try:
+            # Get all teams and calculate defensive rankings
+            all_teams_def = []
+            teams_list = get_teams(season)
+
+            for team in teams_list:
+                team_def = calculate_team_defensive_metrics(team, season, week)
+                if team_def['games'] > 0:
+                    all_teams_def.append({
+                        'team': team,
+                        'pass_yds': team_def['avg_pass_yds_allowed'],
+                        'rush_yds': team_def['avg_rush_yds_allowed'],
+                        'total_yds': team_def['avg_total_yds_allowed'],
+                        'pts': team_def['avg_pts_allowed']
+                    })
+
+            # Sort and rank (lower is better for defense)
+            all_teams_def.sort(key=lambda x: x['total_yds'])
+
+            # Find rankings for our teams
+            t1_rank = next((i+1 for i, t in enumerate(all_teams_def) if t['team'] == team1), None)
+            t2_rank = next((i+1 for i, t in enumerate(all_teams_def) if t['team'] == team2), None)
+
+            if t1_rank and t2_rank:
+                rank_col1, rank_col2, rank_col3 = st.columns(3)
+
+                with rank_col1:
+                    st.markdown(f"**{team1}**")
+                    st.metric("Overall Defense Rank", f"#{t1_rank}")
+
+                with rank_col3:
+                    st.markdown(f"**{team2}**")
+                    st.metric("Overall Defense Rank", f"#{t2_rank}")
+
+                with rank_col2:
+                    st.markdown("**Comparison**")
+                    rank_diff = abs(t1_rank - t2_rank)
+                    better_team = team1 if t1_rank < t2_rank else team2
+                    if rank_diff > 0:
+                        st.metric("Better Defense", better_team, f"{rank_diff} spots better")
+                    else:
+                        st.info("Tied ranking")
+
+        except Exception as e:
+            st.caption(f"Rankings calculation unavailable: {e}")
+
+    else:
+        st.info("⚠️ Comprehensive defensive metrics require game data. Play at least 1 game to see detailed defensive analysis.")
+
+    st.divider()
+
     # Home/Away Splits and Margin Analysis
     st.subheader("🏠 Home/Away Performance & Margins")
 

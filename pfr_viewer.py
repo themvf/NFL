@@ -8237,38 +8237,69 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     try:
         # Get week-by-week defensive data for both teams
+        # Defensive stats = opponent offensive stats (what the defense allowed)
         conn = sqlite3.connect(DB_PATH)
-        week_filter = f" AND week < {week}" if week else ""
+        week_filter = f" AND g.week < {week}" if week else ""
 
-        # Query defensive stats by week for Team 1
+        # Query defensive stats by week for Team 1 (opponent's offensive stats)
         t1_weekly_def_query = f"""
             SELECT
-                week,
-                AVG(pass_yds) as pass_yds_allowed,
-                AVG(rush_yds) as rush_yds_allowed,
-                AVG(yards_total) as total_yds_allowed,
-                AVG(points) as pts_allowed
-            FROM team_game_summary
-            WHERE season = {season}{week_filter}
-              AND opponent_team = '{team1}'
-            GROUP BY week
-            ORDER BY week
+                g.week,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team1}' THEN tgs_away.pass_yds
+                    ELSE tgs_home.pass_yds
+                END) as pass_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team1}' THEN tgs_away.rush_yds
+                    ELSE tgs_home.rush_yds
+                END) as rush_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team1}' THEN (tgs_away.pass_yds + tgs_away.rush_yds)
+                    ELSE (tgs_home.pass_yds + tgs_home.rush_yds)
+                END) as total_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team1}' THEN g.away_score
+                    ELSE g.home_score
+                END) as pts_allowed
+            FROM games g
+            LEFT JOIN team_game_summary tgs_home ON g.game_id = tgs_home.game_id AND g.home_team_abbr = tgs_home.team_abbr
+            LEFT JOIN team_game_summary tgs_away ON g.game_id = tgs_away.game_id AND g.away_team_abbr = tgs_away.team_abbr
+            WHERE g.season = {season}{week_filter}
+              AND (g.home_team_abbr = '{team1}' OR g.away_team_abbr = '{team1}')
+              AND g.home_score IS NOT NULL
+            GROUP BY g.week
+            ORDER BY g.week
         """
         t1_weekly_def = pd.read_sql_query(t1_weekly_def_query, conn)
 
-        # Query defensive stats by week for Team 2
+        # Query defensive stats by week for Team 2 (opponent's offensive stats)
         t2_weekly_def_query = f"""
             SELECT
-                week,
-                AVG(pass_yds) as pass_yds_allowed,
-                AVG(rush_yds) as rush_yds_allowed,
-                AVG(yards_total) as total_yds_allowed,
-                AVG(points) as pts_allowed
-            FROM team_game_summary
-            WHERE season = {season}{week_filter}
-              AND opponent_team = '{team2}'
-            GROUP BY week
-            ORDER BY week
+                g.week,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team2}' THEN tgs_away.pass_yds
+                    ELSE tgs_home.pass_yds
+                END) as pass_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team2}' THEN tgs_away.rush_yds
+                    ELSE tgs_home.rush_yds
+                END) as rush_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team2}' THEN (tgs_away.pass_yds + tgs_away.rush_yds)
+                    ELSE (tgs_home.pass_yds + tgs_home.rush_yds)
+                END) as total_yds_allowed,
+                AVG(CASE
+                    WHEN g.home_team_abbr = '{team2}' THEN g.away_score
+                    ELSE g.home_score
+                END) as pts_allowed
+            FROM games g
+            LEFT JOIN team_game_summary tgs_home ON g.game_id = tgs_home.game_id AND g.home_team_abbr = tgs_home.team_abbr
+            LEFT JOIN team_game_summary tgs_away ON g.game_id = tgs_away.game_id AND g.away_team_abbr = tgs_away.team_abbr
+            WHERE g.season = {season}{week_filter}
+              AND (g.home_team_abbr = '{team2}' OR g.away_team_abbr = '{team2}')
+              AND g.home_score IS NOT NULL
+            GROUP BY g.week
+            ORDER BY g.week
         """
         t2_weekly_def = pd.read_sql_query(t2_weekly_def_query, conn)
         conn.close()

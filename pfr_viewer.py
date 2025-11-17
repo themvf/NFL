@@ -8231,6 +8231,144 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     st.divider()
 
+    # Defensive Performance Charts
+    st.markdown("### 📊 Defensive Performance Visualization")
+    st.caption("Visual analysis of defensive trends over the season")
+
+    try:
+        # Get week-by-week defensive data for both teams
+        conn = sqlite3.connect(DB_PATH)
+        week_filter = f" AND week < {week}" if week else ""
+
+        # Query defensive stats by week for Team 1
+        t1_weekly_def_query = f"""
+            SELECT
+                week,
+                AVG(pass_yds) as pass_yds_allowed,
+                AVG(rush_yds) as rush_yds_allowed,
+                AVG(yards_total) as total_yds_allowed,
+                AVG(points) as pts_allowed
+            FROM team_game_summary
+            WHERE season = {season}{week_filter}
+              AND opponent_team = '{team1}'
+            GROUP BY week
+            ORDER BY week
+        """
+        t1_weekly_def = pd.read_sql_query(t1_weekly_def_query, conn)
+
+        # Query defensive stats by week for Team 2
+        t2_weekly_def_query = f"""
+            SELECT
+                week,
+                AVG(pass_yds) as pass_yds_allowed,
+                AVG(rush_yds) as rush_yds_allowed,
+                AVG(yards_total) as total_yds_allowed,
+                AVG(points) as pts_allowed
+            FROM team_game_summary
+            WHERE season = {season}{week_filter}
+              AND opponent_team = '{team2}'
+            GROUP BY week
+            ORDER BY week
+        """
+        t2_weekly_def = pd.read_sql_query(t2_weekly_def_query, conn)
+        conn.close()
+
+        if not t1_weekly_def.empty and not t2_weekly_def.empty:
+            # Create defensive comparison chart
+            fig_def_compare = go.Figure()
+
+            # Team 1 defensive yards allowed
+            fig_def_compare.add_trace(go.Bar(
+                name=f'{team1} Pass Yds Allowed',
+                x=t1_weekly_def['week'],
+                y=t1_weekly_def['pass_yds_allowed'],
+                marker_color='#ff6b6b',
+                opacity=0.7
+            ))
+
+            fig_def_compare.add_trace(go.Bar(
+                name=f'{team1} Rush Yds Allowed',
+                x=t1_weekly_def['week'],
+                y=t1_weekly_def['rush_yds_allowed'],
+                marker_color='#feca57',
+                opacity=0.7
+            ))
+
+            # Team 2 defensive yards allowed
+            fig_def_compare.add_trace(go.Bar(
+                name=f'{team2} Pass Yds Allowed',
+                x=t2_weekly_def['week'],
+                y=t2_weekly_def['pass_yds_allowed'],
+                marker_color='#48dbfb',
+                opacity=0.7
+            ))
+
+            fig_def_compare.add_trace(go.Bar(
+                name=f'{team2} Rush Yds Allowed',
+                x=t2_weekly_def['week'],
+                y=t2_weekly_def['rush_yds_allowed'],
+                marker_color='#0abde3',
+                opacity=0.7
+            ))
+
+            fig_def_compare.update_layout(
+                title="Defensive Yards Allowed Breakdown by Week",
+                xaxis_title="Week",
+                yaxis_title="Yards Allowed",
+                barmode='group',
+                height=450,
+                hovermode='x unified',
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+
+            st.plotly_chart(fig_def_compare, use_container_width=True)
+
+            # Points Allowed Trend Chart
+            fig_pts_def = go.Figure()
+
+            fig_pts_def.add_trace(go.Scatter(
+                x=t1_weekly_def['week'],
+                y=t1_weekly_def['pts_allowed'],
+                mode='lines+markers',
+                name=f'{team1} Pts Allowed',
+                line=dict(color='#ee5a6f', width=3),
+                marker=dict(size=10)
+            ))
+
+            fig_pts_def.add_trace(go.Scatter(
+                x=t2_weekly_def['week'],
+                y=t2_weekly_def['pts_allowed'],
+                mode='lines+markers',
+                name=f'{team2} Pts Allowed',
+                line=dict(color='#1dd1a1', width=3),
+                marker=dict(size=10)
+            ))
+
+            # Add league average reference line
+            league_avg_pts = (t1_weekly_def['pts_allowed'].mean() + t2_weekly_def['pts_allowed'].mean()) / 2
+            fig_pts_def.add_hline(
+                y=league_avg_pts,
+                line_dash="dash",
+                line_color="gray",
+                annotation_text=f"Avg ({league_avg_pts:.1f})",
+                annotation_position="right"
+            )
+
+            fig_pts_def.update_layout(
+                title="Defensive Points Allowed Trend",
+                xaxis_title="Week",
+                yaxis_title="Points Allowed",
+                height=400,
+                hovermode='x unified'
+            )
+
+            st.plotly_chart(fig_pts_def, use_container_width=True)
+
+    except Exception as e:
+        st.caption(f"⚠️ Defensive charts unavailable: {e}")
+
+    st.divider()
+
     # Game Results Section
     st.subheader("📊 Season Game Results")
 
@@ -9224,140 +9362,6 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         except Exception as e:
             st.caption(f"Rankings calculation unavailable: {e}")
 
-        # Defensive Performance Charts
-        st.markdown("### 📊 Defensive Performance Visualization")
-
-        try:
-            # Get week-by-week defensive data for both teams
-            conn = sqlite3.connect(DB_PATH)
-            week_filter = f" AND week < {week}" if week else ""
-
-            # Query defensive stats by week for Team 1
-            t1_weekly_def_query = f"""
-                SELECT
-                    week,
-                    AVG(pass_yds) as pass_yds_allowed,
-                    AVG(rush_yds) as rush_yds_allowed,
-                    AVG(yards_total) as total_yds_allowed,
-                    AVG(points) as pts_allowed
-                FROM team_game_summary
-                WHERE season = {season}{week_filter}
-                  AND opponent_team = '{team1}'
-                GROUP BY week
-                ORDER BY week
-            """
-            t1_weekly_def = pd.read_sql_query(t1_weekly_def_query, conn)
-
-            # Query defensive stats by week for Team 2
-            t2_weekly_def_query = f"""
-                SELECT
-                    week,
-                    AVG(pass_yds) as pass_yds_allowed,
-                    AVG(rush_yds) as rush_yds_allowed,
-                    AVG(yards_total) as total_yds_allowed,
-                    AVG(points) as pts_allowed
-                FROM team_game_summary
-                WHERE season = {season}{week_filter}
-                  AND opponent_team = '{team2}'
-                GROUP BY week
-                ORDER BY week
-            """
-            t2_weekly_def = pd.read_sql_query(t2_weekly_def_query, conn)
-            conn.close()
-
-            if not t1_weekly_def.empty and not t2_weekly_def.empty:
-                # Create defensive comparison chart
-                fig_def_compare = go.Figure()
-
-                # Team 1 defensive yards allowed
-                fig_def_compare.add_trace(go.Bar(
-                    name=f'{team1} Pass Yds Allowed',
-                    x=t1_weekly_def['week'],
-                    y=t1_weekly_def['pass_yds_allowed'],
-                    marker_color='#ff6b6b',
-                    opacity=0.7
-                ))
-
-                fig_def_compare.add_trace(go.Bar(
-                    name=f'{team1} Rush Yds Allowed',
-                    x=t1_weekly_def['week'],
-                    y=t1_weekly_def['rush_yds_allowed'],
-                    marker_color='#feca57',
-                    opacity=0.7
-                ))
-
-                # Team 2 defensive yards allowed
-                fig_def_compare.add_trace(go.Bar(
-                    name=f'{team2} Pass Yds Allowed',
-                    x=t2_weekly_def['week'],
-                    y=t2_weekly_def['pass_yds_allowed'],
-                    marker_color='#48dbfb',
-                    opacity=0.7
-                ))
-
-                fig_def_compare.add_trace(go.Bar(
-                    name=f'{team2} Rush Yds Allowed',
-                    x=t2_weekly_def['week'],
-                    y=t2_weekly_def['rush_yds_allowed'],
-                    marker_color='#0abde3',
-                    opacity=0.7
-                ))
-
-                fig_def_compare.update_layout(
-                    title="Defensive Yards Allowed Breakdown by Week",
-                    xaxis_title="Week",
-                    yaxis_title="Yards Allowed",
-                    barmode='group',
-                    height=450,
-                    hovermode='x unified',
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-
-                st.plotly_chart(fig_def_compare, use_container_width=True)
-
-                # Points Allowed Trend Chart
-                fig_pts_def = go.Figure()
-
-                fig_pts_def.add_trace(go.Scatter(
-                    x=t1_weekly_def['week'],
-                    y=t1_weekly_def['pts_allowed'],
-                    mode='lines+markers',
-                    name=f'{team1} Pts Allowed',
-                    line=dict(color='#ee5a6f', width=3),
-                    marker=dict(size=10)
-                ))
-
-                fig_pts_def.add_trace(go.Scatter(
-                    x=t2_weekly_def['week'],
-                    y=t2_weekly_def['pts_allowed'],
-                    mode='lines+markers',
-                    name=f'{team2} Pts Allowed',
-                    line=dict(color='#1dd1a1', width=3),
-                    marker=dict(size=10)
-                ))
-
-                # Add league average reference line
-                league_avg_pts = (t1_weekly_def['pts_allowed'].mean() + t2_weekly_def['pts_allowed'].mean()) / 2
-                fig_pts_def.add_hline(
-                    y=league_avg_pts,
-                    line_dash="dash",
-                    line_color="gray",
-                    annotation_text=f"Avg ({league_avg_pts:.1f})",
-                    annotation_position="right"
-                )
-
-                fig_pts_def.update_layout(
-                    title="Defensive Points Allowed Trend",
-                    xaxis_title="Week",
-                    yaxis_title="Points Allowed",
-                    height=400,
-                    hovermode='x unified'
-                )
-
-                st.plotly_chart(fig_pts_def, use_container_width=True)
-
-        except Exception as e:
-            st.caption(f"⚠️ Defensive charts unavailable: {e}")
 
     else:
         st.info("⚠️ Comprehensive defensive metrics require game data. Play at least 1 game to see detailed defensive analysis.")

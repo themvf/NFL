@@ -6456,6 +6456,8 @@ def calculate_point_differential(team_abbr: str, season: int, week: Optional[int
         FROM games g
         WHERE g.season = ?
         AND (g.home_team_abbr = ? OR g.away_team_abbr = ?)
+        AND g.home_score IS NOT NULL
+        AND g.away_score IS NOT NULL
     """
     params = [season, team_abbr, team_abbr]
     if week:
@@ -6465,7 +6467,14 @@ def calculate_point_differential(team_abbr: str, season: int, week: Optional[int
     games = query(sql, tuple(params))
 
     if games.empty:
-        return {'pts_for': 0.0, 'pts_against': 0.0, 'pt_diff': 0.0, 'pt_diff_per_game': 0.0}
+        return {
+            'pts_for': 0.0,
+            'pts_against': 0.0,
+            'pt_diff': 0.0,
+            'pt_diff_per_game': 0.0,
+            'avg_pts_for': 22.0,  # NFL average fallback
+            'avg_pts_against': 22.0
+        }
 
     total_pts_for = 0
     total_pts_against = 0
@@ -6474,6 +6483,10 @@ def calculate_point_differential(team_abbr: str, season: int, week: Optional[int
         is_home = row['home_team_abbr'] == team_abbr
         team_score = row['home_score'] if is_home else row['away_score']
         opp_score = row['away_score'] if is_home else row['home_score']
+
+        # Skip if scores are None (shouldn't happen with SQL filter, but defensive)
+        if team_score is None or opp_score is None:
+            continue
 
         total_pts_for += team_score
         total_pts_against += opp_score
@@ -6487,8 +6500,8 @@ def calculate_point_differential(team_abbr: str, season: int, week: Optional[int
         'pts_against': float(total_pts_against),
         'pt_diff': float(pt_diff),
         'pt_diff_per_game': pt_diff_per_game,
-        'avg_pts_for': total_pts_for / games_played if games_played > 0 else 0.0,
-        'avg_pts_against': total_pts_against / games_played if games_played > 0 else 0.0
+        'avg_pts_for': float(total_pts_for / games_played) if games_played > 0 else 22.0,
+        'avg_pts_against': float(total_pts_against / games_played) if games_played > 0 else 22.0
     }
 
 

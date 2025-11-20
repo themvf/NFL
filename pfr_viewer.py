@@ -10316,6 +10316,35 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
         st.divider()
 
+        # Strategic Matchup Analysis Section
+        st.subheader("🎯 Strategic Matchup Analysis")
+        st.caption("Advanced team-level matchup charts identifying strategic advantages and vulnerabilities")
+
+        # Create a fake upcoming_games dataframe for team comparison context
+        # This allows the charts to filter to just these two teams
+        upcoming_comparison = pd.DataFrame([{
+            'home_team': team1,
+            'away_team': team2,
+            'week': week if week else 'Season'
+        }])
+
+        # QB Pressure Matchup Chart
+        with st.expander("🛡️ QB Pressure Matchup - Pass Protection vs Pass Rush", expanded=True):
+            st.caption("**Analysis:** Offensive line protection quality vs defensive pass rush effectiveness")
+            render_qb_pressure_matchup_chart(season, week, upcoming_comparison)
+
+        # Air Yards vs YAC Matchup Chart
+        with st.expander("✈️ Air Yards vs YAC - Passing Philosophy vs Coverage Style", expanded=True):
+            st.caption("**Analysis:** Downfield vs underneath passing attack and yards after catch allowed")
+            render_air_yac_matchup_chart(season, week, upcoming_comparison)
+
+        # Team Balance Chart
+        with st.expander("⚖️ Team Balance - Offensive Play Calling Tendencies", expanded=True):
+            st.caption("**Analysis:** Rush vs pass play distribution reveals offensive philosophy and predictability")
+            render_team_balance_chart(season, week)
+
+        st.divider()
+
         # TD Against Section
         st.subheader("🛡️ TD Against")
         st.caption("Touchdowns allowed by each team's defense - lower numbers indicate better defensive performance")

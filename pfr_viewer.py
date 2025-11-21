@@ -2257,6 +2257,17 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (RB)",
                     'Opponent': opponent,
+                    'RB Score': round(rb_score, 1),
+                    'Tier': tier,
+                    'Rush Yds/Gm': round(player['avg_rush_yds'], 1),
+                    'Rec Yds/Gm': round(player.get('total_rec_yds', 0) / player['games_played'], 1) if player['games_played'] > 0 else 0,
+                    'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
+                    'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),
+                    'Total TDs/Gm': round(rb_total_tds_per_game, 2),
+                    'Touches/Gm': round(rb_touches_per_game, 1),
+                    'Targets/Gm': round(player['avg_targets'], 1),
+                    'Recommendation': recommendation,
+                    # Legacy columns for backward compatibility
                     'Avg Yds/Game': round(player['avg_total_yds'], 1),
                     'Median Rush Yds': round(player['median_rush_yds'], 1),
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
@@ -2355,6 +2366,12 @@ def generate_player_projections(season, week, teams_playing):
                     'Opponent': opponent,
                     'WR Score': wr_score,
                     'Tier': tier,
+                    'Rec Yds/Gm': round(wr_rec_yds_per_game, 1),
+                    'Rec TDs/Gm': round(wr_rec_tds_per_game, 2),
+                    'Targets/Gm': round(wr_targets_per_game, 1),
+                    'Target Share %': round(wr_target_share_pct, 1),
+                    'Recommendation': recommendation,
+                    # Legacy columns for backward compatibility
                     'Avg Yds/Game': round(player['avg_rec_yds'], 1),
                     'Median Rush Yds': 0,
                     'Median Rec Yds': round(player['median_rec_yds'], 1),
@@ -17161,41 +17178,91 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # Skill Players Combined Tab
                 with proj_tabs[3]:
                     if not projections.get('SKILL', pd.DataFrame()).empty:
-                        st.markdown("##### Top Skill Position Players (RB/WR) - All Positions Combined")
+                        st.markdown("##### ⭐ Top Skill Position Players - Comprehensive Matchup Analysis")
+                        st.caption("Multi-factor scoring combining player production (yards, TDs, touches) with defensive matchup quality. RBs and WRs ranked by their respective comprehensive scores.")
 
-                        skill_df = projections['SKILL'].head(75).copy()
-                        skill_df['Matchup'] = skill_df['Multiplier'].apply(lambda x: get_matchup_rating(x)[0])
+                        skill_df = projections['SKILL'].copy()
 
-                        def style_matchup(row):
-                            _, color = get_matchup_rating(row['Multiplier'])
+                        # Add unified Score and Position columns for sorting
+                        skill_df['Score'] = skill_df.apply(lambda row: row.get('RB Score', row.get('WR Score', 0)), axis=1)
+                        skill_df['Position'] = skill_df['Team'].apply(lambda x: 'RB' if '(RB)' in x else ('WR' if '(WR)' in x else 'TE'))
+
+                        # Sort by Score and limit to top 60
+                        skill_df = skill_df.sort_values('Score', ascending=False).head(60)
+
+                        # Define tier-based color coding function (matching QB/RB/WR)
+                        def get_tier_color(tier):
+                            tier_colors = {
+                                'ELITE SMASH': 'background-color: #006400; color: white;',  # Dark green
+                                'GREAT PLAY': 'background-color: #228B22; color: white;',   # Forest green
+                                'FAVORABLE': 'background-color: #32CD32; color: black;',    # Lime green
+                                'SOLID': 'background-color: #90EE90; color: black;',        # Light green
+                                'BALANCED': 'background-color: #FFFFE0; color: black;',     # Light yellow
+                                'TOUGH': 'background-color: #FFB6C1; color: black;',        # Light pink
+                                'AVOID': 'background-color: #FF69B4; color: white;'         # Hot pink
+                            }
+                            return tier_colors.get(tier, '')
+
+                        def style_skill_tier(row):
+                            tier = row.get('Tier', '')
+                            color = get_tier_color(tier)
                             return [color] * len(row) if color else [''] * len(row)
 
-                        styled_df = skill_df.style.apply(style_matchup, axis=1)
+                        # Select columns to display
+                        display_cols = ['Player', 'Team', 'Opponent', 'Score', 'Tier']
+
+                        # Add RB-specific or WR-specific columns based on position
+                        for col in ['Rush Yds/Gm', 'Rec Yds/Gm', 'Rush TDs/Gm', 'Rec TDs/Gm', 'Total TDs/Gm', 'Touches/Gm', 'Targets/Gm', 'Target Share %', 'Recommendation']:
+                            if col in skill_df.columns:
+                                display_cols.append(col)
+
+                        # Filter to display_cols that exist
+                        display_cols = [col for col in display_cols if col in skill_df.columns]
+                        display_df = skill_df[display_cols].copy()
+
+                        styled_df = display_df.style.apply(style_skill_tier, axis=1)
 
                         st.dataframe(
                             styled_df,
                             use_container_width=True,
                             hide_index=True,
                             column_config={
-                                "Avg Yds/Game": st.column_config.NumberColumn("Avg Yds/Game", format="%.1f"),
-                                "Median Rush Yds": st.column_config.NumberColumn("Median Rush Yds", format="%.1f"),
-                                "Median Rec Yds": st.column_config.NumberColumn("Median Rec Yds", format="%.1f"),
-                                "Median Yds": st.column_config.NumberColumn("Median Yds", format="%.1f"),
-                                "Avg Air Yds": st.column_config.NumberColumn("Avg Air Yds", format="%.1f"),
-                                "Avg YAC": st.column_config.NumberColumn("Avg YAC", format="%.1f"),
-                                "Rush TDs": st.column_config.NumberColumn("Rush TDs", format="%.0f"),
-                                "Rec TDs": st.column_config.NumberColumn("Rec TDs", format="%.0f"),
-                                "Def Total TDs": st.column_config.NumberColumn("Def Total TDs", format="%.0f"),
-                                "Def Rush TDs": st.column_config.NumberColumn("Def Rush TDs", format="%.0f"),
-                                "Def Rec TDs": st.column_config.NumberColumn("Def Rec TDs", format="%.0f"),
-                                "% Rush TDs": st.column_config.NumberColumn("% Rush TDs", format="%.1f"),
-                                "% Rec TDs": st.column_config.NumberColumn("% Rec TDs", format="%.1f"),
-                                "Def Total Rank": st.column_config.NumberColumn("Def Total Rank", format="%.0f"),
-                                "Projected Yds": st.column_config.NumberColumn("Projected Yds", format="%.1f"),
-                                "Multiplier": st.column_config.NumberColumn("Multiplier", format="%.1f"),
-                                "Games": st.column_config.NumberColumn("Games", format="%.1f")
+                                "Player": st.column_config.TextColumn("Player", width="medium"),
+                                "Team": st.column_config.TextColumn("Team", width="small"),
+                                "Opponent": st.column_config.TextColumn("Opp", width="small"),
+                                "Score": st.column_config.NumberColumn(
+                                    "Score",
+                                    help="Comprehensive matchup score (0-100): Combines production metrics + defensive matchup quality",
+                                    format="%.1f",
+                                    width="small"
+                                ),
+                                "Tier": st.column_config.TextColumn("Tier", width="medium"),
+                                "Rush Yds/Gm": st.column_config.NumberColumn("Rush Yds/Gm", format="%.1f", width="small"),
+                                "Rec Yds/Gm": st.column_config.NumberColumn("Rec Yds/Gm", format="%.1f", width="small"),
+                                "Rush TDs/Gm": st.column_config.NumberColumn("Rush TDs/Gm", format="%.2f", width="small"),
+                                "Rec TDs/Gm": st.column_config.NumberColumn("Rec TDs/Gm", format="%.2f", width="small"),
+                                "Total TDs/Gm": st.column_config.NumberColumn("Total TDs/Gm", format="%.2f", width="small"),
+                                "Touches/Gm": st.column_config.NumberColumn("Touches/Gm", format="%.1f", width="small"),
+                                "Targets/Gm": st.column_config.NumberColumn("Targets/Gm", format="%.1f", width="small"),
+                                "Target Share %": st.column_config.NumberColumn("Target %", format="%.1f", width="small"),
+                                "Recommendation": st.column_config.TextColumn("Recommendation", width="large")
                             }
                         )
+
+                        # Expandable section for detailed recommendations
+                        with st.expander("📋 View Detailed Skill Player Recommendations", expanded=False):
+                            st.markdown("### Complete Matchup Analysis")
+
+                            for idx, row in skill_df.iterrows():
+                                if pd.notna(row.get('Recommendation')):
+                                    position = row['Position']
+                                    score = row['Score']
+                                    tier = row.get('Tier', 'N/A')
+
+                                    st.markdown(f"**{row['Player']}** ({position}) - {row['Team']} vs {row['Opponent']}")
+                                    st.markdown(f"*Score: {score:.1f} | Tier: {tier}*")
+                                    st.markdown(f"> {row['Recommendation']}")
+                                    st.divider()
                     else:
                         st.info("No skill position data available for this week")
 

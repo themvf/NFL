@@ -10343,6 +10343,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             st.caption("**Analysis:** Rush vs pass play distribution reveals offensive philosophy and predictability")
             render_team_balance_chart(season, week)
 
+        # Additional Matchup Charts (collapsed by default)
+        with st.expander("🏈 Rushing TD Matchup - Red Zone Ground Game Analysis", expanded=False):
+            st.caption("**Analysis:** Offensive rushing TD production vs defensive rushing TD prevention in red zone situations")
+            render_rushing_td_matchup_chart(season, week, upcoming_comparison)
+
+        with st.expander("🎯 RB Receiving Matchup - Pass-Catching Back Opportunities", expanded=False):
+            st.caption("**Analysis:** RB receiving yards production vs linebacker/safety coverage vulnerability on passing downs")
+            render_rb_receiving_matchup_chart(season, week, upcoming_comparison)
+
         st.divider()
 
         # TD Against Section

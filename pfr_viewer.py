@@ -1727,12 +1727,17 @@ def calculate_defensive_stats(season, max_week):
             """
             def_adv_df = pd.read_sql_query(def_adv_query, conn)
 
-            # QB rushing yards allowed (QBs only - high pass attempts)
-            # Calculate per-game average of total QB rushing yards
+            # QB rushing yards and TDs allowed (QBs only - high pass attempts)
+            # Calculate per-game average of total QB rushing yards and TDs
             qb_rush_allowed_query = f"""
-                SELECT AVG(game_rush_yds) as avg_qb_rush_allowed
+                SELECT
+                    AVG(game_rush_yds) as avg_qb_rush_allowed,
+                    SUM(game_rush_tds) as total_qb_rush_tds_allowed
                 FROM (
-                    SELECT week, SUM(rushing_yards) as game_rush_yds
+                    SELECT
+                        week,
+                        SUM(rushing_yards) as game_rush_yds,
+                        SUM(rushing_tds) as game_rush_tds
                     FROM player_stats
                     WHERE season = {season} AND week < {max_week}
                       AND attempts > 10
@@ -1752,6 +1757,7 @@ def calculate_defensive_stats(season, max_week):
                 'rec_td_to_wr': rec_wr_df['total_rec_td_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['total_rec_td_to_wr'].iloc[0]) else 0,
                 'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40,
                 'qb_rush_allowed': qb_rush_df['avg_qb_rush_allowed'].iloc[0] if not qb_rush_df.empty and not pd.isna(qb_rush_df['avg_qb_rush_allowed'].iloc[0]) else 10,
+                'qb_rush_tds_allowed': qb_rush_df['total_qb_rush_tds_allowed'].iloc[0] if not qb_rush_df.empty and not pd.isna(qb_rush_df['total_qb_rush_tds_allowed'].iloc[0]) else 0,
                 'def_ints': def_adv_df['total_def_ints'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_def_ints'].iloc[0]) else 0,
                 'def_blitzes': def_adv_df['total_blitzes'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_blitzes'].iloc[0]) else 0,
                 'def_hurries': def_adv_df['total_hurries'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_hurries'].iloc[0]) else 0,
@@ -2056,7 +2062,9 @@ def generate_player_projections(season, week, teams_playing):
             'rec_wr': sum([d['rec_to_wr'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 60,
             'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40,
             'qb_rush': sum([d['qb_rush_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 10,
+            'qb_rush_tds': sum([d['qb_rush_tds_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 0.5,
             'def_ints': sum([d['def_ints'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 8,
+            'def_blitzes': sum([d['def_blitzes'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 50,
             'def_sacks': sum([d['def_sacks'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
             'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15,
             'def_rush_tds': sum([d['rush_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 1.0,
@@ -2186,11 +2194,28 @@ def generate_player_projections(season, week, teams_playing):
                 # Calculate pressure score
                 pressure_score = opponent_def['def_sacks'] + (opponent_def['def_hurries'] * 0.5) + (opponent_def['def_blitzes'] * 0.3)
 
+                # Calculate QB Defensive Composite Score (0-100 scale - higher = worse defense = better for QB)
+                qb_def_score = calculate_qb_defensive_composite_score(
+                    def_pass_yards_allowed=opponent_def['pass_allowed'],
+                    def_pass_tds_allowed=opponent_def['pass_td_allowed'],
+                    def_qb_rush_yards_allowed=opponent_def['qb_rush_allowed'],
+                    def_qb_rush_tds_allowed=opponent_def['qb_rush_tds_allowed'],
+                    def_blitzes=opponent_def['def_blitzes'],
+                    def_sacks=opponent_def['def_sacks'],
+                    league_avg_pass_yards=league_avg['pass'],
+                    league_avg_pass_tds=league_avg['pass_tds'],
+                    league_avg_qb_rush_yards=league_avg['qb_rush'],
+                    league_avg_qb_rush_tds=league_avg['qb_rush_tds'],
+                    league_avg_blitzes=league_avg['def_blitzes'],
+                    league_avg_sacks=league_avg['def_sacks']
+                )
+
                 projections['QB'].append({
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
                     'QB Score': round(qb_score, 1),
+                    'QB Def Score': round(qb_def_score, 1),
                     'Tier': tier,
                     'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
@@ -3568,6 +3593,141 @@ def generate_comprehensive_qb_storyline(qb_score, qb_name, qb_yards_per_game, qb
         recommendation = f"{qb_name} is a fade candidate. Poor production ({yards_desc}, {tds_desc}, {int_desc}{rush_td_desc}) vs difficult matchup ({def_desc}). Bench if possible."
 
     return tier, recommendation
+
+
+def calculate_qb_defensive_composite_score(def_pass_yards_allowed, def_pass_tds_allowed,
+                                           def_qb_rush_yards_allowed, def_qb_rush_tds_allowed,
+                                           def_blitzes, def_sacks,
+                                           league_avg_pass_yards, league_avg_pass_tds,
+                                           league_avg_qb_rush_yards, league_avg_qb_rush_tds,
+                                           league_avg_blitzes, league_avg_sacks):
+    """
+    Calculate QB Defensive Composite Score (0-100 scale).
+
+    **Higher score = WORSE defense (better matchup for QB)**
+    **Lower score = BETTER defense (worse matchup for QB)**
+
+    This is different from the multiplier - it's an absolute 0-100 rating where:
+    - 85-100: Elite matchup (defense is terrible at stopping QBs)
+    - 70-84: Great matchup (defense allows significant QB production)
+    - 55-69: Good matchup (defense is below average vs QBs)
+    - 45-54: Average matchup (league average defense)
+    - 30-44: Tough matchup (defense is above average vs QBs)
+    - 15-29: Very tough matchup (strong defense)
+    - 0-14: Elite defense (nightmare matchup for QBs)
+
+    Scoring Components (weighted):
+    - Pass Yards Allowed: 30 points (primary yardage factor)
+    - Pass TDs Allowed: 25 points (scoring opportunities)
+    - QB Rush Yards Allowed: 20 points (dual-threat opportunity)
+    - QB Rush TDs Allowed: 10 points (rushing TD bonus)
+    - Blitzes (inverted): 10 points (more blitzes = lower score for defense)
+    - Sacks (inverted): 5 points (more sacks = lower score for defense)
+
+    Total: 100 points
+    """
+    score = 0
+
+    # 1. PASS YARDS ALLOWED (30 points) - Higher yards allowed = better for QB
+    if def_pass_yards_allowed >= league_avg_pass_yards * 1.15:  # 15%+ above average
+        score += 30  # Elite pass funnel
+    elif def_pass_yards_allowed >= league_avg_pass_yards * 1.08:  # 8-15% above average
+        score += 24  # Great pass funnel
+    elif def_pass_yards_allowed >= league_avg_pass_yards * 1.02:  # 2-8% above average
+        score += 18  # Above average
+    elif def_pass_yards_allowed >= league_avg_pass_yards * 0.98:  # Within 2% of average
+        score += 15  # Average
+    elif def_pass_yards_allowed >= league_avg_pass_yards * 0.92:  # 2-8% below average
+        score += 10  # Below average
+    elif def_pass_yards_allowed >= league_avg_pass_yards * 0.85:  # 8-15% below average
+        score += 5   # Stingy
+    else:  # 15%+ below average
+        score += 0   # Elite pass defense
+
+    # 2. PASS TDS ALLOWED (25 points) - More TDs allowed = better for QB
+    pass_td_ratio = def_pass_tds_allowed / league_avg_pass_tds if league_avg_pass_tds > 0 else 1.0
+    if pass_td_ratio >= 1.3:  # 30%+ more TDs allowed
+        score += 25  # TD-prone defense
+    elif pass_td_ratio >= 1.15:  # 15-30% more TDs
+        score += 20
+    elif pass_td_ratio >= 1.05:  # 5-15% more TDs
+        score += 15
+    elif pass_td_ratio >= 0.95:  # Within 5% of average
+        score += 12
+    elif pass_td_ratio >= 0.85:  # 5-15% fewer TDs
+        score += 8
+    elif pass_td_ratio >= 0.7:  # 15-30% fewer TDs
+        score += 4
+    else:  # 30%+ fewer TDs allowed
+        score += 0  # TD stingy
+
+    # 3. QB RUSH YARDS ALLOWED (20 points) - More rush yards allowed = better for dual-threat QBs
+    qb_rush_ratio = def_qb_rush_yards_allowed / league_avg_qb_rush_yards if league_avg_qb_rush_yards > 0 else 1.0
+    if qb_rush_ratio >= 1.5:  # 50%+ more QB rush yards allowed
+        score += 20  # Can't contain mobile QBs
+    elif qb_rush_ratio >= 1.25:  # 25-50% more
+        score += 16
+    elif qb_rush_ratio >= 1.1:  # 10-25% more
+        score += 12
+    elif qb_rush_ratio >= 0.9:  # Within 10% of average
+        score += 10
+    elif qb_rush_ratio >= 0.75:  # 10-25% fewer
+        score += 6
+    elif qb_rush_ratio >= 0.5:  # 25-50% fewer
+        score += 3
+    else:  # 50%+ fewer QB rush yards
+        score += 0  # Excellent QB rush containment
+
+    # 4. QB RUSH TDS ALLOWED (10 points) - More rush TDs allowed = better for QBs
+    qb_rush_td_ratio = def_qb_rush_tds_allowed / league_avg_qb_rush_tds if league_avg_qb_rush_tds > 0 else 1.0
+    if qb_rush_td_ratio >= 2.0:  # 2x+ more rush TDs to QBs
+        score += 10
+    elif qb_rush_td_ratio >= 1.5:  # 1.5-2x more
+        score += 8
+    elif qb_rush_td_ratio >= 1.2:  # 20-50% more
+        score += 6
+    elif qb_rush_td_ratio >= 0.8:  # Within 20%
+        score += 5
+    elif qb_rush_td_ratio >= 0.5:  # 20-50% fewer
+        score += 3
+    else:  # 50%+ fewer
+        score += 0
+
+    # 5. BLITZES (10 points - INVERTED) - Fewer blitzes = better for QB (less pressure)
+    blitz_ratio = def_blitzes / league_avg_blitzes if league_avg_blitzes > 0 else 1.0
+    if blitz_ratio <= 0.7:  # 30%+ fewer blitzes (passive defense)
+        score += 10  # Great for QB - less aggression
+    elif blitz_ratio <= 0.85:  # 15-30% fewer
+        score += 8
+    elif blitz_ratio <= 0.95:  # 5-15% fewer
+        score += 6
+    elif blitz_ratio <= 1.05:  # Within 5%
+        score += 5
+    elif blitz_ratio <= 1.15:  # 5-15% more blitzes
+        score += 3
+    elif blitz_ratio <= 1.3:  # 15-30% more
+        score += 1
+    else:  # 30%+ more blitzes (very aggressive)
+        score += 0  # Tough for QB
+
+    # 6. SACKS (5 points - INVERTED) - Fewer sacks = better for QB
+    sack_ratio = def_sacks / league_avg_sacks if league_avg_sacks > 0 else 1.0
+    if sack_ratio <= 0.7:  # 30%+ fewer sacks
+        score += 5  # Weak pass rush
+    elif sack_ratio <= 0.85:  # 15-30% fewer
+        score += 4
+    elif sack_ratio <= 0.95:  # 5-15% fewer
+        score += 3
+    elif sack_ratio <= 1.05:  # Within 5%
+        score += 2.5
+    elif sack_ratio <= 1.15:  # 5-15% more sacks
+        score += 1.5
+    elif sack_ratio <= 1.3:  # 15-30% more
+        score += 0.5
+    else:  # 30%+ more sacks
+        score += 0  # Elite pass rush
+
+    return round(score, 1)
 
 
 # ============================================================================

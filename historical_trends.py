@@ -311,6 +311,83 @@ def calculate_score_margin_distribution(seasons: List[int]) -> pd.DataFrame:
     return distribution
 
 
+def calculate_underdog_blowout_wins(seasons: List[int], min_margin: float = 7.5) -> Dict:
+    """
+    Calculate rate of underdogs winning by 7.5+ points (significant upsets).
+
+    Args:
+        seasons: List of seasons
+        min_margin: Minimum margin of victory (default 7.5 points)
+
+    Returns:
+        Dict with underdog blowout win stats
+    """
+    games = get_completed_games(seasons)
+
+    if games.empty:
+        return {
+            'overall_rate': 0,
+            'total_underdog_games': 0,
+            'underdog_blowout_wins': 0,
+            'by_season': pd.DataFrame(),
+            'examples': pd.DataFrame()
+        }
+
+    # Determine underdog and calculate margin
+    # NFLverse convention: POSITIVE spread = home favorite, NEGATIVE = away favorite
+    games['underdog_is_home'] = games['spread_line'] < 0
+    games['underdog_won'] = (
+        ((games['underdog_is_home']) & (games['home_score'] > games['away_score'])) |
+        ((~games['underdog_is_home']) & (games['away_score'] > games['home_score']))
+    )
+
+    # Calculate margin of victory for underdog wins
+    games['underdog_margin'] = games.apply(
+        lambda row: (row['home_score'] - row['away_score']) if row['underdog_is_home']
+        else (row['away_score'] - row['home_score']),
+        axis=1
+    )
+
+    # Filter to underdog blowout wins (7.5+ point margin)
+    games['underdog_blowout_win'] = (games['underdog_won']) & (games['underdog_margin'] >= min_margin)
+
+    # Calculate overall rate
+    overall_rate = games['underdog_blowout_win'].mean() * 100
+    total_underdog_games = len(games)
+    underdog_blowout_wins = games['underdog_blowout_win'].sum()
+
+    # By season
+    by_season = games.groupby('season').agg({
+        'underdog_blowout_win': ['sum', 'count', 'mean']
+    }).reset_index()
+    by_season.columns = ['season', 'upset_wins', 'total_games', 'upset_rate']
+    by_season['upset_rate'] = by_season['upset_rate'] * 100
+
+    # Get examples of recent blowout upsets
+    examples = games[games['underdog_blowout_win']].copy()
+    examples['underdog_team'] = examples.apply(
+        lambda row: row['home_team'] if row['underdog_is_home'] else row['away_team'],
+        axis=1
+    )
+    examples['favorite_team'] = examples.apply(
+        lambda row: row['away_team'] if row['underdog_is_home'] else row['home_team'],
+        axis=1
+    )
+    examples['score'] = examples.apply(
+        lambda row: f"{row['home_team']} {int(row['home_score'])} - {int(row['away_score'])} {row['away_team']}",
+        axis=1
+    )
+    examples = examples[['season', 'week', 'underdog_team', 'favorite_team', 'underdog_margin', 'score', 'spread_line']].sort_values(['season', 'week'], ascending=[False, False]).head(20)
+
+    return {
+        'overall_rate': overall_rate,
+        'total_underdog_games': total_underdog_games,
+        'underdog_blowout_wins': underdog_blowout_wins,
+        'by_season': by_season,
+        'examples': examples
+    }
+
+
 def get_most_common_scores(seasons: List[int], limit: int = 20) -> pd.DataFrame:
     """
     Get most common final score combinations.
@@ -485,6 +562,76 @@ def render_home_fav_underdog_split(seasons: List[int]):
         st.caption(f"📊 {split['home_dog_games']:,} games")
 
     st.caption("💡 **Insight:** Home favorites benefit from both being favored AND having home field advantage, leading to high win rates. Home underdogs must overcome both disadvantages.")
+
+
+def render_underdog_blowout_wins(seasons: List[int]):
+    """Render underdog blowout wins (7.5+ point upsets)."""
+    st.markdown("#### 💥 Underdog Blowout Wins (7.5+ Points)")
+
+    metrics = calculate_underdog_blowout_wins(seasons)
+
+    # Key Metrics
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "Upset Rate",
+            f"{metrics['overall_rate']:.1f}%",
+            help="% of all games where underdog won by 7.5+ points"
+        )
+
+    with col2:
+        st.metric(
+            "Total Upsets",
+            f"{metrics['underdog_blowout_wins']:,}",
+            help="Total underdog blowout wins"
+        )
+
+    with col3:
+        st.metric(
+            "Total Games",
+            f"{metrics['total_underdog_games']:,}",
+            help="Total completed games analyzed"
+        )
+
+    # Trend by season
+    if not metrics['by_season'].empty:
+        st.markdown("**Underdog Blowout Wins by Season**")
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=metrics['by_season']['season'],
+            y=metrics['by_season']['upset_rate'],
+            mode='lines+markers',
+            name='Upset Rate',
+            line=dict(color='#d62728', width=3),
+            marker=dict(size=10),
+            hovertemplate='<b>%{x}</b><br>Upset Rate: %{y:.1f}%<br>Upsets: %{customdata}<extra></extra>',
+            customdata=metrics['by_season']['upset_wins']
+        ))
+
+        fig.update_layout(
+            xaxis_title="Season",
+            yaxis_title="Upset Rate (%)",
+            height=350,
+            yaxis=dict(range=[0, max(metrics['by_season']['upset_rate'].max() * 1.2, 10)])
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Recent examples
+    if not metrics['examples'].empty:
+        with st.expander("📋 Recent Underdog Blowout Wins", expanded=False):
+            display_df = metrics['examples'].copy()
+            display_df['spread_line'] = display_df['spread_line'].round(1)
+            display_df['underdog_margin'] = display_df['underdog_margin'].round(1)
+
+            display_df.columns = ['Season', 'Week', 'Underdog', 'Favorite', 'Margin', 'Final Score', 'Spread']
+
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    st.caption("💡 **Insight:** Underdog blowout wins (7.5+ points) represent significant upsets where the underdog not only won, but dominated. These games often indicate mismatches in betting lines or exceptional underdog performances.")
 
 
 def render_day_of_week_analysis(seasons: List[int]):
@@ -697,6 +844,8 @@ def render_historical_trends():
         render_favorite_analysis(selected_seasons)
         st.divider()
         render_home_fav_underdog_split(selected_seasons)
+        st.divider()
+        render_underdog_blowout_wins(selected_seasons)
 
     with tabs[2]:
         render_day_of_week_analysis(selected_seasons)

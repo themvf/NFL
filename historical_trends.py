@@ -122,7 +122,8 @@ def calculate_favorite_win_rate(seasons: List[int], min_spread: Optional[float] 
         }
 
     # Determine favorite and whether they won
-    games['favorite_is_home'] = games['spread_line'] < 0
+    # NFLverse convention: POSITIVE spread = home favorite, NEGATIVE = away favorite
+    games['favorite_is_home'] = games['spread_line'] > 0
     games['favorite_spread'] = games['spread_line'].abs()
 
     # Apply spread filters
@@ -180,7 +181,8 @@ def calculate_home_favorite_split(seasons: List[int]) -> Dict:
         }
 
     games['home_won'] = games['home_score'] > games['away_score']
-    games['home_is_favorite'] = games['spread_line'] < 0
+    # NFLverse convention: POSITIVE spread = home favorite, NEGATIVE = away favorite
+    games['home_is_favorite'] = games['spread_line'] > 0
 
     # Home favorites
     home_favs = games[games['home_is_favorite']]
@@ -211,7 +213,8 @@ def calculate_day_of_week_metrics(seasons: List[int]) -> pd.DataFrame:
         return pd.DataFrame()
 
     # Determine favorite and whether they won
-    games['favorite_is_home'] = games['spread_line'] < 0
+    # NFLverse convention: POSITIVE spread = home favorite, NEGATIVE = away favorite
+    games['favorite_is_home'] = games['spread_line'] > 0
     games['favorite_won'] = (
         ((games['favorite_is_home']) & (games['home_score'] > games['away_score'])) |
         ((~games['favorite_is_home']) & (games['away_score'] > games['home_score']))

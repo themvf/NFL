@@ -2210,12 +2210,18 @@ def generate_player_projections(season, week, teams_playing):
                     league_avg_sacks=league_avg['def_sacks']
                 )
 
+                # Calculate Matchup Score (weighted combination of QB talent and defensive matchup)
+                # 60% QB Score (talent) + 40% QB Def Score (matchup favorability)
+                # This gives more weight to QB skill since elite QBs produce even vs tough defenses
+                matchup_score = (qb_score * 0.6) + (qb_def_score * 0.4)
+
                 projections['QB'].append({
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
                     'QB Score': round(qb_score, 1),
                     'QB Def Score': round(qb_def_score, 1),
+                    'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Avg Yds/Game': round(player['avg_pass_yds'], 1),
                     'Median Pass Yds': round(player['median_pass_yds'], 1),
@@ -2500,8 +2506,8 @@ def generate_player_projections(season, week, teams_playing):
             if data:
                 df = pd.DataFrame(data)
                 # Use position-specific scoring for QB, RB, and WR, otherwise use projected yards/total
-                if pos == 'QB' and 'QB Score' in df.columns:
-                    sort_col = 'QB Score'
+                if pos == 'QB' and 'Matchup Score' in df.columns:
+                    sort_col = 'Matchup Score'
                 elif pos == 'RB' and 'RB Score' in df.columns:
                     sort_col = 'RB Score'
                 elif pos == 'WR' and 'WR Score' in df.columns:

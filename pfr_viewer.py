@@ -1727,6 +1727,21 @@ def calculate_defensive_stats(season, max_week):
             """
             def_adv_df = pd.read_sql_query(def_adv_query, conn)
 
+            # QB rushing yards allowed (QBs only - high pass attempts)
+            # Calculate per-game average of total QB rushing yards
+            qb_rush_allowed_query = f"""
+                SELECT AVG(game_rush_yds) as avg_qb_rush_allowed
+                FROM (
+                    SELECT week, SUM(rushing_yards) as game_rush_yds
+                    FROM player_stats
+                    WHERE season = {season} AND week < {max_week}
+                      AND attempts > 10
+                      AND opponent_team = '{team}'
+                    GROUP BY week
+                ) per_game
+            """
+            qb_rush_df = pd.read_sql_query(qb_rush_allowed_query, conn)
+
             defensive_stats[team] = {
                 'pass_allowed': pass_df['avg_pass_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['avg_pass_allowed'].iloc[0]) else 240,
                 'pass_td_allowed': pass_df['total_pass_td_allowed'].iloc[0] if not pass_df.empty and not pd.isna(pass_df['total_pass_td_allowed'].iloc[0]) else 0,
@@ -1736,6 +1751,7 @@ def calculate_defensive_stats(season, max_week):
                 'rec_to_wr': rec_wr_df['avg_rec_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['avg_rec_to_wr'].iloc[0]) else 60,
                 'rec_td_to_wr': rec_wr_df['total_rec_td_to_wr'].iloc[0] if not rec_wr_df.empty and not pd.isna(rec_wr_df['total_rec_td_to_wr'].iloc[0]) else 0,
                 'rec_to_te': rec_te_df['avg_rec_to_te'].iloc[0] if not rec_te_df.empty and not pd.isna(rec_te_df['avg_rec_to_te'].iloc[0]) else 40,
+                'qb_rush_allowed': qb_rush_df['avg_qb_rush_allowed'].iloc[0] if not qb_rush_df.empty and not pd.isna(qb_rush_df['avg_qb_rush_allowed'].iloc[0]) else 10,
                 'def_ints': def_adv_df['total_def_ints'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_def_ints'].iloc[0]) else 0,
                 'def_blitzes': def_adv_df['total_blitzes'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_blitzes'].iloc[0]) else 0,
                 'def_hurries': def_adv_df['total_hurries'].iloc[0] if not def_adv_df.empty and not pd.isna(def_adv_df['total_hurries'].iloc[0]) else 0,
@@ -2039,6 +2055,7 @@ def generate_player_projections(season, week, teams_playing):
             'rec_rb': sum([d['rec_to_rb'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
             'rec_wr': sum([d['rec_to_wr'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 60,
             'rec_te': sum([d['rec_to_te'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 40,
+            'qb_rush': sum([d['qb_rush_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 10,
             'def_ints': sum([d['def_ints'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 8,
             'def_sacks': sum([d['def_sacks'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 20,
             'pass_tds': sum([d['pass_td_allowed'] for d in defensive_stats.values()]) / len(defensive_stats) if defensive_stats else 15,
@@ -2100,7 +2117,34 @@ def generate_player_projections(season, week, teams_playing):
             position = player['position_type']
 
             if position == 'QB':
-                multiplier = opponent_def['pass_allowed'] / league_avg['pass']
+                # Composite multiplier incorporating 5 defensive factors
+                # 1. Passing yards allowed (40% weight - primary factor)
+                pass_yds_mult = opponent_def['pass_allowed'] / league_avg['pass']
+
+                # 2. Passing TDs allowed (25% weight - scoring opportunities)
+                pass_td_mult = opponent_def['pass_td_allowed'] / league_avg['pass_tds']
+
+                # 3. QB rushing yards allowed (20% weight - dual-threat opportunity)
+                qb_rush_mult = opponent_def['qb_rush_allowed'] / league_avg['qb_rush']
+
+                # 4. Defensive INTs (10% weight - inverse because lower is better for QB)
+                # Invert the ratio: defenses with MORE INTs get lower multiplier
+                int_mult = league_avg['def_ints'] / opponent_def['def_ints'] if opponent_def['def_ints'] > 0 else 1.0
+
+                # 5. Defensive sacks (5% weight - inverse because lower is better for QB)
+                # Invert the ratio: defenses with MORE sacks get lower multiplier
+                sack_mult = league_avg['def_sacks'] / opponent_def['def_sacks'] if opponent_def['def_sacks'] > 0 else 1.0
+
+                # Weighted composite multiplier
+                multiplier = (
+                    pass_yds_mult * 0.40 +
+                    pass_td_mult * 0.25 +
+                    qb_rush_mult * 0.20 +
+                    int_mult * 0.10 +
+                    sack_mult * 0.05
+                )
+
+                # Apply multiplier to median passing yards
                 projected_yds = player['median_pass_yds'] * multiplier
 
                 # Calculate comprehensive QB score
@@ -2158,12 +2202,18 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush Yds': round(player['median_rush_yds'], 1),
                     'Def Allows': round(opponent_def['pass_allowed'], 1),
                     'Def Pass TDs': int(opponent_def['pass_td_allowed']),
+                    'Def QB Rush Yds': round(opponent_def['qb_rush_allowed'], 1),
                     'Def INTs': int(opponent_def['def_ints']),
                     'Def Sacks': int(opponent_def['def_sacks']),
                     'Pressure Score': round(pressure_score, 1),
                     'Def Pass Rank': def_pass_ranking.get(opponent, 16),
                     'Projected Yds': round(projected_yds, 1),
-                    'Multiplier': round(multiplier, 1),
+                    'Multiplier': round(multiplier, 2),
+                    'Pass Yds Mult': round(pass_yds_mult, 2),
+                    'Pass TD Mult': round(pass_td_mult, 2),
+                    'QB Rush Mult': round(qb_rush_mult, 2),
+                    'INT Mult': round(int_mult, 2),
+                    'Sack Mult': round(sack_mult, 2),
                     'Recommendation': recommendation,
                     'Games': round(float(player['games_played']), 1)
                 })

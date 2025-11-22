@@ -17,6 +17,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from google.cloud import storage
 import json
+from historical_trends import render_historical_trends
 
 # Configure logging
 logging.basicConfig(
@@ -7322,6 +7323,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Team Comparison",
             "Power Rankings",
             "Stats & Trends",
+            "Historical Trends",
             "Advanced Team Analytics",
             "Matchup Predictor",
             "Upcoming Matches",
@@ -20969,6 +20971,9 @@ def main():
 
     elif view == "Stats & Trends":
         render_stats_trends(season, week)
+
+    elif view == "Historical Trends":
+        render_historical_trends()
 
     elif view == "Advanced Team Analytics":
         render_advanced_team_analytics(season, week, team)

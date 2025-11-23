@@ -2270,6 +2270,11 @@ def generate_player_projections(season, week, teams_playing):
                 # Elite RBs produce even vs tough defenses, so weight talent more heavily
                 matchup_score = (rb_talent_score * 0.6) + (rb_def_score * 0.4)
 
+                # Calculate projected rushing yards based on defensive matchup
+                # RB Def Score of 50 = average (1.0x), 100 = worst defense (2.0x), 0 = best defense (0.0x)
+                def_multiplier = rb_def_score / 50.0
+                projected_rush_yds = player['avg_rush_yds'] * def_multiplier
+
                 # Keep legacy comprehensive score for backward compatibility
                 rb_score = calculate_comprehensive_rb_score(
                     rb_rush_yds_per_game=player['avg_rush_yds'],
@@ -2325,6 +2330,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Team': player['team'],
                     'Opponent': opponent,
                     'Rush Yds/Gm': round(player['avg_rush_yds'], 1),
+                    'Projected Rush Yds': round(projected_rush_yds, 1),
                     'Rec Yds/Gm': round(player.get('total_rec_yds', 0) / player['games_played'], 1) if player['games_played'] > 0 else 0,
                     'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
                     'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),
@@ -2366,6 +2372,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Rush Yds/Gm': round(player['avg_rush_yds'], 1),
+                    'Projected Rush Yds': round(projected_rush_yds, 1),
                     'Rec Yds/Gm': round(player.get('total_rec_yds', 0) / player['games_played'], 1) if player['games_played'] > 0 else 0,
                     'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
                     'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),

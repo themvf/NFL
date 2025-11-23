@@ -2394,7 +2394,7 @@ def generate_player_projections(season, week, teams_playing):
                 })
 
             elif position == 'WR':
-                # Calculate comprehensive WR matchup score
+                # Calculate WR matchup score components
                 wr_rec_yds_per_game = player['avg_rec_yds']
                 wr_rec_tds_total = player['total_rec_td']
                 wr_targets_per_game = player.get('avg_targets', player['median_targets'])
@@ -2409,7 +2409,27 @@ def generate_player_projections(season, week, teams_playing):
                 typical_team_targets_per_game = 35  # NFL average
                 wr_target_share_pct = (wr_targets_per_game / typical_team_targets_per_game * 100) if typical_team_targets_per_game > 0 else 0
 
-                # Calculate WR Score
+                # Calculate receptions per game for catch rate
+                wr_receptions_per_game = player['total_receptions'] / wr_games if wr_games > 0 else 0
+                wr_avg_yac = player.get('avg_rec_yac', 0)
+
+                # Calculate separate WR talent score and defensive matchup score
+                wr_talent_score = calculate_wr_talent_score(
+                    wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
+                    wr_target_share_pct, wr_games, wr_receptions_per_game, wr_avg_yac
+                )
+
+                wr_def_score = calculate_wr_defensive_matchup_score(
+                    def_rec_yds_allowed, def_rec_tds_allowed,
+                    def_rec_rank, league_avg['def_rec_tds']
+                )
+
+                # Calculate Matchup Score (weighted combination of talent and matchup)
+                # 60% WR talent + 40% defensive matchup
+                # Elite WRs produce even vs tough coverage, so weight talent more heavily
+                matchup_score = (wr_talent_score * 0.6) + (wr_def_score * 0.4)
+
+                # Keep legacy comprehensive score for backward compatibility
                 wr_score = calculate_comprehensive_wr_score(
                     wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
                     wr_target_share_pct, wr_games, def_rec_yds_allowed,
@@ -2435,7 +2455,9 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': player['team'],
                     'Opponent': opponent,
-                    'WR Score': wr_score,
+                    'WR Score': round(wr_talent_score, 1),
+                    'WR Def Score': round(wr_def_score, 1),
+                    'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Rec Yds/Gm': round(wr_rec_yds_per_game, 1),
                     'Rec TDs/Gm': round(wr_rec_tds_per_game, 2),
@@ -2470,7 +2492,9 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (WR)",
                     'Opponent': opponent,
-                    'WR Score': wr_score,
+                    'WR Score': round(wr_talent_score, 1),
+                    'WR Def Score': round(wr_def_score, 1),
+                    'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Rec Yds/Gm': round(wr_rec_yds_per_game, 1),
                     'Rec TDs/Gm': round(wr_rec_tds_per_game, 2),
@@ -2534,8 +2558,8 @@ def generate_player_projections(season, week, teams_playing):
                     sort_col = 'Matchup Score'
                 elif pos == 'RB' and 'Matchup Score' in df.columns:
                     sort_col = 'Matchup Score'
-                elif pos == 'WR' and 'WR Score' in df.columns:
-                    sort_col = 'WR Score'
+                elif pos == 'WR' and 'Matchup Score' in df.columns:
+                    sort_col = 'Matchup Score'
                 else:
                     sort_col = 'Projected Yds' if 'Projected Yds' in df.columns else 'Projected Total'
                 result[pos] = df.sort_values(sort_col, ascending=False)
@@ -4005,6 +4029,125 @@ def calculate_rb_defensive_matchup_score(def_rush_allowed, def_rush_tds_allowed,
 # ============================================================================
 # COMPREHENSIVE WR MATCHUP SCORING SYSTEM
 # ============================================================================
+
+def calculate_wr_talent_score(wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
+                              wr_target_share_pct, wr_games, wr_receptions_per_game,
+                              wr_avg_yac):
+    """
+    Calculate WR talent/production score (0-100) based purely on player performance.
+    This isolates WR ability from defensive matchup quality.
+
+    Scoring Components (75 points total):
+    - Receiving Yards Production: 25 points
+    - Receiving TD Production: 20 points
+    - Target Volume/Role: 15 points
+    - Target Share %: 10 points
+    - Reception Rate (Catch %): 5 points (efficiency)
+    """
+    score = 0
+
+    # Calculate per-game rates
+    wr_rec_tds_per_game = wr_rec_tds_total / wr_games if wr_games > 0 else 0
+    catch_rate = (wr_receptions_per_game / wr_targets_per_game * 100) if wr_targets_per_game > 0 else 0
+
+    # 1. RECEIVING YARDS PRODUCTION (25 points)
+    if wr_rec_yds_per_game >= 90:  # Elite (top 5 - 1500+ yd pace)
+        score += 25
+    elif wr_rec_yds_per_game >= 75:  # Strong (top 12 - 1250+ yd pace)
+        score += 20
+    elif wr_rec_yds_per_game >= 60:  # Average (top 20 - 1000+ yd pace)
+        score += 15
+    elif wr_rec_yds_per_game >= 45:  # Below average (750+ yd pace)
+        score += 10
+    else:  # Limited role (<750 yd pace)
+        score += 5
+
+    # 2. RECEIVING TD PRODUCTION (20 points)
+    if wr_rec_tds_per_game >= 0.6:  # Elite (10+ TDs per season)
+        score += 20
+    elif wr_rec_tds_per_game >= 0.4:  # Strong (7+ TDs per season)
+        score += 15
+    elif wr_rec_tds_per_game >= 0.3:  # Average (5+ TDs per season)
+        score += 10
+    elif wr_rec_tds_per_game > 0:  # Occasional (1-4 TDs per season)
+        score += 5
+    # else: 0 points for no TDs
+
+    # 3. TARGET VOLUME/ROLE (15 points)
+    if wr_targets_per_game >= 10:  # Elite target share (true WR1)
+        score += 15
+    elif wr_targets_per_game >= 8:  # Strong (alpha WR)
+        score += 12
+    elif wr_targets_per_game >= 6:  # Average (WR2)
+        score += 9
+    elif wr_targets_per_game >= 4:  # Below average (WR3)
+        score += 5
+    else:  # Limited role
+        score += 2
+
+    # 4. TARGET SHARE % (10 points)
+    if wr_target_share_pct >= 28:  # Elite (true alpha - 28%+)
+        score += 10
+    elif wr_target_share_pct >= 22:  # Strong (clear WR1 - 22%+)
+        score += 8
+    elif wr_target_share_pct >= 17:  # Average (WR1/WR2 - 17%+)
+        score += 5
+    elif wr_target_share_pct >= 12:  # Below average (WR3 - 12%+)
+        score += 2
+    # else: 0 points for limited share
+
+    # 5. RECEPTION RATE/EFFICIENCY (5 points) - Catch % bonus
+    if catch_rate >= 70:  # Elite hands/efficiency
+        score += 5
+    elif catch_rate >= 65:  # Strong
+        score += 3
+    elif catch_rate >= 60:  # Average
+        score += 2
+    elif catch_rate >= 55:  # Below average
+        score += 1
+    # else: 0 points
+
+    # Scale to 0-100 (current max is 75, so multiply by 100/75 = 1.333)
+    scaled_score = (score / 75) * 100
+
+    return round(scaled_score, 1)
+
+
+def calculate_wr_defensive_matchup_score(def_rec_yds_allowed, def_rec_tds_allowed,
+                                         def_rec_rank, league_avg_def_rec_tds):
+    """
+    Calculate WR defensive matchup score (0-100) based purely on defensive weakness.
+    Higher score = worse defense = better matchup for WR.
+
+    Scoring Components (25 points total):
+    - Defensive Receiving Yards Allowed: 15 points
+    - Defensive TD Vulnerability: 10 points (TDs allowed to WRs)
+    """
+    score = 0
+
+    # 1. DEFENSIVE RECEIVING VULNERABILITY (15 points) - Pass yards allowed to WRs
+    if def_rec_yds_allowed >= 80:  # Generous (worst 5 pass defenses)
+        score += 15
+    elif def_rec_yds_allowed >= 70:  # Favorable (bottom 12)
+        score += 12
+    elif def_rec_yds_allowed >= 60:  # Average
+        score += 8
+    else:  # Lockdown (<60 yds to WRs)
+        score += 4
+
+    # 2. DEFENSIVE TD VULNERABILITY (10 points) - Receiving TDs allowed to WRs
+    if def_rec_tds_allowed >= league_avg_def_rec_tds * 1.2:  # TD-prone (20%+ above avg)
+        score += 10
+    elif def_rec_tds_allowed >= league_avg_def_rec_tds * 0.8:  # Average
+        score += 6
+    else:  # Lockdown (<80% of avg)
+        score += 2
+
+    # Scale to 0-100 (current max is 25, so multiply by 100/25 = 4)
+    scaled_score = (score / 25) * 100
+
+    return round(scaled_score, 1)
+
 
 def calculate_comprehensive_wr_score(wr_rec_yds_per_game, wr_rec_tds_total, wr_targets_per_game,
                                      wr_target_share_pct, wr_games, def_rec_yds_allowed,

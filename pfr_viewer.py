@@ -2250,7 +2250,27 @@ def generate_player_projections(season, week, teams_playing):
                 })
 
             elif position == 'RB':
-                # Calculate comprehensive RB score
+                # Calculate separate RB talent score and defensive matchup score
+                rb_talent_score = calculate_rb_talent_score(
+                    rb_rush_yds_per_game=player['avg_rush_yds'],
+                    rb_rush_tds_total=player['total_rush_td'],
+                    rb_rec_tds_total=player['total_rec_td'],
+                    rb_targets_per_game=player['avg_targets'],
+                    rb_games=player['games_played']
+                )
+
+                rb_def_score = calculate_rb_defensive_matchup_score(
+                    def_rush_allowed=opponent_def['rush_allowed'],
+                    def_rush_tds_allowed=opponent_def['rush_td_allowed'],
+                    league_avg_def_rush_tds=league_avg['def_rush_tds']
+                )
+
+                # Calculate Matchup Score (weighted combination of talent and matchup)
+                # 60% RB talent + 40% defensive matchup
+                # Elite RBs produce even vs tough defenses, so weight talent more heavily
+                matchup_score = (rb_talent_score * 0.6) + (rb_def_score * 0.4)
+
+                # Keep legacy comprehensive score for backward compatibility
                 rb_score = calculate_comprehensive_rb_score(
                     rb_rush_yds_per_game=player['avg_rush_yds'],
                     rb_rush_tds_total=player['total_rush_td'],
@@ -2297,7 +2317,9 @@ def generate_player_projections(season, week, teams_playing):
                 avg_opp_rank = opp_quality.get('avg_opponent_rank', 0)
 
                 projections['RB'].append({
-                    'RB Score': round(rb_score, 1),
+                    'RB Score': round(rb_talent_score, 1),
+                    'RB Def Score': round(rb_def_score, 1),
+                    'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Player': player['player'],
                     'Team': player['team'],
@@ -2339,7 +2361,9 @@ def generate_player_projections(season, week, teams_playing):
                     'Player': player['player'],
                     'Team': f"{player['team']} (RB)",
                     'Opponent': opponent,
-                    'RB Score': round(rb_score, 1),
+                    'RB Score': round(rb_talent_score, 1),
+                    'RB Def Score': round(rb_def_score, 1),
+                    'Matchup Score': round(matchup_score, 1),
                     'Tier': tier,
                     'Rush Yds/Gm': round(player['avg_rush_yds'], 1),
                     'Rec Yds/Gm': round(player.get('total_rec_yds', 0) / player['games_played'], 1) if player['games_played'] > 0 else 0,
@@ -2508,8 +2532,8 @@ def generate_player_projections(season, week, teams_playing):
                 # Use position-specific scoring for QB, RB, and WR, otherwise use projected yards/total
                 if pos == 'QB' and 'Matchup Score' in df.columns:
                     sort_col = 'Matchup Score'
-                elif pos == 'RB' and 'RB Score' in df.columns:
-                    sort_col = 'RB Score'
+                elif pos == 'RB' and 'Matchup Score' in df.columns:
+                    sort_col = 'Matchup Score'
                 elif pos == 'WR' and 'WR Score' in df.columns:
                     sort_col = 'WR Score'
                 else:
@@ -3874,6 +3898,108 @@ def generate_comprehensive_rb_storyline(rb_score, rb_name, rb_rush_yds_per_game,
         recommendation = f"{rb_name} is a fade candidate. Poor production ({rush_yds_desc}, {rush_tds_desc}, {targets_desc}) vs difficult matchup ({def_desc}). Bench unless desperate for bye week fill-in."
 
     return tier, recommendation
+
+
+def calculate_rb_talent_score(rb_rush_yds_per_game, rb_rush_tds_total, rb_rec_tds_total,
+                               rb_targets_per_game, rb_games):
+    """
+    Calculate RB talent/production score (0-100) based purely on player performance.
+    This isolates RB ability from defensive matchup quality.
+
+    Scoring Components (75 points total):
+    - Rushing Yards Production: 25 points
+    - Rushing TD Production: 20 points
+    - Receiving Role/PPR Value: 20 points
+    - Receiving TD Bonus: 10 points
+    """
+    score = 0
+
+    # Calculate per-game rates
+    rb_rush_tds_per_game = rb_rush_tds_total / rb_games if rb_games > 0 else 0
+    rb_rec_tds_per_game = rb_rec_tds_total / rb_games if rb_games > 0 else 0
+
+    # 1. RUSHING YARDS PRODUCTION (25 points)
+    if rb_rush_yds_per_game >= 100:  # Elite (top 5)
+        score += 25
+    elif rb_rush_yds_per_game >= 80:  # Strong (top 12)
+        score += 20
+    elif rb_rush_yds_per_game >= 60:  # Average (top 20)
+        score += 15
+    elif rb_rush_yds_per_game >= 40:  # Below average
+        score += 10
+    else:  # Limited role
+        score += 5
+
+    # 2. RUSHING TD PRODUCTION (20 points)
+    if rb_rush_tds_per_game >= 0.6:  # Elite (10+ per season)
+        score += 20
+    elif rb_rush_tds_per_game >= 0.4:  # Strong (7+ per season)
+        score += 15
+    elif rb_rush_tds_per_game >= 0.2:  # Average (3+ per season)
+        score += 10
+    elif rb_rush_tds_per_game > 0:  # Occasional
+        score += 5
+    # else: 0 points for no TDs
+
+    # 3. RECEIVING ROLE/PPR VALUE (20 points)
+    if rb_targets_per_game >= 5:  # Elite pass-catching back
+        score += 20
+    elif rb_targets_per_game >= 3:  # Strong receiving role
+        score += 15
+    elif rb_targets_per_game >= 2:  # Moderate receiving
+        score += 10
+    elif rb_targets_per_game >= 1:  # Limited receiving
+        score += 5
+    # else: 0 points for no targets
+
+    # 4. RECEIVING TD BONUS (10 points)
+    if rb_rec_tds_per_game >= 0.3:  # Elite (5+ rec TDs per season)
+        score += 10
+    elif rb_rec_tds_per_game >= 0.1:  # Strong (2+ rec TDs per season)
+        score += 7
+    elif rb_rec_tds_per_game > 0:  # Occasional
+        score += 3
+    # else: 0 points for no rec TDs
+
+    # Scale to 0-100 (current max is 75, so multiply by 100/75 = 1.333)
+    scaled_score = (score / 75) * 100
+
+    return round(scaled_score, 1)
+
+
+def calculate_rb_defensive_matchup_score(def_rush_allowed, def_rush_tds_allowed, league_avg_def_rush_tds):
+    """
+    Calculate RB defensive matchup score (0-100) based purely on defensive weakness.
+    Higher score = worse defense = better matchup for RB.
+
+    Scoring Components (25 points total):
+    - Defensive Rush Defense: 15 points (rush yards allowed)
+    - Defensive TD Vulnerability: 10 points (TD-prone defenses)
+    """
+    score = 0
+
+    # 1. DEFENSIVE RUSH DEFENSE (15 points)
+    if def_rush_allowed >= 110:  # Generous run defense (worst 5)
+        score += 15
+    elif def_rush_allowed >= 95:  # Favorable (bottom 12)
+        score += 12
+    elif def_rush_allowed >= 80:  # Average
+        score += 8
+    else:  # Stingy (<80 yds allowed)
+        score += 4
+
+    # 2. DEFENSIVE TD VULNERABILITY (10 points)
+    if def_rush_tds_allowed >= league_avg_def_rush_tds * 1.2:  # TD-prone (20%+ above avg)
+        score += 10
+    elif def_rush_tds_allowed >= league_avg_def_rush_tds * 0.8:  # Average
+        score += 6
+    else:  # Lockdown (<80% of avg)
+        score += 2
+
+    # Scale to 0-100 (current max is 25, so multiply by 100/25 = 4)
+    scaled_score = (score / 25) * 100
+
+    return round(scaled_score, 1)
 
 
 # ============================================================================

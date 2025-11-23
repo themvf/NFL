@@ -2275,6 +2275,18 @@ def generate_player_projections(season, week, teams_playing):
                 def_multiplier = rb_def_score / 50.0
                 projected_rush_yds = player['avg_rush_yds'] * def_multiplier
 
+                # Calculate TD Probability %
+                rb_total_tds = player['total_rush_td'] + player['total_rec_td']
+                league_avg_total_tds = league_avg['def_rush_tds']  # Use as baseline for all TDs
+                td_probability = calculate_rb_td_probability(
+                    rb_total_tds=rb_total_tds,
+                    rb_games=player['games_played'],
+                    def_rush_tds_allowed=opponent_def['rush_td_allowed'],
+                    def_rec_tds_to_rb=opponent_def.get('rec_td_to_rb', 0),  # RB receiving TDs allowed
+                    league_avg_tds=league_avg_total_tds,
+                    td_std_dev=None  # TODO: Calculate from game-by-game data in future
+                )
+
                 # Keep legacy comprehensive score for backward compatibility
                 rb_score = calculate_comprehensive_rb_score(
                     rb_rush_yds_per_game=player['avg_rush_yds'],
@@ -2335,6 +2347,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
                     'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),
                     'Total TDs/Gm': round(rb_total_tds_per_game, 2),
+                    'TD Probability %': td_probability,
                     'Targets/Gm': round(player['avg_targets'], 1),
                     'Touches/Gm': round(rb_touches_per_game, 1),
                     'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
@@ -2377,6 +2390,7 @@ def generate_player_projections(season, week, teams_playing):
                     'Rush TDs/Gm': round(rb_rush_tds_per_game, 2),
                     'Rec TDs/Gm': round(rb_rec_tds_per_game, 2),
                     'Total TDs/Gm': round(rb_total_tds_per_game, 2),
+                    'TD Probability %': td_probability,
                     'Touches/Gm': round(rb_touches_per_game, 1),
                     'Targets/Gm': round(player['avg_targets'], 1),
                     'Recommendation': recommendation,
@@ -4031,6 +4045,75 @@ def calculate_rb_defensive_matchup_score(def_rush_allowed, def_rush_tds_allowed,
     scaled_score = (score / 25) * 100
 
     return round(scaled_score, 1)
+
+
+def calculate_rb_td_probability(rb_total_tds, rb_games, def_rush_tds_allowed,
+                                 def_rec_tds_to_rb, league_avg_tds, td_std_dev=None):
+    """
+    Calculate RB TD Probability % combining player TD production, defensive TD vulnerability,
+    league averages, and TD consistency.
+
+    Formula combines:
+    1. RB Total TDs per game (rush + receiving TDs)
+    2. Defense allows rush TDs (per game)
+    3. Defense allows receiving TDs to RBs (per game)
+    4. RB's average TDs per game (baseline production)
+    5. RB's TD consistency (optional - lower std dev = more consistent)
+
+    Returns: Probability percentage (0-100%)
+    """
+    # Calculate RB's average TD rate
+    rb_tds_per_game = rb_total_tds / rb_games if rb_games > 0 else 0
+
+    # Base probability from RB talent (40% weight)
+    # Scale RB production relative to elite tier (1.0 TD/game = elite, 0.5 = average)
+    rb_talent_factor = min(rb_tds_per_game / 1.0, 1.0) * 40  # Max 40%
+
+    # Defensive vulnerability factor (35% weight)
+    # Total defensive TDs allowed (rush + receiving to RBs)
+    total_def_tds_allowed = def_rush_tds_allowed + def_rec_tds_to_rb
+
+    # Scale defensive vulnerability relative to league average
+    if league_avg_tds > 0:
+        def_multiplier = total_def_tds_allowed / league_avg_tds
+    else:
+        def_multiplier = 1.0
+
+    # Generous defense (1.5x+ league avg) = max 35%, stingy (0.5x avg) = 10%
+    def_vulnerability_factor = min(max((def_multiplier - 0.5) / 1.0 * 35, 10), 35)
+
+    # League baseline factor (15% weight)
+    # Every RB has some baseline TD probability based on role
+    league_baseline = 15
+
+    # TD consistency bonus (10% weight) - Optional
+    consistency_bonus = 0
+    if td_std_dev is not None and rb_tds_per_game > 0:
+        # Coefficient of Variation = std_dev / mean
+        # Lower CV = more consistent
+        cv = td_std_dev / rb_tds_per_game if rb_tds_per_game > 0 else 999
+
+        if cv <= 0.5:  # Very consistent (scores TDs regularly)
+            consistency_bonus = 10
+        elif cv <= 0.75:  # Consistent
+            consistency_bonus = 7
+        elif cv <= 1.0:  # Moderate consistency
+            consistency_bonus = 5
+        elif cv <= 1.5:  # Inconsistent
+            consistency_bonus = 3
+        else:  # Very inconsistent (boom/bust)
+            consistency_bonus = 1
+    else:
+        # If no std dev provided, use moderate baseline
+        consistency_bonus = 5
+
+    # Total TD Probability %
+    td_probability = rb_talent_factor + def_vulnerability_factor + league_baseline + consistency_bonus
+
+    # Cap at 100%
+    td_probability = min(td_probability, 100)
+
+    return round(td_probability, 1)
 
 
 # ============================================================================

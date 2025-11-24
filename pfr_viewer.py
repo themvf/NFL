@@ -4506,14 +4506,15 @@ def calculate_defensive_pass_metrics(season, week=None):
             week_filter = ""
 
         # Get advanced defensive pass stats (sacks, hurries, INTs, passer rating)
+        # Note: pfr_advstats_def_week has player-level data, need to SUM then average per game
         adv_stats_query = f"""
             SELECT
                 team,
                 COUNT(DISTINCT week) as games_played,
-                AVG(CAST(def_sacks AS REAL)) as sacks_per_game,
-                AVG(CAST(def_hurries AS REAL)) as hurries_per_game,
-                AVG(CAST(def_ints AS REAL)) as ints_per_game,
-                AVG(CAST(def_pass_rating AS REAL)) as passer_rating_allowed
+                SUM(CAST(def_sacks AS REAL)) / COUNT(DISTINCT week) as sacks_per_game,
+                SUM(CAST(def_times_hurried AS REAL)) / COUNT(DISTINCT week) as hurries_per_game,
+                SUM(CAST(def_ints AS REAL)) / COUNT(DISTINCT week) as ints_per_game,
+                AVG(CAST(def_passer_rating_allowed AS REAL)) as passer_rating_allowed
             FROM pfr_advstats_def_week
             WHERE season = {season}
                 {week_filter}

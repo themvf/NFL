@@ -4476,6 +4476,83 @@ def generate_defensive_summary(season, week=None, teams_filter=None):
         return pd.DataFrame()
 
 
+def generate_defensive_rush_summary(season, week=None, teams_filter=None):
+    """
+    Generate simplified defensive rush summary showing only style and rush yards allowed.
+
+    Args:
+        season (int): Season year
+        week (int, optional): Week number for rolling window
+        teams_filter (list, optional): List of team abbreviations to include
+
+    Returns:
+        pd.DataFrame: Summary table with columns:
+            - Team
+            - Defensive Rush Style
+            - Rush Yds Allowed/Game
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Get defensive run metrics and classifications
+        run_metrics_df = calculate_defensive_run_metrics(season, week)
+
+        if run_metrics_df.empty:
+            conn.close()
+            return pd.DataFrame()
+
+        # Classify defensive run styles
+        classified_df = classify_defensive_run_style(run_metrics_df)
+
+        # Build week filter for rush defense query
+        if week:
+            window_size = 5
+            week_start = max(1, week - window_size + 1)
+            week_filter = f"AND week BETWEEN {week_start} AND {week}"
+        else:
+            week_filter = ""
+
+        # Query rush yards allowed
+        rush_def_query = f"""
+            SELECT
+                opponent_team AS team,
+                AVG(rushing_yards) AS avg_rush_yards_allowed
+            FROM team_stats_week
+            WHERE season = {season}
+                {week_filter}
+            GROUP BY opponent_team
+        """
+
+        rush_def_df = pd.read_sql_query(rush_def_query, conn)
+        conn.close()
+
+        # Merge data
+        summary_df = classified_df[['team', 'defensive_style']].copy()
+        summary_df = summary_df.merge(rush_def_df, on='team', how='left')
+
+        # Filter to requested teams if provided
+        if teams_filter:
+            summary_df = summary_df[summary_df['team'].isin(teams_filter)]
+
+        # Rename columns for display
+        summary_df = summary_df.rename(columns={
+            'team': 'Team',
+            'defensive_style': 'Defensive Rush Style',
+            'avg_rush_yards_allowed': 'Rush Yds Allowed/Game'
+        })
+
+        # Sort by team name
+        summary_df = summary_df.sort_values('Team')
+
+        return summary_df
+
+    except Exception as e:
+        print(f"Error generating defensive rush summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+
+
 def get_defensive_run_style_matchup(offense_team, defense_team, season, week=None):
     """
     Get defensive run style for a specific matchup and generate RB matchup insight.
@@ -18022,6 +18099,29 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     """)
             else:
                 st.info("Defensive summary data not available for selected teams.")
+
+            # Add simplified defensive rush summary table
+            st.divider()
+            st.subheader("🏃 Defensive Rush Summary")
+            st.caption("Quick reference: Defensive run style and rushing yards allowed per game")
+
+            # Generate defensive rush summary
+            with st.spinner("Loading defensive rush statistics..."):
+                defensive_rush_df = generate_defensive_rush_summary(selected_season, selected_week, teams_playing)
+
+            if defensive_rush_df is not None and not defensive_rush_df.empty:
+                st.dataframe(
+                    defensive_rush_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Team": st.column_config.TextColumn("Team", width="small"),
+                        "Defensive Rush Style": st.column_config.TextColumn("Def Rush Style", width="medium"),
+                        "Rush Yds Allowed/Game": st.column_config.NumberColumn("Rush Yds/Gm", format="%.1f", width="small")
+                    }
+                )
+            else:
+                st.info("Defensive rush summary data not available for selected teams.")
 
             # Add player projections for this week
             st.divider()

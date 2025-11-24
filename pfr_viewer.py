@@ -4261,63 +4261,35 @@ def calculate_defensive_run_metrics(season, week=None, window_size=5):
     else:
         week_filter = ""
 
-    # Query 1: Play-by-play metrics (stuff rate, explosive runs)
-    # Extract season from game_id (format: YYYYMMDDTEAM, first 4 chars = year)
-    plays_query = f"""
-        SELECT
-            defteam_abbr AS team,
-            COUNT(*) AS total_rushes,
-            SUM(CASE WHEN yards_gained <= 0 THEN 1 ELSE 0 END) AS stuffs,
-            SUM(CASE WHEN yards_gained >= 10 THEN 1 ELSE 0 END) AS explosive_runs,
-            AVG(yards_gained) AS avg_rush_yds_allowed
-        FROM plays
-        WHERE CAST(SUBSTR(game_id, 1, 4) AS INTEGER) = {season}
-            AND is_rush = 1
-            AND defteam_abbr IS NOT NULL
-        GROUP BY defteam_abbr
-    """
-
-    # Query 2: Advanced metrics (YBC, YAC) from pfr_advstats_rush_week
+    # Query: Advanced metrics (YBC, YAC) from pfr_advstats_rush_week
+    # NOTE: plays table is empty, so we only use pfr_advstats_rush_week
     # This table has player-level data, we need to aggregate by defensive team
     adv_query = f"""
         SELECT
             opponent AS team,
-            AVG(rushing_yards_before_contact) AS ybc_allowed,
-            AVG(rushing_yards_after_contact) AS yac_allowed,
+            AVG(rushing_yards_before_contact_avg) AS ybc_allowed,
+            AVG(rushing_yards_after_contact_avg) AS yac_allowed,
+            SUM(carries) / COUNT(DISTINCT week) AS carries_per_game,
+            COUNT(DISTINCT week) AS games_played,
             COUNT(*) AS player_games
         FROM pfr_advstats_rush_week
         WHERE season = {season}
-            AND rushing_attempts > 0
+            AND carries > 0
             {week_filter}
         GROUP BY opponent
     """
 
     try:
-        plays_df = pd.read_sql_query(plays_query, conn)
-        adv_df = pd.read_sql_query(adv_query, conn)
+        metrics_df = pd.read_sql_query(adv_query, conn)
 
-        # Calculate rate stats
-        plays_df['stuff_rate'] = (plays_df['stuffs'] / plays_df['total_rushes'] * 100).fillna(0)
-        plays_df['explosive_run_pct'] = (plays_df['explosive_runs'] / plays_df['total_rushes'] * 100).fillna(0)
-
-        # Merge the two dataframes
-        metrics_df = plays_df.merge(
-            adv_df[['team', 'ybc_allowed', 'yac_allowed']],
-            on='team',
-            how='left'
-        )
-
-        # Fill missing YBC/YAC with zeros (some teams might not have advanced stats)
-        metrics_df['ybc_allowed'] = metrics_df['ybc_allowed'].fillna(0)
-        metrics_df['yac_allowed'] = metrics_df['yac_allowed'].fillna(0)
+        if metrics_df.empty:
+            return pd.DataFrame()
 
         # Select final columns
         result = metrics_df[[
-            'team', 'stuff_rate', 'explosive_run_pct',
-            'ybc_allowed', 'yac_allowed', 'avg_rush_yds_allowed', 'total_rushes'
+            'team', 'ybc_allowed', 'yac_allowed',
+            'carries_per_game', 'games_played'
         ]].copy()
-
-        result.rename(columns={'total_rushes': 'rushes_faced'}, inplace=True)
 
         return result
 

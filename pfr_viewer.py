@@ -2335,6 +2335,20 @@ def generate_player_projections(season, week, teams_playing):
                 opp_quality = defense_opponent_quality.get(opponent, {})
                 avg_opp_rank = opp_quality.get('avg_opponent_rank', 0)
 
+                # Get defensive run style
+                try:
+                    def_style_info = get_defensive_run_style_matchup(
+                        offense_team=player['team'],
+                        defense_team=opponent,
+                        season=season,
+                        week=week
+                    )
+                    def_run_style = def_style_info['style']
+                    def_run_style_insight = def_style_info['rb_matchup_insight']
+                except Exception:
+                    def_run_style = "Unknown"
+                    def_run_style_insight = "No data available"
+
                 projections['RB'].append({
                     'RB Score': round(rb_talent_score, 1),
                     'RB Def Score': round(rb_def_score, 1),
@@ -2354,6 +2368,8 @@ def generate_player_projections(season, week, teams_playing):
                     'Touches/Gm': round(rb_touches_per_game, 1),
                     'Def Rush Yds': round(opponent_def['rush_allowed'], 1),
                     'Def Rush TDs': round(opponent_def['rush_td_allowed'], 1),
+                    'Def Run Style': def_run_style,
+                    'Def Style Insight': def_run_style_insight,
                     'Recommendation': recommendation,
                     # Keep legacy columns for backward compatibility
                     'RB Rank': rb_rank,
@@ -4209,6 +4225,262 @@ def calculate_wr_td_probability(wr_total_rec_tds, wr_games, def_rec_tds_allowed,
     td_probability = min(td_probability, 100)
 
     return round(td_probability, 1)
+
+
+# ============================================================================
+# DEFENSIVE RUN STYLE CLASSIFICATION SYSTEM
+# ============================================================================
+
+def calculate_defensive_run_metrics(season, week=None, window_size=5):
+    """
+    Calculate defensive run metrics for all teams using available data.
+
+    Metrics calculated:
+    - stuff_rate_forced: % of rushes stopped at or behind LOS
+    - explosive_run_pct_allowed: % of rushes ≥10 yards
+    - ybc_allowed: yards before contact per rush allowed
+    - yac_allowed: yards after contact per rush allowed
+    - avg_rush_yards_allowed: average rush yards per attempt
+
+    Args:
+        season (int): Season to analyze
+        week (int, optional): If provided, uses rolling window ending at this week
+        window_size (int): Number of weeks to include in rolling window (default: 5)
+
+    Returns:
+        pd.DataFrame: Team defensive metrics with columns:
+            team, stuff_rate, explosive_run_pct, ybc_allowed, yac_allowed,
+            avg_rush_yds_allowed, rushes_faced
+    """
+    conn = sqlite3.connect(DB_PATH)
+
+    # Build week filter for rolling window
+    if week:
+        week_start = max(1, week - window_size + 1)
+        week_filter = f"AND week BETWEEN {week_start} AND {week}"
+    else:
+        week_filter = ""
+
+    # Query 1: Play-by-play metrics (stuff rate, explosive runs)
+    plays_query = f"""
+        SELECT
+            defteam_abbr AS team,
+            COUNT(*) AS total_rushes,
+            SUM(CASE WHEN yards_gained <= 0 THEN 1 ELSE 0 END) AS stuffs,
+            SUM(CASE WHEN yards_gained >= 10 THEN 1 ELSE 0 END) AS explosive_runs,
+            AVG(yards_gained) AS avg_rush_yds_allowed
+        FROM plays
+        WHERE season = {season}
+            AND is_rush = 1
+            AND defteam_abbr IS NOT NULL
+            {week_filter}
+        GROUP BY defteam_abbr
+    """
+
+    # Query 2: Advanced metrics (YBC, YAC) from pfr_advstats_rush_week
+    # This table has player-level data, we need to aggregate by defensive team
+    adv_query = f"""
+        SELECT
+            opponent AS team,
+            AVG(rushing_yards_before_contact) AS ybc_allowed,
+            AVG(rushing_yards_after_contact) AS yac_allowed,
+            COUNT(*) AS player_games
+        FROM pfr_advstats_rush_week
+        WHERE season = {season}
+            AND rushing_attempts > 0
+            {week_filter}
+        GROUP BY opponent
+    """
+
+    try:
+        plays_df = pd.read_sql_query(plays_query, conn)
+        adv_df = pd.read_sql_query(adv_query, conn)
+
+        # Calculate rate stats
+        plays_df['stuff_rate'] = (plays_df['stuffs'] / plays_df['total_rushes'] * 100).fillna(0)
+        plays_df['explosive_run_pct'] = (plays_df['explosive_runs'] / plays_df['total_rushes'] * 100).fillna(0)
+
+        # Merge the two dataframes
+        metrics_df = plays_df.merge(
+            adv_df[['team', 'ybc_allowed', 'yac_allowed']],
+            on='team',
+            how='left'
+        )
+
+        # Fill missing YBC/YAC with zeros (some teams might not have advanced stats)
+        metrics_df['ybc_allowed'] = metrics_df['ybc_allowed'].fillna(0)
+        metrics_df['yac_allowed'] = metrics_df['yac_allowed'].fillna(0)
+
+        # Select final columns
+        result = metrics_df[[
+            'team', 'stuff_rate', 'explosive_run_pct',
+            'ybc_allowed', 'yac_allowed', 'avg_rush_yds_allowed', 'total_rushes'
+        ]].copy()
+
+        result.rename(columns={'total_rushes': 'rushes_faced'}, inplace=True)
+
+        return result
+
+    except Exception as e:
+        print(f"Error calculating defensive run metrics: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+def classify_defensive_run_style(metrics_df):
+    """
+    Classify each defense into run style categories based on percentile ranks.
+
+    Styles:
+    1. Bulldozer: High stuff rate (≥p70), low YBC (≤p40) - dominant at point of attack
+    2. Spill-and-Swarm: Low explosive runs (≤p40) - swarm tackle, limit big plays
+    3. Soft Shell: Low stuff rate (≤p40), high YBC (≥p60) - give up yards at LOS
+    4. Leakier Front: High explosive runs (≥p70) OR high YAC (≥p70) - allow big plays
+    5. Balanced: Doesn't fit other categories
+
+    Args:
+        metrics_df (pd.DataFrame): Output from calculate_defensive_run_metrics()
+
+    Returns:
+        pd.DataFrame: Original metrics plus style, percentile ranks, and explainers
+    """
+    if metrics_df.empty:
+        return metrics_df
+
+    result = metrics_df.copy()
+
+    # Calculate percentiles for each metric
+    # Higher stuff_rate = better defense (more stuffs)
+    result['stuff_rate_percentile'] = result['stuff_rate'].rank(pct=True) * 100
+
+    # Lower explosive_run_pct = better defense (fewer explosive runs)
+    result['explosive_pct_percentile'] = (1 - result['explosive_run_pct'].rank(pct=True)) * 100
+
+    # Lower YBC = better defense (stop at LOS)
+    result['ybc_percentile'] = (1 - result['ybc_allowed'].rank(pct=True)) * 100
+
+    # Lower YAC = better defense (better tackling)
+    result['yac_percentile'] = (1 - result['yac_allowed'].rank(pct=True)) * 100
+
+    # Lower avg rush yards = better defense
+    result['avg_rush_yds_percentile'] = (1 - result['avg_rush_yds_allowed'].rank(pct=True)) * 100
+
+    # Classify each team
+    styles = []
+    explainers = []
+
+    for _, row in result.iterrows():
+        style = "Balanced"
+        explainer_parts = []
+
+        # Check Bulldozer (dominant at point of attack)
+        if row['stuff_rate_percentile'] >= 70 and row['ybc_percentile'] >= 60:
+            style = "🚜 Bulldozer"
+            explainer_parts.append(f"High stuff rate ({row['stuff_rate']:.1f}%, p{row['stuff_rate_percentile']:.0f})")
+            explainer_parts.append(f"Low YBC allowed ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+
+        # Check Spill-and-Swarm (swarm tackle, limit big plays)
+        elif row['explosive_pct_percentile'] >= 60 and row['yac_percentile'] >= 50:
+            style = "🌊 Spill-and-Swarm"
+            explainer_parts.append(f"Low explosive runs ({row['explosive_run_pct']:.1f}%, p{row['explosive_pct_percentile']:.0f})")
+            explainer_parts.append(f"Good YAC prevention ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
+
+        # Check Soft Shell (give up yards at LOS)
+        elif row['stuff_rate_percentile'] <= 40 and row['ybc_percentile'] <= 40:
+            style = "🛡️ Soft Shell"
+            explainer_parts.append(f"Low stuff rate ({row['stuff_rate']:.1f}%, p{row['stuff_rate_percentile']:.0f})")
+            explainer_parts.append(f"High YBC allowed ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+
+        # Check Leakier Front (allow big plays)
+        elif row['explosive_pct_percentile'] <= 30 or row['yac_percentile'] <= 30:
+            style = "🚨 Leakier Front"
+            if row['explosive_pct_percentile'] <= 30:
+                explainer_parts.append(f"High explosive runs ({row['explosive_run_pct']:.1f}%, p{row['explosive_pct_percentile']:.0f})")
+            if row['yac_percentile'] <= 30:
+                explainer_parts.append(f"High YAC allowed ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
+
+        # If no specific style identified, explain balanced
+        if not explainer_parts:
+            explainer_parts.append(f"Stuff rate: {row['stuff_rate']:.1f}% (p{row['stuff_rate_percentile']:.0f})")
+            explainer_parts.append(f"Explosive runs: {row['explosive_run_pct']:.1f}% (p{row['explosive_pct_percentile']:.0f})")
+
+        styles.append(style)
+        explainers.append(" | ".join(explainer_parts))
+
+    result['defensive_style'] = styles
+    result['style_explainer'] = explainers
+
+    return result
+
+
+def get_defensive_run_style_matchup(offense_team, defense_team, season, week=None):
+    """
+    Get defensive run style for a specific matchup and generate RB matchup insight.
+
+    Args:
+        offense_team (str): Offensive team abbreviation
+        defense_team (str): Defensive team abbreviation
+        season (int): Season
+        week (int, optional): Week number for rolling window
+
+    Returns:
+        dict: Defensive style info including:
+            - style: Style classification
+            - explainer: Human-readable explanation
+            - metrics: Raw metrics dict
+            - rb_matchup_insight: Tailored RB advice
+    """
+    # Calculate metrics for all teams
+    metrics_df = calculate_defensive_run_metrics(season, week)
+
+    if metrics_df.empty:
+        return {
+            'style': 'Unknown',
+            'explainer': 'Insufficient data',
+            'metrics': {},
+            'rb_matchup_insight': 'No data available'
+        }
+
+    # Classify styles
+    styled_df = classify_defensive_run_style(metrics_df)
+
+    # Get defense row
+    def_row = styled_df[styled_df['team'] == defense_team]
+
+    if def_row.empty:
+        return {
+            'style': 'Unknown',
+            'explainer': 'Team not found',
+            'metrics': {},
+            'rb_matchup_insight': 'No data available for this team'
+        }
+
+    def_row = def_row.iloc[0]
+
+    # Generate RB matchup insight based on style
+    style = def_row['defensive_style']
+    insights = {
+        "🚜 Bulldozer": "TOUGH RB MATCHUP - Strong at point of attack. Target pass-catching RBs or look elsewhere.",
+        "🌊 Spill-and-Swarm": "MODERATE RB MATCHUP - Limits big plays but allows consistent gains. Volume RBs preferred.",
+        "🛡️ Soft Shell": "FAVORABLE RB MATCHUP - Allows yards at LOS. Target rushing volume and YPC upside.",
+        "🚨 Leakier Front": "SMASH RB MATCHUP - Allows explosive runs and missed tackles. Target home run RBs.",
+        "Balanced": "NEUTRAL RB MATCHUP - No clear defensive identity. Defer to player talent."
+    }
+
+    return {
+        'style': style,
+        'explainer': def_row['style_explainer'],
+        'metrics': {
+            'stuff_rate': def_row['stuff_rate'],
+            'explosive_run_pct': def_row['explosive_run_pct'],
+            'ybc_allowed': def_row['ybc_allowed'],
+            'yac_allowed': def_row['yac_allowed'],
+            'avg_rush_yds_allowed': def_row['avg_rush_yds_allowed'],
+            'rushes_faced': def_row['rushes_faced']
+        },
+        'rb_matchup_insight': insights.get(style, insights["Balanced"])
+    }
 
 
 # ============================================================================

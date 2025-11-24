@@ -4302,13 +4302,15 @@ def calculate_defensive_run_metrics(season, week=None, window_size=5):
 
 def classify_defensive_run_style(metrics_df):
     """
-    Classify each defense into run style categories based on percentile ranks.
+    Classify each defense into run style categories based on YBC and YAC percentiles.
+
+    Simplified classification using only available metrics from pfr_advstats_rush_week:
 
     Styles:
-    1. Bulldozer: High stuff rate (≥p70), low YBC (≤p40) - dominant at point of attack
-    2. Spill-and-Swarm: Low explosive runs (≤p40) - swarm tackle, limit big plays
-    3. Soft Shell: Low stuff rate (≤p40), high YBC (≥p60) - give up yards at LOS
-    4. Leakier Front: High explosive runs (≥p70) OR high YAC (≥p70) - allow big plays
+    1. Bulldozer: Strong at LOS (low YBC) + good tackling (low YAC) - dominant run defense
+    2. Spill-and-Swarm: Weak at LOS (high YBC) but good tackling (low YAC) - absorb contact then swarm
+    3. Soft Shell: Weak at LOS (high YBC) - give up yards before contact
+    4. Leakier Front: Poor tackling (high YAC) - allow yards after contact
     5. Balanced: Doesn't fit other categories
 
     Args:
@@ -4322,21 +4324,12 @@ def classify_defensive_run_style(metrics_df):
 
     result = metrics_df.copy()
 
-    # Calculate percentiles for each metric
-    # Higher stuff_rate = better defense (more stuffs)
-    result['stuff_rate_percentile'] = result['stuff_rate'].rank(pct=True) * 100
-
-    # Lower explosive_run_pct = better defense (fewer explosive runs)
-    result['explosive_pct_percentile'] = (1 - result['explosive_run_pct'].rank(pct=True)) * 100
-
+    # Calculate percentiles (higher percentile = better defense)
     # Lower YBC = better defense (stop at LOS)
     result['ybc_percentile'] = (1 - result['ybc_allowed'].rank(pct=True)) * 100
 
     # Lower YAC = better defense (better tackling)
     result['yac_percentile'] = (1 - result['yac_allowed'].rank(pct=True)) * 100
-
-    # Lower avg rush yards = better defense
-    result['avg_rush_yds_percentile'] = (1 - result['avg_rush_yds_allowed'].rank(pct=True)) * 100
 
     # Classify each team
     styles = []
@@ -4346,36 +4339,32 @@ def classify_defensive_run_style(metrics_df):
         style = "Balanced"
         explainer_parts = []
 
-        # Check Bulldozer (dominant at point of attack)
-        if row['stuff_rate_percentile'] >= 70 and row['ybc_percentile'] >= 60:
+        # Bulldozer: Strong at LOS (low YBC) + good tackling (low YAC)
+        if row['ybc_percentile'] >= 60 and row['yac_percentile'] >= 50:
             style = "🚜 Bulldozer"
-            explainer_parts.append(f"High stuff rate ({row['stuff_rate']:.1f}%, p{row['stuff_rate_percentile']:.0f})")
-            explainer_parts.append(f"Low YBC allowed ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+            explainer_parts.append(f"Low YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+            explainer_parts.append(f"Good tackling ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
-        # Check Spill-and-Swarm (swarm tackle, limit big plays)
-        elif row['explosive_pct_percentile'] >= 60 and row['yac_percentile'] >= 50:
+        # Spill-and-Swarm: Weak at LOS (high YBC) but good tackling (low YAC)
+        elif row['ybc_percentile'] <= 40 and row['yac_percentile'] >= 50:
             style = "🌊 Spill-and-Swarm"
-            explainer_parts.append(f"Low explosive runs ({row['explosive_run_pct']:.1f}%, p{row['explosive_pct_percentile']:.0f})")
-            explainer_parts.append(f"Good YAC prevention ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
+            explainer_parts.append(f"High YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+            explainer_parts.append(f"Good tackling ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
-        # Check Soft Shell (give up yards at LOS)
-        elif row['stuff_rate_percentile'] <= 40 and row['ybc_percentile'] <= 40:
+        # Soft Shell: Weak at LOS (high YBC)
+        elif row['ybc_percentile'] <= 40:
             style = "🛡️ Soft Shell"
-            explainer_parts.append(f"Low stuff rate ({row['stuff_rate']:.1f}%, p{row['stuff_rate_percentile']:.0f})")
-            explainer_parts.append(f"High YBC allowed ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
+            explainer_parts.append(f"High YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
 
-        # Check Leakier Front (allow big plays)
-        elif row['explosive_pct_percentile'] <= 30 or row['yac_percentile'] <= 30:
+        # Leakier Front: Poor tackling (high YAC)
+        elif row['yac_percentile'] <= 40:
             style = "🚨 Leakier Front"
-            if row['explosive_pct_percentile'] <= 30:
-                explainer_parts.append(f"High explosive runs ({row['explosive_run_pct']:.1f}%, p{row['explosive_pct_percentile']:.0f})")
-            if row['yac_percentile'] <= 30:
-                explainer_parts.append(f"High YAC allowed ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
+            explainer_parts.append(f"High YAC ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
         # If no specific style identified, explain balanced
         if not explainer_parts:
-            explainer_parts.append(f"Stuff rate: {row['stuff_rate']:.1f}% (p{row['stuff_rate_percentile']:.0f})")
-            explainer_parts.append(f"Explosive runs: {row['explosive_run_pct']:.1f}% (p{row['explosive_pct_percentile']:.0f})")
+            explainer_parts.append(f"YBC: {row['ybc_allowed']:.2f} (p{row['ybc_percentile']:.0f})")
+            explainer_parts.append(f"YAC: {row['yac_allowed']:.2f} (p{row['yac_percentile']:.0f})")
 
         styles.append(style)
         explainers.append(" | ".join(explainer_parts))

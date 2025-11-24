@@ -4433,12 +4433,10 @@ def get_defensive_run_style_matchup(offense_team, defense_team, season, week=Non
         'style': style,
         'explainer': def_row['style_explainer'],
         'metrics': {
-            'stuff_rate': def_row['stuff_rate'],
-            'explosive_run_pct': def_row['explosive_run_pct'],
             'ybc_allowed': def_row['ybc_allowed'],
             'yac_allowed': def_row['yac_allowed'],
-            'avg_rush_yds_allowed': def_row['avg_rush_yds_allowed'],
-            'rushes_faced': def_row['rushes_faced']
+            'carries_per_game': def_row['carries_per_game'],
+            'games_played': def_row['games_played']
         },
         'rb_matchup_insight': insights.get(style, insights["Balanced"])
     }

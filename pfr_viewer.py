@@ -18002,6 +18002,24 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         "Style Explanation": st.column_config.TextColumn("Style Details", width="large")
                     }
                 )
+
+                # Add defensive style definitions
+                with st.expander("ℹ️ Defensive Run Style Definitions"):
+                    st.markdown("""
+                    **Defensive run styles are based on Yards Before Contact (YBC) and Yards After Contact (YAC) metrics:**
+
+                    - **🚜 Bulldozer**: Elite run defense - Strong at line of scrimmage (low YBC allowed) and excellent tackling (low YAC allowed). RBs will face tough sledding with limited opportunities.
+
+                    - **🌊 Spill-and-Swarm**: Bend-don't-break run defense - Allows yards at the line (higher YBC) but swarms to the ball with good tackling (low YAC). RBs may get to the second level but will be met by aggressive pursuit.
+
+                    - **🛡️ Soft Shell**: Vulnerable at the line - Weak point-of-attack defense (high YBC allowed). RBs can exploit gaps and get to the second level easily. Best matchups for running backs.
+
+                    - **🚨 Leakier Front**: Poor tackling - Allows significant yards after contact (high YAC). RBs who break tackles excel in these matchups. Explosive play potential.
+
+                    - **Balanced**: Middle-of-the-pack run defense - Average in both YBC and YAC metrics. Standard matchup expectations without significant advantage either way.
+
+                    _Metrics are calculated from Pro Football Reference advanced rushing stats and ranked on a percentile basis (0-100, where higher percentile = better defense)._
+                    """)
             else:
                 st.info("Defensive summary data not available for selected teams.")
 

@@ -4476,6 +4476,165 @@ def generate_defensive_summary(season, week=None, teams_filter=None):
         return pd.DataFrame()
 
 
+def calculate_defensive_pass_metrics(season, week=None):
+    """
+    Calculate defensive pass metrics from pfr_advstats_def_week and team_stats_week tables.
+
+    Returns metrics for classifying defensive pass styles:
+    - Sacks per game (pass rush pressure)
+    - Hurries per game (additional pressure metric)
+    - INTs per game (ball hawk tendencies)
+    - Pass yards allowed per game
+    - QB passer rating allowed (coverage quality)
+
+    Args:
+        season (int): Season year
+        week (int, optional): Week number for rolling window
+
+    Returns:
+        pd.DataFrame: Defensive pass metrics by team
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        if week:
+            window_size = 5
+            week_start = max(1, week - window_size + 1)
+            week_filter = f"AND week BETWEEN {week_start} AND {week}"
+        else:
+            week_filter = ""
+
+        # Get advanced defensive pass stats (sacks, hurries, INTs, passer rating)
+        adv_stats_query = f"""
+            SELECT
+                team,
+                COUNT(DISTINCT week) as games_played,
+                AVG(CAST(def_sacks AS REAL)) as sacks_per_game,
+                AVG(CAST(def_hurries AS REAL)) as hurries_per_game,
+                AVG(CAST(def_ints AS REAL)) as ints_per_game,
+                AVG(CAST(def_pass_rating AS REAL)) as passer_rating_allowed
+            FROM pfr_advstats_def_week
+            WHERE season = {season}
+                {week_filter}
+            GROUP BY team
+        """
+
+        adv_df = pd.read_sql_query(adv_stats_query, conn)
+
+        # Get pass yards allowed from team_stats_week
+        pass_yards_query = f"""
+            SELECT
+                opponent_team AS team,
+                AVG(passing_yards) AS pass_yards_allowed
+            FROM team_stats_week
+            WHERE season = {season}
+                {week_filter}
+            GROUP BY opponent_team
+        """
+
+        yards_df = pd.read_sql_query(pass_yards_query, conn)
+        conn.close()
+
+        # Merge datasets
+        if adv_df.empty or yards_df.empty:
+            return pd.DataFrame()
+
+        result = adv_df.merge(yards_df, on='team', how='left')
+
+        # Fill any missing values
+        result = result.fillna(0)
+
+        return result
+
+    except Exception as e:
+        print(f"Error calculating defensive pass metrics: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+
+
+def classify_defensive_pass_style(metrics_df):
+    """
+    Classify each defense into pass style categories based on pressure, ball hawks, and coverage.
+
+    Styles:
+    1. 🔥 Pass Rush Terror: High pressure (sacks+hurries) - forces quick throws/mistakes
+    2. 🦅 Ball Hawks: High INT rate - opportunistic secondary that creates turnovers
+    3. 🛡️ Lockdown Coverage: Low passer rating + low yards - elite coverage, prevents completions
+    4. 🚨 Soft Coverage: High yards allowed + high passer rating - vulnerable to passes
+
+    Args:
+        metrics_df (pd.DataFrame): Output from calculate_defensive_pass_metrics()
+
+    Returns:
+        pd.DataFrame: Original metrics plus style, percentile ranks, and explainers
+    """
+    if metrics_df.empty:
+        return metrics_df
+
+    result = metrics_df.copy()
+
+    # Calculate percentiles (higher percentile = better defense, except where noted)
+    # Higher sacks/hurries = better defense (more pressure)
+    result['sacks_percentile'] = result['sacks_per_game'].rank(pct=True) * 100
+    result['hurries_percentile'] = result['hurries_per_game'].rank(pct=True) * 100
+    result['pressure_percentile'] = ((result['sacks_percentile'] + result['hurries_percentile']) / 2).round(1)
+
+    # Higher INTs = better defense (more turnovers)
+    result['ints_percentile'] = result['ints_per_game'].rank(pct=True) * 100
+
+    # Lower yards allowed = better defense
+    result['yards_percentile'] = (1 - result['pass_yards_allowed'].rank(pct=True)) * 100
+
+    # Lower passer rating = better defense
+    result['rating_percentile'] = (1 - result['passer_rating_allowed'].rank(pct=True)) * 100
+
+    # Classify each team
+    styles = []
+    explainers = []
+
+    for _, row in result.iterrows():
+        style = "Balanced"
+        explainer_parts = []
+
+        # Pass Rush Terror: High pressure (sacks + hurries)
+        if row['pressure_percentile'] >= 60:
+            style = "🔥 Pass Rush Terror"
+            explainer_parts.append(f"High pressure ({row['sacks_per_game']:.1f} sacks, {row['hurries_per_game']:.1f} hurries/gm, p{row['pressure_percentile']:.0f})")
+
+        # Ball Hawks: High INT rate
+        elif row['ints_percentile'] >= 65:
+            style = "🦅 Ball Hawks"
+            explainer_parts.append(f"High INTs ({row['ints_per_game']:.2f}/gm, p{row['ints_percentile']:.0f})")
+
+        # Lockdown Coverage: Low passer rating + decent yards allowed
+        elif row['rating_percentile'] >= 60 and row['yards_percentile'] >= 40:
+            style = "🛡️ Lockdown Coverage"
+            explainer_parts.append(f"Low passer rating ({row['passer_rating_allowed']:.1f}, p{row['rating_percentile']:.0f})")
+            explainer_parts.append(f"Yards allowed ({row['pass_yards_allowed']:.1f}/gm, p{row['yards_percentile']:.0f})")
+
+        # Soft Coverage: High yards + high passer rating (vulnerable)
+        elif row['yards_percentile'] <= 40 and row['rating_percentile'] <= 40:
+            style = "🚨 Soft Coverage"
+            explainer_parts.append(f"High yards ({row['pass_yards_allowed']:.1f}/gm, p{row['yards_percentile']:.0f})")
+            explainer_parts.append(f"High passer rating ({row['passer_rating_allowed']:.1f}, p{row['rating_percentile']:.0f})")
+
+        # If no specific style identified, explain balanced
+        if not explainer_parts:
+            explainer_parts.append(f"Pressure: p{row['pressure_percentile']:.0f}")
+            explainer_parts.append(f"INTs: {row['ints_per_game']:.2f}/gm")
+            explainer_parts.append(f"Rating: {row['passer_rating_allowed']:.1f}")
+
+        styles.append(style)
+        explainers.append(" | ".join(explainer_parts))
+
+    result['defensive_pass_style'] = styles
+    result['style_explainer'] = explainers
+
+    return result
+
+
 def generate_defensive_rush_summary(season, week=None, teams_filter=None):
     """
     Generate simplified defensive rush summary showing only style and rush yards allowed.
@@ -4548,6 +4707,55 @@ def generate_defensive_rush_summary(season, week=None, teams_filter=None):
 
     except Exception as e:
         print(f"Error generating defensive rush summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return pd.DataFrame()
+
+
+def generate_defensive_pass_summary(season, week=None, teams_filter=None):
+    """
+    Generate simplified defensive pass summary showing only style and pass yards allowed.
+
+    Args:
+        season (int): Season year
+        week (int, optional): Week number for rolling window
+        teams_filter (list, optional): List of team abbreviations to include
+
+    Returns:
+        pd.DataFrame: Summary table with columns:
+            - Team
+            - Defensive Pass Style
+            - Pass Yds Allowed/Game
+    """
+    try:
+        # Get defensive pass metrics and classifications
+        pass_metrics_df = calculate_defensive_pass_metrics(season, week)
+
+        if pass_metrics_df.empty:
+            return pd.DataFrame()
+
+        # Classify defensive pass styles
+        classified_df = classify_defensive_pass_style(pass_metrics_df)
+
+        # Filter to requested teams if provided
+        if teams_filter:
+            classified_df = classified_df[classified_df['team'].isin(teams_filter)]
+
+        # Select and rename columns for display
+        summary_df = classified_df[['team', 'defensive_pass_style', 'pass_yards_allowed']].copy()
+        summary_df = summary_df.rename(columns={
+            'team': 'Team',
+            'defensive_pass_style': 'Defensive Pass Style',
+            'pass_yards_allowed': 'Pass Yds Allowed/Game'
+        })
+
+        # Sort by team name
+        summary_df = summary_df.sort_values('Team')
+
+        return summary_df
+
+    except Exception as e:
+        print(f"Error generating defensive pass summary: {e}")
         import traceback
         traceback.print_exc()
         return pd.DataFrame()
@@ -18122,6 +18330,47 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 )
             else:
                 st.info("Defensive rush summary data not available for selected teams.")
+
+            # Add simplified defensive pass summary table
+            st.divider()
+            st.subheader("🎯 Defensive Pass Summary")
+            st.caption("Quick reference: Defensive pass style and passing yards allowed per game")
+
+            # Generate defensive pass summary
+            with st.spinner("Loading defensive pass statistics..."):
+                defensive_pass_df = generate_defensive_pass_summary(selected_season, selected_week, teams_playing)
+
+            if defensive_pass_df is not None and not defensive_pass_df.empty:
+                st.dataframe(
+                    defensive_pass_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Team": st.column_config.TextColumn("Team", width="small"),
+                        "Defensive Pass Style": st.column_config.TextColumn("Def Pass Style", width="medium"),
+                        "Pass Yds Allowed/Game": st.column_config.NumberColumn("Pass Yds/Gm", format="%.1f", width="small")
+                    }
+                )
+
+                # Add defensive pass style definitions
+                with st.expander("ℹ️ Defensive Pass Style Definitions"):
+                    st.markdown("""
+                    **Defensive pass styles are based on pressure (sacks+hurries), ball hawks (INTs), and coverage quality (passer rating allowed):**
+
+                    - **🔥 Pass Rush Terror**: High pressure (sacks + hurries per game) - Forces QBs into quick throws and mistakes. Elite pass rush that disrupts timing.
+
+                    - **🦅 Ball Hawks**: High interception rate - Opportunistic secondary that creates turnovers. Ball-hawking DBs who jump routes and make plays on the ball.
+
+                    - **🛡️ Lockdown Coverage**: Low passer rating allowed + limited yards - Elite coverage that prevents completions. QBs struggle to find open receivers.
+
+                    - **🚨 Soft Coverage**: High yards + high passer rating allowed - Vulnerable to passes. QBs can complete passes easily with high success rates.
+
+                    - **Balanced**: Middle-of-the-pack pass defense - Average metrics across pressure, turnovers, and coverage quality.
+
+                    _Metrics are calculated from Pro Football Reference advanced defensive stats (pfr_advstats_def_week) and team passing stats, ranked on a percentile basis (0-100, where higher percentile = better defense)._
+                    """)
+            else:
+                st.info("Defensive pass summary data not available for selected teams.")
 
             # Add player projections for this week
             st.divider()

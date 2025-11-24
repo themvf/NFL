@@ -4416,13 +4416,13 @@ def generate_defensive_summary(season, week=None, teams_filter=None):
         # Query pass defense yards allowed from team_stats_week
         pass_def_query = f"""
             SELECT
-                opponent AS team,
+                opponent_team AS team,
                 AVG(passing_yards) AS avg_pass_yards_allowed,
                 COUNT(DISTINCT week) AS games_played
             FROM team_stats_week
             WHERE season = {season}
                 {week_filter}
-            GROUP BY opponent
+            GROUP BY opponent_team
         """
 
         pass_def_df = pd.read_sql_query(pass_def_query, conn)
@@ -4432,12 +4432,12 @@ def generate_defensive_summary(season, week=None, teams_filter=None):
         conn = sqlite3.connect(DB_PATH)
         rush_def_query = f"""
             SELECT
-                opponent AS team,
+                opponent_team AS team,
                 AVG(rushing_yards) AS avg_rush_yards_allowed
             FROM team_stats_week
             WHERE season = {season}
                 {week_filter}
-            GROUP BY opponent
+            GROUP BY opponent_team
         """
 
         rush_def_df = pd.read_sql_query(rush_def_query, conn)

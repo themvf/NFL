@@ -2271,8 +2271,10 @@ def generate_player_projections(season, week, teams_playing):
                 matchup_score = (rb_talent_score * 0.6) + (rb_def_score * 0.4)
 
                 # Calculate projected rushing yards based on defensive matchup
-                # RB Def Score of 50 = average (1.0x), 100 = worst defense (2.0x), 0 = best defense (0.0x)
-                def_multiplier = rb_def_score / 50.0
+                # Use actual defensive yards allowed relative to league average
+                # Defense allows 100 yds, league avg is 80 = 1.25x multiplier (favorable matchup)
+                # Defense allows 60 yds, league avg is 80 = 0.75x multiplier (tough matchup)
+                def_multiplier = opponent_def['rush_allowed'] / league_avg['rush'] if league_avg['rush'] > 0 else 1.0
                 projected_rush_yds = player['avg_rush_yds'] * def_multiplier
 
                 # Calculate TD Probability %

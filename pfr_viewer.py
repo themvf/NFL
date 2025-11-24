@@ -4262,6 +4262,7 @@ def calculate_defensive_run_metrics(season, week=None, window_size=5):
         week_filter = ""
 
     # Query 1: Play-by-play metrics (stuff rate, explosive runs)
+    # Extract season from game_id (format: YYYYMMDDTEAM, first 4 chars = year)
     plays_query = f"""
         SELECT
             defteam_abbr AS team,
@@ -4270,10 +4271,9 @@ def calculate_defensive_run_metrics(season, week=None, window_size=5):
             SUM(CASE WHEN yards_gained >= 10 THEN 1 ELSE 0 END) AS explosive_runs,
             AVG(yards_gained) AS avg_rush_yds_allowed
         FROM plays
-        WHERE season = {season}
+        WHERE CAST(SUBSTR(game_id, 1, 4) AS INTEGER) = {season}
             AND is_rush = 1
             AND defteam_abbr IS NOT NULL
-            {week_filter}
         GROUP BY defteam_abbr
     """
 

@@ -22553,7 +22553,9 @@ def main():
                         "PPG Without": f"{tm.avg_fantasy_pts_without:.1f}",
                         "Δ Pts": f"{tm.fantasy_pts_delta:+.1f}",
                         "Δ Tgts": f"{tm.targets_delta:+.1f}" if tm.position in ('WR', 'TE') else "-",
+                        "Δ Rec": f"{tm.receptions_delta:+.1f}" if tm.position in ('WR', 'TE', 'RB') else "-",
                         "Δ Carries": f"{tm.carries_delta:+.1f}" if tm.position == 'RB' else "-",
+                        "Δ TDs": f"{tm.touchdowns_delta:+.1f}",
                         "Sample": f"{tm.games_together}/{tm.games_apart}",
                         "DFS Score": f"{tm.dfs_value_score:.0f}/100"
                     })

@@ -65,19 +65,25 @@ class TeammateImpact:
     # WITH key player present
     avg_fantasy_pts_with: float
     avg_targets_with: float  # For pass catchers
+    avg_receptions_with: float  # For pass catchers
     avg_carries_with: float  # For RBs
+    avg_touchdowns_with: float  # All TDs (rushing + receiving)
     avg_yards_with: float
 
     # WITHOUT key player (when they're absent)
     avg_fantasy_pts_without: float
     avg_targets_without: float
+    avg_receptions_without: float
     avg_carries_without: float
+    avg_touchdowns_without: float
     avg_yards_without: float
 
     # Deltas (positive = teammate BENEFITS from absence - DFS GOLD!)
     fantasy_pts_delta: float
     targets_delta: float
+    receptions_delta: float
     carries_delta: float
+    touchdowns_delta: float
     yards_delta: float
 
     # Sample sizes
@@ -463,7 +469,9 @@ def calculate_teammate_redistribution(
             SELECT
                 AVG(fantasy_points_ppr) as avg_fantasy_pts,
                 AVG(targets) as avg_targets,
+                AVG(receptions) as avg_receptions,
                 AVG(carries) as avg_carries,
+                AVG(COALESCE(receiving_tds, 0) + COALESCE(rushing_tds, 0)) as avg_touchdowns,
                 AVG(receiving_yards + rushing_yards + passing_yards) as avg_yards,
                 COUNT(*) as games
             FROM player_week_stats
@@ -482,7 +490,9 @@ def calculate_teammate_redistribution(
             with_stats = pd.DataFrame([{
                 'avg_fantasy_pts': 0,
                 'avg_targets': 0,
+                'avg_receptions': 0,
                 'avg_carries': 0,
+                'avg_touchdowns': 0,
                 'avg_yards': 0,
                 'games': 0
             }])
@@ -493,7 +503,9 @@ def calculate_teammate_redistribution(
             SELECT
                 AVG(fantasy_points_ppr) as avg_fantasy_pts,
                 AVG(targets) as avg_targets,
+                AVG(receptions) as avg_receptions,
                 AVG(carries) as avg_carries,
+                AVG(COALESCE(receiving_tds, 0) + COALESCE(rushing_tds, 0)) as avg_touchdowns,
                 AVG(receiving_yards + rushing_yards + passing_yards) as avg_yards,
                 COUNT(*) as games
             FROM player_week_stats
@@ -512,7 +524,9 @@ def calculate_teammate_redistribution(
             without_stats = pd.DataFrame([{
                 'avg_fantasy_pts': 0,
                 'avg_targets': 0,
+                'avg_receptions': 0,
                 'avg_carries': 0,
+                'avg_touchdowns': 0,
                 'avg_yards': 0,
                 'games': 0
             }])
@@ -529,15 +543,21 @@ def calculate_teammate_redistribution(
         fantasy_without = without_stats.iloc[0]['avg_fantasy_pts'] or 0
         targets_with = with_stats.iloc[0]['avg_targets'] or 0
         targets_without = without_stats.iloc[0]['avg_targets'] or 0
+        receptions_with = with_stats.iloc[0]['avg_receptions'] or 0
+        receptions_without = without_stats.iloc[0]['avg_receptions'] or 0
         carries_with = with_stats.iloc[0]['avg_carries'] or 0
         carries_without = without_stats.iloc[0]['avg_carries'] or 0
+        touchdowns_with = with_stats.iloc[0]['avg_touchdowns'] or 0
+        touchdowns_without = without_stats.iloc[0]['avg_touchdowns'] or 0
         yards_with = with_stats.iloc[0]['avg_yards'] or 0
         yards_without = without_stats.iloc[0]['avg_yards'] or 0
 
         # Calculate deltas
         fantasy_delta = fantasy_without - fantasy_with
         targets_delta = targets_without - targets_with
+        receptions_delta = receptions_without - receptions_with
         carries_delta = carries_without - carries_with
+        touchdowns_delta = touchdowns_without - touchdowns_with
         yards_delta = yards_without - yards_with
 
         # Calculate DFS Value Score (0-100)
@@ -575,15 +595,21 @@ def calculate_teammate_redistribution(
             position=teammate_pos,
             avg_fantasy_pts_with=fantasy_with,
             avg_targets_with=targets_with,
+            avg_receptions_with=receptions_with,
             avg_carries_with=carries_with,
+            avg_touchdowns_with=touchdowns_with,
             avg_yards_with=yards_with,
             avg_fantasy_pts_without=fantasy_without,
             avg_targets_without=targets_without,
+            avg_receptions_without=receptions_without,
             avg_carries_without=carries_without,
+            avg_touchdowns_without=touchdowns_without,
             avg_yards_without=yards_without,
             fantasy_pts_delta=fantasy_delta,
             targets_delta=targets_delta,
+            receptions_delta=receptions_delta,
             carries_delta=carries_delta,
+            touchdowns_delta=touchdowns_delta,
             yards_delta=yards_delta,
             games_together=games_together,
             games_apart=games_apart,

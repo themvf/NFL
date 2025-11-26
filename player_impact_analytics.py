@@ -175,28 +175,56 @@ def get_player_absences(
     Returns:
         (weeks_with_player, weeks_without_player) - Two lists of week numbers
     """
-    # Get all weeks in the season for this player's team
-    team_weeks_query = """
-    SELECT DISTINCT week
+    # First, get the player's team(s) for this season
+    team_query = """
+    SELECT DISTINCT recent_team
     FROM player_week_stats
-    WHERE season = ?
-      AND season_type = ?
-      AND recent_team IN (
-          SELECT DISTINCT recent_team
-          FROM player_week_stats
-          WHERE player_id = ? AND season = ? AND season_type = ?
-      )
-    ORDER BY week
+    WHERE player_id = ? AND season = ? AND season_type = ?
     """
 
-    all_weeks_df = pd.read_sql_query(
-        team_weeks_query,
+    team_df = pd.read_sql_query(
+        team_query,
         conn,
-        params=[season, season_type, player_id, season, season_type]
+        params=[player_id, season, season_type]
     )
-    all_weeks = set(all_weeks_df['week'].tolist())
 
-    # Get weeks where player actually played
+    if team_df.empty:
+        return [], []
+
+    player_teams = team_df['recent_team'].tolist()
+
+    # Get all weeks where the team(s) actually played games (from schedule table)
+    # This excludes bye weeks automatically and ensures we only count real games
+    placeholders = ','.join('?' * len(player_teams))
+
+    # Map season_type to game_type for schedule table
+    if season_type == "POST":
+        # For playoffs, include all playoff game types
+        schedule_query = f"""
+        SELECT DISTINCT week
+        FROM schedule
+        WHERE season = ?
+          AND game_type IN ('WC', 'DIV', 'CON', 'SB')
+          AND (away_team IN ({placeholders}) OR home_team IN ({placeholders}))
+        ORDER BY week
+        """
+        params = [season] + player_teams + player_teams
+    else:
+        # For REG and PRE, use exact game_type match
+        schedule_query = f"""
+        SELECT DISTINCT week
+        FROM schedule
+        WHERE season = ?
+          AND game_type = ?
+          AND (away_team IN ({placeholders}) OR home_team IN ({placeholders}))
+        ORDER BY week
+        """
+        params = [season, season_type] + player_teams + player_teams
+
+    all_weeks_df = pd.read_sql_query(schedule_query, conn, params=params)
+    all_weeks = set(all_weeks_df['week'].tolist()) if not all_weeks_df.empty else set()
+
+    # Get weeks where player actually had stats (played and got touches)
     player_weeks_query = """
     SELECT DISTINCT week
     FROM player_week_stats
@@ -212,7 +240,9 @@ def get_player_absences(
     )
     weeks_played = set(player_weeks_df['week'].tolist())
 
-    # Weeks absent = all team weeks - weeks player played
+    # Weeks absent = team game weeks - weeks player had stats
+    # NOTE: This assumes players without stats were inactive/absent
+    # Players who were active but had 0 touches will incorrectly show as absent
     weeks_absent = all_weeks - weeks_played
 
     return sorted(list(weeks_played)), sorted(list(weeks_absent))

@@ -45,7 +45,7 @@ def sync_player_stats():
         # Map column names from player_stats to player_week_stats
         # The schemas are similar but column names might differ
         column_mapping = {
-            'recent_team': 'recent_team',
+            'team': 'recent_team',  # IMPORTANT: source uses 'team', target uses 'recent_team'
             'position': 'position',
             'player_id': 'player_id',
             'player_name': 'player_display_name',

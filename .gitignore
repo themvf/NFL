@@ -33,6 +33,10 @@ data/*.db
 # Exception: Allow merged database (required for app)
 !data/nfl_merged.db
 
+# Local databases (predictions will be backed up to S3)
+*.db
+nfl_stats.db
+
 # Artifacts
 artifacts/
 

@@ -14,10 +14,10 @@ MERGED_DB = PROJECT_DIR / "data" / "nfl_merged.db"
 STATS_DB = PROJECT_DIR / "nfl_stats.db"
 
 def sync_player_stats():
-    """Copy player_stats from merged db to stats db for Player Impact."""
+    """Copy player_stats and schedule from merged db to stats db for Player Impact."""
 
     print("="*60)
-    print("SYNCING PLAYER STATS TO PLAYER IMPACT DATABASE")
+    print("SYNCING DATA TO PLAYER IMPACT DATABASE")
     print("="*60)
 
     # Connect to both databases
@@ -25,8 +25,39 @@ def sync_player_stats():
     stats_conn = sqlite3.connect(str(STATS_DB))
 
     try:
-        # Read player_stats from merged db
-        print("\nReading player_stats from nfl_merged.db...")
+        # STEP 1: Sync schedule data (critical for absence detection!)
+        print("\n[1/2] Reading schedule from nfl_merged.db...")
+        schedule_df = pd.read_sql_query(
+            "SELECT * FROM schedules WHERE season >= 2023",
+            merged_conn
+        )
+
+        print(f"Found {len(schedule_df)} schedule rows")
+        print(f"Seasons: {sorted(schedule_df['season'].unique())}")
+
+        # Check 2025 schedule
+        df_2025_sched = schedule_df[schedule_df['season'] == 2025]
+        print(f"\n2025 Schedule:")
+        print(f"  - {len(df_2025_sched)} games")
+        print(f"  - Weeks {df_2025_sched['week'].min()} through {df_2025_sched['week'].max()}")
+
+        # Delete old schedule data
+        print("\nDeleting old schedule from nfl_stats.db...")
+        stats_conn.execute("DELETE FROM schedule")
+        stats_conn.commit()
+
+        # Insert new schedule data
+        print(f"Inserting {len(schedule_df)} schedule rows...")
+        schedule_df.to_sql(
+            'schedule',
+            stats_conn,
+            if_exists='append',
+            index=False,
+            chunksize=100
+        )
+
+        # STEP 2: Sync player stats
+        print("\n[2/2] Reading player_stats from nfl_merged.db...")
         player_stats_df = pd.read_sql_query(
             "SELECT * FROM player_stats",
             merged_conn

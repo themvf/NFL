@@ -194,7 +194,8 @@ def get_player_absences(
     player_teams = team_df['recent_team'].tolist()
 
     # Get all weeks where the team(s) actually played games (from schedule table)
-    # This excludes bye weeks automatically and ensures we only count real games
+    # ONLY include completed games (where scores exist) to exclude future weeks
+    # This excludes bye weeks AND future games automatically
     placeholders = ','.join('?' * len(player_teams))
 
     # Map season_type to game_type for schedule table
@@ -206,17 +207,22 @@ def get_player_absences(
         WHERE season = ?
           AND game_type IN ('WC', 'DIV', 'CON', 'SB')
           AND (away_team IN ({placeholders}) OR home_team IN ({placeholders}))
+          AND away_score IS NOT NULL
+          AND home_score IS NOT NULL
         ORDER BY week
         """
         params = [season] + player_teams + player_teams
     else:
         # For REG and PRE, use exact game_type match
+        # CRITICAL: Filter for completed games only (scores exist)
         schedule_query = f"""
         SELECT DISTINCT week
         FROM schedule
         WHERE season = ?
           AND game_type = ?
           AND (away_team IN ({placeholders}) OR home_team IN ({placeholders}))
+          AND away_score IS NOT NULL
+          AND home_score IS NOT NULL
         ORDER BY week
         """
         params = [season, season_type] + player_teams + player_teams

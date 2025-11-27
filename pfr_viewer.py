@@ -2653,6 +2653,10 @@ def add_enhanced_projections_to_wr_te(df, season=2025):
     - Matchup Grade: A+ to D rating
     - DFS Score: 0-100 DFS value score
     - DFS Rating: Elite/Excellent/Good/Moderate/Avoid
+    - Breakout Score: 0-100 high-upside dartthrow score (WRs only)
+    - Breakout Rating: Upside potential rating
+    - Trend: Target trend indicator (Rising Star/Heating Up/Stable/Cooling)
+    - Upside Factors: List of reasons for breakout potential
 
     Args:
         df: DataFrame with columns Player, Team, Opponent
@@ -2673,6 +2677,10 @@ def add_enhanced_projections_to_wr_te(df, season=2025):
     df['Matchup Grade'] = None
     df['DFS Score'] = None
     df['DFS Rating'] = None
+    df['Breakout Score'] = None
+    df['Breakout Rating'] = None
+    df['Trend'] = None
+    df['Upside Factors'] = None
 
     # Process each player
     for idx, row in df.iterrows():
@@ -2714,6 +2722,26 @@ def add_enhanced_projections_to_wr_te(df, season=2025):
                 if dfs:
                     df.at[idx, 'DFS Score'] = dfs['dfs_score']
                     df.at[idx, 'DFS Rating'] = dfs['dfs_rating']
+
+            # Calculate Breakout Score (only for WRs - skip TEs for now)
+            if position == 'WR':
+                try:
+                    breakout = ep.calculate_wr_breakout_score(
+                        player_name=player_name,
+                        team=team,
+                        opponent_team=opponent,
+                        season=season
+                    )
+
+                    if breakout:
+                        df.at[idx, 'Breakout Score'] = breakout['breakout_score']
+                        df.at[idx, 'Breakout Rating'] = breakout['breakout_rating']
+                        df.at[idx, 'Trend'] = breakout['trend_indicator']
+                        # Join upside factors into comma-separated string
+                        df.at[idx, 'Upside Factors'] = ', '.join(breakout['upside_factors']) if breakout['upside_factors'] else 'None'
+                except Exception as e:
+                    # Skip if breakout calculation fails
+                    pass
 
         except Exception as e:
             # Skip players where enhanced projection fails
@@ -18734,6 +18762,10 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                                 "Matchup Grade": st.column_config.TextColumn("Grade", width="small"),
                                 "DFS Score": st.column_config.NumberColumn("DFS Score", format="%.0f", help="0-100 DFS value score"),
                                 "DFS Rating": st.column_config.TextColumn("DFS Rating", width="medium"),
+                                "Breakout Score": st.column_config.NumberColumn("Breakout", format="%.0f", help="High-upside dartthrow score (70+ = Elite)"),
+                                "Breakout Rating": st.column_config.TextColumn("Breakout Rating", width="medium", help="Upside potential rating"),
+                                "Trend": st.column_config.TextColumn("Trend", width="small", help="Target trend indicator"),
+                                "Upside Factors": st.column_config.TextColumn("Upside Factors", width="large", help="Reasons for breakout potential"),
                                 "Rec Yds/Gm": st.column_config.NumberColumn("Rec Yds/Gm", format="%.1f"),
                                 "Rec TDs/Gm": st.column_config.NumberColumn("Rec TDs/Gm", format="%.2f"),
                                 "Targets/Gm": st.column_config.NumberColumn("Targets/Gm", format="%.1f"),

@@ -662,6 +662,212 @@ def calculate_dfs_score(projection_data, player_salary=None):
     }
 
 
+def calculate_wr_breakout_score(player_name, team, opponent_team, season=2025):
+    """
+    Calculate WR Breakout Score (0-100) - identifies high-upside dartthrow plays.
+
+    Perfect for finding UNDER-THE-RADAR WRs who could smash their projection based on:
+    1. Rising opportunity trend (targets/receptions increasing)
+    2. High variance/volatility (boom-or-bust upside)
+    3. Favorable matchup style (YAC/Air alignment with defense)
+    4. Low ownership/WR3-WR4 types with spike potential
+
+    Components (100 points total):
+    - Opportunity Trend (30 pts): Recent target growth vs season average
+    - Volatility Score (25 pts): Standard deviation of yardage (high variance = high upside)
+    - Matchup Alignment (25 pts): Air/YAC style match + defensive vulnerability
+    - Ceiling Potential (20 pts): Red zone upside + big play ability
+
+    Returns dict with:
+    - breakout_score: 0-100 (70+ = Elite dartthrow, 50-69 = Good upside, <50 = Low upside)
+    - breakout_rating: Text rating
+    - trend_indicator: "Rising Star" / "Heating Up" / "Stable" / "Cooling"
+    - upside_factors: List of reasons this player could smash
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+
+    # Get player's game-by-game data for trend and variance analysis
+    query = '''
+    SELECT
+        week,
+        targets,
+        receptions,
+        receiving_yards,
+        receiving_tds,
+        receiving_air_yards,
+        receiving_yards_after_catch
+    FROM player_stats
+    WHERE player_display_name = ?
+      AND team = ?
+      AND season = ?
+      AND season_type = 'REG'
+    ORDER BY week DESC
+    LIMIT 12
+    '''
+
+    df = pd.read_sql_query(query, conn, params=(player_name, team, season))
+    conn.close()
+
+    if df.empty or len(df) < 3:
+        return None  # Need at least 3 games for trend analysis
+
+    # COMPONENT 1: Opportunity Trend Score (30 points)
+    # Compare recent 4 games vs earlier games
+    recent_games = df.head(4)
+    earlier_games = df.tail(len(df) - 4) if len(df) > 4 else df
+
+    recent_targets_avg = recent_games['targets'].mean()
+    earlier_targets_avg = earlier_games['targets'].mean() if len(earlier_games) > 0 else recent_targets_avg
+
+    # Calculate trend percentage
+    if earlier_targets_avg > 0:
+        trend_pct = ((recent_targets_avg - earlier_targets_avg) / earlier_targets_avg) * 100
+    else:
+        trend_pct = 0
+
+    # Score the trend (positive trend = points)
+    if trend_pct >= 50:  # Targets up 50%+
+        opportunity_score = 30
+        trend_indicator = "🔥 Rising Star"
+    elif trend_pct >= 25:  # Targets up 25%+
+        opportunity_score = 24
+        trend_indicator = "📈 Heating Up"
+    elif trend_pct >= 10:  # Targets up 10%+
+        opportunity_score = 18
+        trend_indicator = "↗️ Trending Up"
+    elif trend_pct >= -10:  # Stable targets
+        opportunity_score = 12
+        trend_indicator = "➡️ Stable"
+    else:  # Declining targets
+        opportunity_score = 5
+        trend_indicator = "↘️ Cooling"
+
+    # COMPONENT 2: Volatility Score (25 points)
+    # High variance = boom-or-bust upside (good for DFS dartthrows)
+    yards_std = df['receiving_yards'].std()
+    yards_mean = df['receiving_yards'].mean()
+
+    # Coefficient of variation (CV) = std / mean
+    cv = (yards_std / yards_mean) if yards_mean > 5 else 0
+
+    # High CV (>0.8) = volatile boom-or-bust player
+    # Moderate CV (0.5-0.8) = some variance
+    # Low CV (<0.5) = consistent (bad for dartthrow upside)
+    if cv >= 0.9:
+        volatility_score = 25  # Ultra-volatile (massive ceiling)
+        volatility_label = "Explosive Upside"
+    elif cv >= 0.7:
+        volatility_score = 20  # High volatility
+        volatility_label = "High Ceiling"
+    elif cv >= 0.5:
+        volatility_score = 14  # Moderate volatility
+        volatility_label = "Moderate Variance"
+    else:
+        volatility_score = 7  # Low volatility (consistent = low ceiling)
+        volatility_label = "Low Variance"
+
+    # COMPONENT 3: Matchup Alignment Score (25 points)
+    # Air/YAC alignment + defensive vulnerability
+    offense_df = get_offensive_team_stats(season)
+    defense_df = get_defensive_team_stats(season)
+
+    off_stats = offense_df[offense_df['team'] == team]
+    def_stats = defense_df[defense_df['defense'] == opponent_team]
+
+    matchup_score = 12  # Default neutral
+    matchup_factors = []
+
+    if not off_stats.empty and not def_stats.empty:
+        # Get style multiplier
+        style_mult = calculate_style_matchup_multiplier(off_stats, def_stats)
+
+        # Convert multiplier to score (1.0 = 12 pts, 1.2 = 25 pts, 0.8 = 5 pts)
+        matchup_score = int(((style_mult - 0.8) / 0.4) * 20 + 5)
+        matchup_score = max(5, min(25, matchup_score))
+
+        # Check for specific matchup advantages
+        def_air_pct = def_stats.iloc[0]['air_allowed_pct']
+        def_yac_pct = def_stats.iloc[0]['yac_allowed_pct']
+        off_air_pct = off_stats.iloc[0]['air_pct']
+
+        if def_air_pct > 55 and off_air_pct > 55:
+            matchup_factors.append("Deep Ball Matchup")
+        if def_yac_pct > 50:
+            matchup_factors.append("YAC Exploitable")
+
+        # Check defensive vulnerability to WRs
+        def_wr_yards = def_stats.iloc[0]['wr_yards_allowed_per_game']
+        if def_wr_yards > 250:
+            matchup_factors.append("WR-Soft Defense")
+            matchup_score = min(25, matchup_score + 3)
+
+    # COMPONENT 4: Ceiling Potential (20 points)
+    # Big play ability + red zone upside
+    ceiling_score = 0
+    ceiling_factors = []
+
+    # Check for big-play games (100+ yards or 2+ TDs)
+    big_games = df[(df['receiving_yards'] >= 100) | (df['receiving_tds'] >= 2)]
+    if len(big_games) > 0:
+        ceiling_score += 8
+        ceiling_factors.append(f"{len(big_games)} Big Games")
+
+    # Air yards percentage (deep threat indicator)
+    if df['receiving_air_yards'].sum() > 0:
+        air_pct = (df['receiving_air_yards'].sum() / df['receiving_yards'].sum()) * 100
+        if air_pct > 60:
+            ceiling_score += 7
+            ceiling_factors.append("Deep Threat")
+        elif air_pct > 45:
+            ceiling_score += 4
+
+    # TD upside
+    td_games = df[df['receiving_tds'] > 0]
+    if len(td_games) >= 2:
+        ceiling_score += 5
+        ceiling_factors.append("TD Upside")
+
+    # Total Breakout Score
+    breakout_score = opportunity_score + volatility_score + matchup_score + ceiling_score
+
+    # Rating
+    if breakout_score >= 75:
+        rating = "🚀 ELITE DARTTHROW"
+    elif breakout_score >= 65:
+        rating = "💎 STRONG UPSIDE"
+    elif breakout_score >= 50:
+        rating = "📊 GOOD UPSIDE"
+    elif breakout_score >= 35:
+        rating = "⚖️ MODERATE UPSIDE"
+    else:
+        rating = "😴 LOW UPSIDE"
+
+    # Compile upside factors
+    upside_factors = []
+    if trend_pct >= 25:
+        upside_factors.append(f"Targets +{trend_pct:.0f}% (trending up)")
+    if cv >= 0.7:
+        upside_factors.append(f"{volatility_label} (CV: {cv:.2f})")
+    upside_factors.extend(matchup_factors)
+    upside_factors.extend(ceiling_factors)
+
+    return {
+        'breakout_score': round(breakout_score, 1),
+        'breakout_rating': rating,
+        'trend_indicator': trend_indicator,
+        'opportunity_trend_pct': round(trend_pct, 1),
+        'volatility_cv': round(cv, 2),
+        'recent_targets_avg': round(recent_targets_avg, 1),
+        'upside_factors': upside_factors,
+        'score_breakdown': {
+            'opportunity': opportunity_score,
+            'volatility': volatility_score,
+            'matchup': matchup_score,
+            'ceiling': ceiling_score
+        }
+    }
+
+
 # ============================================================================
 # RB Enhanced Projections Functions
 # ============================================================================

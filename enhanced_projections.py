@@ -713,6 +713,9 @@ def get_rb_defensive_rush_stats(season=2025):
     - total_rush_allowed
     - avg_rush_allowed_per_game
     - rush_tds_allowed_per_game
+    - avg_rb_receptions_allowed (for dual-threat RBs)
+    - avg_rb_rec_yards_allowed
+    - rec_tds_allowed_per_game
     """
     conn = sqlite3.connect(str(DB_PATH))
 
@@ -721,11 +724,14 @@ def get_rb_defensive_rush_stats(season=2025):
         opponent_team as defense,
         COUNT(DISTINCT week) as games,
         SUM(rushing_yards) as total_rush_allowed,
-        SUM(rushing_tds) as rush_tds_allowed
+        SUM(rushing_tds) as rush_tds_allowed,
+        SUM(receptions) as total_rb_receptions,
+        SUM(receiving_yards) as total_rb_rec_yards,
+        SUM(receiving_tds) as rec_tds_allowed
     FROM player_stats
     WHERE season = ?
       AND season_type = 'REG'
-      AND rushing_yards > 0
+      AND position = 'RB'
     GROUP BY opponent_team
     '''
 
@@ -735,6 +741,9 @@ def get_rb_defensive_rush_stats(season=2025):
     # Calculate per-game averages
     df['avg_rush_allowed_per_game'] = (df['total_rush_allowed'] / df['games']).round(1)
     df['rush_tds_allowed_per_game'] = (df['rush_tds_allowed'] / df['games']).round(2)
+    df['avg_rb_receptions_allowed'] = (df['total_rb_receptions'] / df['games']).round(1)
+    df['avg_rb_rec_yards_allowed'] = (df['total_rb_rec_yards'] / df['games']).round(1)
+    df['rec_tds_allowed_per_game'] = (df['rec_tds_allowed'] / df['games']).round(2)
 
     return df
 
@@ -966,19 +975,41 @@ def calculate_enhanced_rb_projection(
         (season_share_data['avg_receptions'] * (1 - RECENCY_WEIGHT))
     )
 
-    # Matchup grade based on defensive strength
-    # Lower def_avg = tougher defense
-    league_avg_rush_def = 115  # Approximate NFL average
-    if def_avg >= league_avg_rush_def * 1.15:
-        matchup_grade = "A"
-    elif def_avg >= league_avg_rush_def * 1.05:
-        matchup_grade = "B+"
-    elif def_avg >= league_avg_rush_def * 0.95:
-        matchup_grade = "B"
-    elif def_avg >= league_avg_rush_def * 0.85:
-        matchup_grade = "C"
+    # Comprehensive matchup grade based on TOTAL fantasy production allowed
+    # Includes: rush yards, rush TDs, receiving yards, receiving TDs, receptions
+    # This evaluates the COMPLETE RB matchup, not just rushing defense
+
+    # Get defensive stats for RBs (all production types)
+    rb_rec_allowed = def_stats.iloc[0]['avg_rb_receptions_allowed']
+    rb_rec_yards_allowed = def_stats.iloc[0]['avg_rb_rec_yards_allowed']
+    rush_tds_allowed = def_stats.iloc[0]['rush_tds_allowed_per_game']
+    rec_tds_allowed = def_stats.iloc[0]['rec_tds_allowed_per_game']
+
+    # Calculate total fantasy points allowed to RBs per game (PPR scoring)
+    # Rush: 0.1 pts/yard + 6 pts/TD
+    # Receiving: 0.1 pts/yard + 1 pt/rec + 6 pts/TD
+    def_fp_allowed = (
+        def_avg * 0.1 +                    # Rush yards
+        rush_tds_allowed * 6.0 +           # Rush TDs
+        rb_rec_yards_allowed * 0.1 +       # Receiving yards
+        rb_rec_allowed * 1.0 +             # Receptions (PPR)
+        rec_tds_allowed * 6.0              # Receiving TDs
+    )
+
+    # League average RB fantasy points allowed ~15-18 per game
+    league_avg_rb_fp_allowed = 16.5
+
+    # Grade based on total fantasy production allowed (higher = better matchup)
+    if def_fp_allowed >= league_avg_rb_fp_allowed * 1.15:
+        matchup_grade = "A"      # Allows 19+ FP/game (soft defense)
+    elif def_fp_allowed >= league_avg_rb_fp_allowed * 1.05:
+        matchup_grade = "B+"     # Allows 17.3+ FP/game
+    elif def_fp_allowed >= league_avg_rb_fp_allowed * 0.95:
+        matchup_grade = "B"      # Allows 15.7+ FP/game (average)
+    elif def_fp_allowed >= league_avg_rb_fp_allowed * 0.85:
+        matchup_grade = "C"      # Allows 14+ FP/game (tough)
     else:
-        matchup_grade = "D"
+        matchup_grade = "D"      # Allows <14 FP/game (elite defense)
 
     return {
         'projected_rush_yards': round(base_rush_proj, 1),

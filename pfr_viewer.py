@@ -19,6 +19,7 @@ from google.cloud import storage
 import json
 from historical_trends import render_historical_trends
 import player_impact_analytics as pia
+import enhanced_projections as ep
 
 # Configure logging
 logging.basicConfig(
@@ -2637,6 +2638,88 @@ def get_matchup_rating(multiplier):
         return '⚠️ Tough', 'background-color: #FFD3D3'
     else:
         return '🛑 Brutal', 'background-color: #FF9090'
+
+
+def add_enhanced_projections_to_wr_te(df, season=2025):
+    """
+    Add enhanced projection columns to WR/TE DataFrame.
+
+    Adds:
+    - Enhanced Proj Yds: Defense-adjusted, recency-weighted, style-matched projection
+    - Proj Range: Confidence interval (low-high)
+    - Proj TDs: TD projection
+    - Proj Rec: Receptions projection
+    - Tgt Share %: Recency-weighted target share
+    - Matchup Grade: A+ to D rating
+    - DFS Score: 0-100 DFS value score
+    - DFS Rating: Elite/Excellent/Good/Moderate/Avoid
+
+    Args:
+        df: DataFrame with columns Player, Team, Opponent
+        season: Season year
+
+    Returns:
+        DataFrame with additional projection columns
+    """
+    if df.empty:
+        return df
+
+    # Initialize new columns
+    df['Enhanced Proj Yds'] = None
+    df['Proj Range'] = None
+    df['Proj TDs'] = None
+    df['Proj Rec'] = None
+    df['Enh Tgt Share %'] = None
+    df['Matchup Grade'] = None
+    df['DFS Score'] = None
+    df['DFS Rating'] = None
+
+    # Process each player
+    for idx, row in df.iterrows():
+        player_name = row['Player']
+        team = row['Team']
+        opponent = row['Opponent']
+
+        # Determine position (check if Team has (TE) suffix for skill players)
+        if '(TE)' in str(team):
+            position = 'TE'
+            team = team.replace(' (TE)', '').strip()
+        elif '(WR)' in str(team):
+            position = 'WR'
+            team = team.replace(' (WR)', '').strip()
+        else:
+            # Try to infer from existing data or default to WR
+            position = 'WR'  # Most common
+
+        try:
+            # Get enhanced projection
+            proj = ep.calculate_enhanced_receiving_projection(
+                player_name=player_name,
+                team=team,
+                opponent_team=opponent,
+                position=position,
+                season=season
+            )
+
+            if proj:
+                df.at[idx, 'Enhanced Proj Yds'] = proj['projected_rec_yards']
+                df.at[idx, 'Proj Range'] = f"{proj['projected_rec_yards_low']:.0f}-{proj['projected_rec_yards_high']:.0f}"
+                df.at[idx, 'Proj TDs'] = proj['projected_tds']
+                df.at[idx, 'Proj Rec'] = proj['projected_receptions']
+                df.at[idx, 'Enh Tgt Share %'] = proj['target_share_pct']
+                df.at[idx, 'Matchup Grade'] = proj['matchup_grade']
+
+                # Calculate DFS score (assuming $6000 salary if not available)
+                dfs = ep.calculate_dfs_score(proj, player_salary=6000)
+                if dfs:
+                    df.at[idx, 'DFS Score'] = dfs['dfs_score']
+                    df.at[idx, 'DFS Rating'] = dfs['dfs_rating']
+
+        except Exception as e:
+            # Skip players where enhanced projection fails
+            continue
+
+    return df
 
 
 # ============================================================================
@@ -18518,6 +18601,10 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                         wr_df = projections['WR'].head(30).copy()
 
+                        # Add enhanced projections
+                        with st.spinner("Calculating enhanced projections with defensive matchups..."):
+                            wr_df = add_enhanced_projections_to_wr_te(wr_df, selected_season)
+
                         # Style the dataframe with tier-based colors
                         def style_wr_tier(row):
                             tier = row['Tier']
@@ -18545,6 +18632,14 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                             column_config={
                                 "WR Score": st.column_config.NumberColumn("WR Score", format="%.1f", help="Comprehensive 0-100 score evaluating production + matchup"),
                                 "Tier": st.column_config.TextColumn("Tier", width="medium"),
+                                "Enhanced Proj Yds": st.column_config.NumberColumn("Enhanced Proj", format="%.1f", help="Defense-adjusted, recency-weighted, style-matched projection"),
+                                "Proj Range": st.column_config.TextColumn("Proj Range", help="Low-High confidence interval"),
+                                "Proj TDs": st.column_config.NumberColumn("Proj TDs", format="%.2f"),
+                                "Proj Rec": st.column_config.NumberColumn("Proj Rec", format="%.1f"),
+                                "Enh Tgt Share %": st.column_config.NumberColumn("Enh Tgt %", format="%.1f", help="Recency-weighted target share"),
+                                "Matchup Grade": st.column_config.TextColumn("Grade", width="small"),
+                                "DFS Score": st.column_config.NumberColumn("DFS Score", format="%.0f", help="0-100 DFS value score"),
+                                "DFS Rating": st.column_config.TextColumn("DFS Rating", width="medium"),
                                 "Rec Yds/Gm": st.column_config.NumberColumn("Rec Yds/Gm", format="%.1f"),
                                 "Rec TDs/Gm": st.column_config.NumberColumn("Rec TDs/Gm", format="%.2f"),
                                 "Targets/Gm": st.column_config.NumberColumn("Targets/Gm", format="%.1f"),
@@ -18578,9 +18673,13 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 with proj_tabs[3]:
                     if not projections.get('SKILL', pd.DataFrame()).empty:
                         st.markdown("##### ⭐ Top Skill Position Players - Comprehensive Matchup Analysis")
-                        st.caption("Multi-factor scoring combining player production (yards, TDs, touches) with defensive matchup quality. RBs and WRs ranked by their respective comprehensive scores.")
+                        st.caption("Multi-factor scoring combining player production (yards, TDs, touches) with defensive matchup quality. RBs, WRs, and TEs ranked by their respective comprehensive scores.")
 
                         skill_df = projections['SKILL'].copy()
+
+                        # Add enhanced projections for WRs and TEs
+                        with st.spinner("Calculating enhanced projections for skill players..."):
+                            skill_df = add_enhanced_projections_to_wr_te(skill_df, selected_season)
 
                         # Add unified Score and Position columns for sorting
                         skill_df['Score'] = skill_df.apply(lambda row: row.get('RB Score', row.get('WR Score', 0)), axis=1)

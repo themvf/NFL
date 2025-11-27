@@ -4751,11 +4751,11 @@ def classify_defensive_pass_style(metrics_df):
     """
     Classify each defense into pass style categories based on pressure, ball hawks, and coverage.
 
-    Styles:
-    1. 🔥 Pass Rush Terror: High pressure (sacks+hurries) - forces quick throws/mistakes
-    2. 🦅 Ball Hawks: High INT rate - opportunistic secondary that creates turnovers
-    3. 🛡️ Lockdown Coverage: Low passer rating + low yards - elite coverage, prevents completions
-    4. 🚨 Soft Coverage: High yards allowed + high passer rating - vulnerable to passes
+    Styles (aligned to NFL terminology):
+    1. 🔥 High-Pressure Front / PRWR Elite: Disrupts QB before routes develop (pressure rate, PRWR)
+    2. 🦅 High Turnover Defense: Creates INTs and PBUs (INT rate, passes defensed)
+    3. 🛡️ Tight Coverage / Elite Coverage Unit: Prevents completions and yards (passer rating allowed, CPOE)
+    4. 🚨 Leaky Secondary: Allows easy completions and explosives (YPA, rating allowed)
 
     Args:
         metrics_df (pd.DataFrame): Output from calculate_defensive_pass_metrics()
@@ -4788,28 +4788,28 @@ def classify_defensive_pass_style(metrics_df):
     explainers = []
 
     for _, row in result.iterrows():
-        style = "Balanced"
+        style = "⚖️ League-Average Pass Defense"
         explainer_parts = []
 
-        # Pass Rush Terror: High pressure (sacks + hurries)
+        # High-Pressure Front / PRWR Elite: High pressure (sacks + hurries)
         if row['pressure_percentile'] >= 60:
-            style = "🔥 Pass Rush Terror"
+            style = "🔥 High-Pressure Front / PRWR Elite"
             explainer_parts.append(f"High pressure ({row['sacks_per_game']:.1f} sacks, {row['hurries_per_game']:.1f} hurries/gm, p{row['pressure_percentile']:.0f})")
 
-        # Ball Hawks: High INT rate
+        # High Turnover Defense: High INT rate
         elif row['ints_percentile'] >= 65:
-            style = "🦅 Ball Hawks"
+            style = "🦅 High Turnover Defense"
             explainer_parts.append(f"High INTs ({row['ints_per_game']:.2f}/gm, p{row['ints_percentile']:.0f})")
 
-        # Lockdown Coverage: Low passer rating + decent yards allowed
+        # Tight Coverage / Elite Coverage Unit: Low passer rating + decent yards allowed
         elif row['rating_percentile'] >= 60 and row['yards_percentile'] >= 40:
-            style = "🛡️ Lockdown Coverage"
+            style = "🛡️ Tight Coverage / Elite Coverage Unit"
             explainer_parts.append(f"Low passer rating ({row['passer_rating_allowed']:.1f}, p{row['rating_percentile']:.0f})")
             explainer_parts.append(f"Yards allowed ({row['pass_yards_allowed']:.1f}/gm, p{row['yards_percentile']:.0f})")
 
-        # Soft Coverage: High yards + high passer rating (vulnerable)
+        # Leaky Secondary: High yards + high passer rating (vulnerable)
         elif row['yards_percentile'] <= 40 and row['rating_percentile'] <= 40:
-            style = "🚨 Soft Coverage"
+            style = "🚨 Leaky Secondary"
             explainer_parts.append(f"High yards ({row['pass_yards_allowed']:.1f}/gm, p{row['yards_percentile']:.0f})")
             explainer_parts.append(f"High passer rating ({row['passer_rating_allowed']:.1f}, p{row['rating_percentile']:.0f})")
 
@@ -4935,7 +4935,7 @@ def generate_defensive_pass_summary(season, week=None, teams_filter=None):
             classified_df = classified_df[classified_df['team'].isin(teams_filter)]
 
         # Select and rename columns for display
-        summary_df = classified_df[['team', 'defensive_pass_style', 'pass_yards_allowed']].copy()
+    summary_df = classified_df[['team', 'defensive_pass_style', 'pass_yards_allowed']].copy()
         summary_df = summary_df.rename(columns={
             'team': 'Team',
             'defensive_pass_style': 'Defensive Pass Style',
@@ -18549,17 +18549,17 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                 # Add defensive pass style definitions
                 with st.expander("ℹ️ Defensive Pass Style Definitions"):
                     st.markdown("""
-                    **Defensive pass styles are based on pressure (sacks+hurries), ball hawks (INTs), and coverage quality (passer rating allowed):**
+                    **Defensive pass styles are based on pressure (sacks+hurries), ball disruption (INTs/PBUs), and coverage quality (passer rating allowed/CPOE):**
 
-                    - **🔥 Pass Rush Terror**: High pressure (sacks + hurries per game) - Forces QBs into quick throws and mistakes. Elite pass rush that disrupts timing.
+                    - **🔥 High-Pressure Front / PRWR Elite**: Disrupts QB before routes develop — elite pressure and pass-rush win rate. (Key metrics: pressure rate, PRWR)
 
-                    - **🦅 Ball Hawks**: High interception rate - Opportunistic secondary that creates turnovers. Ball-hawking DBs who jump routes and make plays on the ball.
+                    - **🦅 High Turnover Defense**: Creates INTs and PBUs — opportunistic secondary that converts on the ball. (Key metrics: INT rate, passes defensed)
 
-                    - **🛡️ Lockdown Coverage**: Low passer rating allowed + limited yards - Elite coverage that prevents completions. QBs struggle to find open receivers.
+                    - **🛡️ Tight Coverage / Elite Coverage Unit**: Prevents completions and yards — squeezes windows and limits separation. (Key metrics: passer rating allowed, CPOE)
 
-                    - **🚨 Soft Coverage**: High yards + high passer rating allowed - Vulnerable to passes. QBs can complete passes easily with high success rates.
+                    - **🚨 Leaky Secondary**: Allows easy completions and explosives — vulnerable coverage with high efficiency allowed. (Key metrics: YPA, rating allowed)
 
-                    - **Balanced**: Middle-of-the-pack pass defense - Average metrics across pressure, turnovers, and coverage quality.
+                    - **⚖️ League-Average Pass Defense**: No extreme tendencies — middle-of-the-pack across pressure, turnovers, and coverage.
 
                     _Metrics are calculated from Pro Football Reference advanced defensive stats (pfr_advstats_def_week) and team passing stats, ranked on a percentile basis (0-100, where higher percentile = better defense)._
                     """)

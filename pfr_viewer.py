@@ -4498,12 +4498,12 @@ def classify_defensive_run_style(metrics_df):
 
     Simplified classification using only available metrics from pfr_advstats_rush_week:
 
-    Styles:
-    1. Bulldozer: Strong at LOS (low YBC) + good tackling (low YAC) - dominant run defense
-    2. Spill-and-Swarm: Weak at LOS (high YBC) but good tackling (low YAC) - absorb contact then swarm
-    3. Soft Shell: Weak at LOS (high YBC) - give up yards before contact
-    4. Leakier Front: Poor tackling (high YAC) - allow yards after contact
-    5. Balanced: Doesn't fit other categories
+    Styles (aligned to NFL terminology):
+    1. Dominant Front / High RSWR: No running room (low YBC + low YAC)
+    2. Bend-Don't-Break / Rally Defense: YBC allowed but limited explosives (high YBC + low YAC)
+    3. Soft Front / Light Box: Poor line control (high YBC allowed)
+    4. Poor Tackling Defense: Missed tackles/angles (high YAC allowed)
+    5. League-Average Defense: No extreme tendencies (mid YBC + mid YAC)
 
     Args:
         metrics_df (pd.DataFrame): Output from calculate_defensive_run_metrics()
@@ -4528,29 +4528,29 @@ def classify_defensive_run_style(metrics_df):
     explainers = []
 
     for _, row in result.iterrows():
-        style = "Balanced"
+        style = "⚖️ League-Average Defense"
         explainer_parts = []
 
-        # Bulldozer: Strong at LOS (low YBC) + good tackling (low YAC)
+        # Dominant Front / High RSWR: Strong at LOS (low YBC) + good tackling (low YAC)
         if row['ybc_percentile'] >= 60 and row['yac_percentile'] >= 50:
-            style = "🚜 Bulldozer"
+            style = "🚜 Dominant Front / High RSWR"
             explainer_parts.append(f"Low YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
             explainer_parts.append(f"Good tackling ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
-        # Spill-and-Swarm: Weak at LOS (high YBC) but good tackling (low YAC)
+        # Bend-Don't-Break / Rally Defense: Weak at LOS (high YBC) but good tackling (low YAC)
         elif row['ybc_percentile'] <= 40 and row['yac_percentile'] >= 50:
-            style = "🌊 Spill-and-Swarm"
+            style = "🌊 Bend-Don't-Break / Rally Defense"
             explainer_parts.append(f"High YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
             explainer_parts.append(f"Good tackling ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
-        # Soft Shell: Weak at LOS (high YBC)
+        # Soft Front / Light Box: Weak at LOS (high YBC)
         elif row['ybc_percentile'] <= 40:
-            style = "🛡️ Soft Shell"
+            style = "🛡️ Soft Front / Light Box"
             explainer_parts.append(f"High YBC ({row['ybc_allowed']:.2f}, p{row['ybc_percentile']:.0f})")
 
-        # Leakier Front: Poor tackling (high YAC)
+        # Poor Tackling Defense: Poor tackling (high YAC)
         elif row['yac_percentile'] <= 40:
-            style = "🚨 Leakier Front"
+            style = "🚨 Poor Tackling Defense"
             explainer_parts.append(f"High YAC ({row['yac_allowed']:.2f}, p{row['yac_percentile']:.0f})")
 
         # If no specific style identified, explain balanced
@@ -5001,11 +5001,11 @@ def get_defensive_run_style_matchup(offense_team, defense_team, season, week=Non
     # Generate RB matchup insight based on style
     style = def_row['defensive_style']
     insights = {
-        "🚜 Bulldozer": "TOUGH RB MATCHUP - Strong at point of attack. Target pass-catching RBs or look elsewhere.",
-        "🌊 Spill-and-Swarm": "MODERATE RB MATCHUP - Limits big plays but allows consistent gains. Volume RBs preferred.",
-        "🛡️ Soft Shell": "FAVORABLE RB MATCHUP - Allows yards at LOS. Target rushing volume and YPC upside.",
-        "🚨 Leakier Front": "SMASH RB MATCHUP - Allows explosive runs and missed tackles. Target home run RBs.",
-        "Balanced": "NEUTRAL RB MATCHUP - No clear defensive identity. Defer to player talent."
+        "🚜 Dominant Front / High RSWR": "TOUGH RB MATCHUP - Dominant front/high run stop win rate. No running room (low YBC + low YAC). Target pass-catching RBs or look elsewhere.",
+        "🌊 Bend-Don't-Break / Rally Defense": "MODERATE RB MATCHUP - YBC allowed but defense rallies to limit explosives (high YBC + low YAC). Volume backs preferred.",
+        "🛡️ Soft Front / Light Box": "FAVORABLE RB MATCHUP - Soft front/light boxes give up yards before contact (high YBC allowed). Ride rushing volume and YPC upside.",
+        "🚨 Poor Tackling Defense": "SMASH RB MATCHUP - Missed tackles and bad pursuit angles fuel explosive runs (high YAC allowed). Target home-run RBs.",
+        "⚖️ League-Average Defense": "NEUTRAL RB MATCHUP - No extreme tendencies (mid YBC + mid YAC). Defer to player talent."
     }
 
     return {
@@ -5017,7 +5017,7 @@ def get_defensive_run_style_matchup(offense_team, defense_team, season, week=Non
             'carries_per_game': def_row['carries_per_game'],
             'games_played': def_row['games_played']
         },
-        'rb_matchup_insight': insights.get(style, insights["Balanced"])
+        'rb_matchup_insight': insights.get(style, insights["⚖️ League-Average Defense"])
     }
 
 
@@ -18487,15 +18487,15 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     st.markdown("""
                     **Defensive run styles are based on Yards Before Contact (YBC) and Yards After Contact (YAC) metrics:**
 
-                    - **🚜 Bulldozer**: Elite run defense - Strong at line of scrimmage (low YBC allowed) and excellent tackling (low YAC allowed). RBs will face tough sledding with limited opportunities.
+                    - **🚜 Dominant Front / High RSWR**: No running room - Wins at the line with strong run stop win rate (low YBC) and finishes tackles cleanly (low YAC).
 
-                    - **🌊 Spill-and-Swarm**: Bend-don't-break run defense - Allows yards at the line (higher YBC) but swarms to the ball with good tackling (low YAC). RBs may get to the second level but will be met by aggressive pursuit.
+                    - **🌊 Bend-Don't-Break / Rally Defense**: YBC allowed but explosives limited - Allows yards before contact yet rallies to the ball to cap gains (high YBC allowed, low YAC allowed).
 
-                    - **🛡️ Soft Shell**: Vulnerable at the line - Weak point-of-attack defense (high YBC allowed). RBs can exploit gaps and get to the second level easily. Best matchups for running backs.
+                    - **🛡️ Soft Front / Light Box**: Poor line control - Soft fronts/light boxes create easy yards before contact (high YBC allowed).
 
-                    - **🚨 Leakier Front**: Poor tackling - Allows significant yards after contact (high YAC). RBs who break tackles excel in these matchups. Explosive play potential.
+                    - **🚨 Poor Tackling Defense**: Missed tackles and angles - Gives up yards after contact due to tackling issues (high YAC allowed).
 
-                    - **Balanced**: Middle-of-the-pack run defense - Average in both YBC and YAC metrics. Standard matchup expectations without significant advantage either way.
+                    - **⚖️ League-Average Defense**: No extreme tendencies - Middle of the pack in both YBC and YAC (mid YBC + mid YAC).
 
                     _Metrics are calculated from Pro Football Reference advanced rushing stats and ranked on a percentile basis (0-100, where higher percentile = better defense)._
                     """)

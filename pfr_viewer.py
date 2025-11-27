@@ -2722,6 +2722,86 @@ def add_enhanced_projections_to_wr_te(df, season=2025):
     return df
 
 
+def add_enhanced_projections_to_rb(df, season=2025):
+    """
+    Add enhanced projection columns to RB DataFrame.
+
+    Adds:
+    - Enhanced Proj Rush Yds: Defense-adjusted, recency-weighted projection
+    - Proj Rush Range: Confidence interval (low-high)
+    - Proj Rush TDs: Rushing TD projection
+    - Proj Rec TDs: Receiving TD projection
+    - Proj Carries: Carries projection
+    - Proj Rec: Receptions projection
+    - Enh Carry Share %: Recency-weighted carry share
+    - Matchup Grade: A to D rating
+    - DFS Score: 0-100 DFS value score
+    - DFS Rating: Elite/Excellent/Good/Moderate/Avoid
+
+    Args:
+        df: DataFrame with columns Player, Team, Opponent
+        season: Season year
+
+    Returns:
+        DataFrame with additional projection columns
+    """
+    if df.empty:
+        return df
+
+    # Initialize new columns
+    df['Enhanced Proj Rush Yds'] = None
+    df['Proj Rush Range'] = None
+    df['Proj Rush TDs'] = None
+    df['Proj Rec TDs'] = None
+    df['Proj Carries'] = None
+    df['Proj Rec'] = None
+    df['Enh Carry Share %'] = None
+    df['Matchup Grade'] = None
+    df['DFS Score'] = None
+    df['DFS Rating'] = None
+
+    # Process each player
+    for idx, row in df.iterrows():
+        player_name = row['Player']
+        team = row['Team']
+        opponent = row['Opponent']
+
+        # Clean team name if it has (RB) suffix
+        if '(RB)' in str(team):
+            team = team.replace(' (RB)', '').strip()
+
+        try:
+            # Get enhanced projection
+            proj = ep.calculate_enhanced_rb_projection(
+                player_name=player_name,
+                team=team,
+                opponent_team=opponent,
+                season=season
+            )
+
+            if proj:
+                df.at[idx, 'Enhanced Proj Rush Yds'] = proj['projected_rush_yards']
+                df.at[idx, 'Proj Rush Range'] = f"{proj['projected_rush_yards_low']:.0f}-{proj['projected_rush_yards_high']:.0f}"
+                df.at[idx, 'Proj Rush TDs'] = proj['projected_rush_tds']
+                df.at[idx, 'Proj Rec TDs'] = proj['projected_rec_tds']
+                df.at[idx, 'Proj Carries'] = proj['projected_carries']
+                df.at[idx, 'Proj Rec'] = proj['projected_receptions']
+                df.at[idx, 'Enh Carry Share %'] = proj['carry_share_pct']
+                df.at[idx, 'Matchup Grade'] = proj['matchup_grade']
+
+                # Calculate DFS score (assuming $6500 salary if not available)
+                dfs = ep.calculate_rb_dfs_score(proj, player_salary=6500)
+                if dfs:
+                    df.at[idx, 'DFS Score'] = dfs['dfs_score']
+                    df.at[idx, 'DFS Rating'] = dfs['dfs_rating']
+
+        except Exception as e:
+            # Skip players where enhanced projection fails
+            continue
+
+    return df
+
+
 # ============================================================================
 # Air Yards / YAC Matchup Analysis Functions
 # ============================================================================
@@ -18537,6 +18617,10 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                         rb_df = projections['RB'].head(30).copy()
 
+                        # Add enhanced projections
+                        with st.spinner("Calculating enhanced RB projections with rush defense matchups..."):
+                            rb_df = add_enhanced_projections_to_rb(rb_df, selected_season)
+
                         # Style with tier-based colors (same as QB)
                         def style_rb_tier(row):
                             tier = row['Tier']
@@ -18567,6 +18651,16 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                                 "RB Score": st.column_config.NumberColumn("RB Score", format="%.1f",
                                     help="Comprehensive 0-100 score: rush yards (25pts) + rush TDs (20pts) + receiving role (20pts) + rec TDs (10pts) + defensive matchup (25pts)"),
                                 "Tier": st.column_config.TextColumn("Tier", width="medium"),
+                                "Enhanced Proj Rush Yds": st.column_config.NumberColumn("Enh Proj Rush", format="%.1f", help="Defense-adjusted, recency-weighted rushing projection"),
+                                "Proj Rush Range": st.column_config.TextColumn("Rush Range", help="Low-High confidence interval"),
+                                "Proj Rush TDs": st.column_config.NumberColumn("Proj Rush TDs", format="%.2f"),
+                                "Proj Rec TDs": st.column_config.NumberColumn("Proj Rec TDs", format="%.2f"),
+                                "Proj Carries": st.column_config.NumberColumn("Proj Carries", format="%.1f"),
+                                "Proj Rec": st.column_config.NumberColumn("Proj Rec", format="%.1f"),
+                                "Enh Carry Share %": st.column_config.NumberColumn("Enh Carry %", format="%.1f", help="Recency-weighted carry share"),
+                                "Matchup Grade": st.column_config.TextColumn("Grade", width="small"),
+                                "DFS Score": st.column_config.NumberColumn("DFS Score", format="%.0f", help="0-100 DFS value score"),
+                                "DFS Rating": st.column_config.TextColumn("DFS Rating", width="medium"),
                                 "Player": st.column_config.TextColumn("Player"),
                                 "Team": st.column_config.TextColumn("Team"),
                                 "Opponent": st.column_config.TextColumn("Opp"),
@@ -18677,9 +18771,12 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                         skill_df = projections['SKILL'].copy()
 
-                        # Add enhanced projections for WRs and TEs
+                        # Add enhanced projections for WRs, TEs, and RBs
                         with st.spinner("Calculating enhanced projections for skill players..."):
+                            # First add WR/TE projections
                             skill_df = add_enhanced_projections_to_wr_te(skill_df, selected_season)
+                            # Then add RB projections
+                            skill_df = add_enhanced_projections_to_rb(skill_df, selected_season)
 
                         # Add unified Score and Position columns for sorting
                         skill_df['Score'] = skill_df.apply(lambda row: row.get('RB Score', row.get('WR Score', 0)), axis=1)

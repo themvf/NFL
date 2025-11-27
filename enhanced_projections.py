@@ -22,6 +22,8 @@ DB_PATH = PROJECT_DIR / "data" / "nfl_merged.db"
 # Constants
 TEAM_YARDS_CAP = 425  # 90th percentile max team receiving yards
 TEAM_YARDS_FLOOR = 100  # Minimum team receiving yards
+TEAM_RUSH_YARDS_CAP = 200  # Max team rushing yards per game
+TEAM_RUSH_YARDS_FLOOR = 50  # Minimum team rushing yards
 TD_CAP_PER_GAME = 2.0  # Maximum TDs for individual player
 RECENT_GAMES_WINDOW = 4  # Games to use for recency weighting
 RECENCY_WEIGHT = 0.70  # Weight given to recent games vs season average
@@ -628,6 +630,427 @@ def calculate_dfs_score(projection_data, player_salary=None):
 
     # Lower range % = higher consistency (invert scale)
     # 50% range = 10 pts, 100% range = 0 pts
+    consistency_score = max(0, min(10, ((1 - range_pct) / 0.5) * 10))
+
+    # Total DFS Score
+    dfs_score = (projection_score + value_score + matchup_score +
+                 volume_score + consistency_score)
+
+    # Rating
+    if dfs_score >= 85:
+        rating = "ELITE SMASH SPOT"
+    elif dfs_score >= 75:
+        rating = "EXCELLENT VALUE"
+    elif dfs_score >= 65:
+        rating = "GOOD PLAY"
+    elif dfs_score >= 50:
+        rating = "MODERATE"
+    else:
+        rating = "AVOID"
+
+    return {
+        'dfs_score': round(dfs_score, 1),
+        'projected_fantasy_points': round(projected_fp, 1),
+        'score_breakdown': {
+            'projection': round(projection_score, 1),
+            'value': round(value_score, 1),
+            'matchup': round(matchup_score, 1),
+            'volume': round(volume_score, 1),
+            'consistency': round(consistency_score, 1)
+        },
+        'dfs_rating': rating
+    }
+
+
+# ============================================================================
+# RB Enhanced Projections Functions
+# ============================================================================
+
+def get_rb_rushing_team_stats(season=2025):
+    """
+    Get offensive team rushing statistics.
+
+    Returns DataFrame with columns:
+    - team
+    - games
+    - total_rush_yards
+    - avg_rush_yards_per_game
+    - total_carries
+    - avg_carries_per_game
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+
+    query = '''
+    SELECT
+        team,
+        COUNT(DISTINCT week) as games,
+        SUM(rushing_yards) as total_rush_yards,
+        SUM(carries) as total_carries
+    FROM player_stats
+    WHERE season = ?
+      AND season_type = 'REG'
+      AND rushing_yards > 0
+    GROUP BY team
+    '''
+
+    df = pd.read_sql_query(query, conn, params=(season,))
+    conn.close()
+
+    # Calculate per-game averages
+    df['avg_rush_yards_per_game'] = (df['total_rush_yards'] / df['games']).round(1)
+    df['avg_carries_per_game'] = (df['total_carries'] / df['games']).round(1)
+
+    return df
+
+
+def get_rb_defensive_rush_stats(season=2025):
+    """
+    Get defensive team rushing statistics allowed.
+
+    Returns DataFrame with columns:
+    - defense (team)
+    - games
+    - total_rush_allowed
+    - avg_rush_allowed_per_game
+    - rush_tds_allowed_per_game
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+
+    query = '''
+    SELECT
+        opponent_team as defense,
+        COUNT(DISTINCT week) as games,
+        SUM(rushing_yards) as total_rush_allowed,
+        SUM(rushing_tds) as rush_tds_allowed
+    FROM player_stats
+    WHERE season = ?
+      AND season_type = 'REG'
+      AND rushing_yards > 0
+    GROUP BY opponent_team
+    '''
+
+    df = pd.read_sql_query(query, conn, params=(season,))
+    conn.close()
+
+    # Calculate per-game averages
+    df['avg_rush_allowed_per_game'] = (df['total_rush_allowed'] / df['games']).round(1)
+    df['rush_tds_allowed_per_game'] = (df['rush_tds_allowed'] / df['games']).round(2)
+
+    return df
+
+
+def get_rb_carry_share(player_name, team, season=2025, recent_only=False):
+    """
+    Get RB's carry share and receiving role (season average or recent games).
+
+    Args:
+        player_name: Player display name
+        team: Player's team
+        season: Season year
+        recent_only: If True, only use last N games
+
+    Returns dict with:
+    - carry_share: Estimated percentage of team carries (0-100)
+    - avg_rush_yards: Average rushing yards per game
+    - avg_carries: Average carries per game
+    - avg_rec_yards: Average receiving yards per game
+    - avg_receptions: Average receptions per game
+    - avg_total_tds: Average total TDs per game (rush + rec)
+    - games: Number of games
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+
+    if recent_only:
+        query = '''
+        SELECT
+            week,
+            carries,
+            rushing_yards,
+            rushing_tds,
+            receptions,
+            receiving_yards,
+            receiving_tds
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND season_type = 'REG'
+          AND (carries > 0 OR receptions > 0)
+        ORDER BY week DESC
+        LIMIT ?
+        '''
+        df = pd.read_sql_query(query, conn, params=(player_name, team, season, RECENT_GAMES_WINDOW))
+    else:
+        query = '''
+        SELECT
+            week,
+            carries,
+            rushing_yards,
+            rushing_tds,
+            receptions,
+            receiving_yards,
+            receiving_tds
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND season_type = 'REG'
+          AND (carries > 0 OR receptions > 0)
+        ORDER BY week DESC
+        '''
+        df = pd.read_sql_query(query, conn, params=(player_name, team, season))
+
+    conn.close()
+
+    if df.empty:
+        return None
+
+    # Estimate carry share (typical team has ~28 carries per game)
+    typical_team_carries = 28
+    avg_carries = df['carries'].mean()
+    carry_share = (avg_carries / typical_team_carries * 100) if typical_team_carries > 0 else 0
+
+    return {
+        'carry_share': round(carry_share, 1),
+        'avg_rush_yards': df['rushing_yards'].mean().round(1),
+        'avg_carries': df['carries'].mean().round(1),
+        'avg_rec_yards': df['receiving_yards'].mean().round(1),
+        'avg_receptions': df['receptions'].mean().round(1),
+        'avg_total_tds': (df['rushing_tds'] + df['receiving_tds']).mean().round(2),
+        'games': len(df)
+    }
+
+
+def calculate_rb_rushing_td_projection(player_name, team, opponent_team, season=2025):
+    """
+    Calculate rushing TD projection for RB.
+
+    Returns projected rushing TDs per game (capped at TD_CAP_PER_GAME).
+    """
+    conn = sqlite3.connect(str(DB_PATH))
+
+    # Get player's recent TD performance
+    query_recent = '''
+    SELECT
+        AVG(rushing_tds) as avg_tds_recent
+    FROM (
+        SELECT rushing_tds
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND season_type = 'REG'
+        ORDER BY week DESC
+        LIMIT ?
+    )
+    '''
+    df_recent = pd.read_sql_query(query_recent, conn, params=(player_name, team, season, RECENT_GAMES_WINDOW))
+
+    # Get player's season TD rate
+    query_season = '''
+    SELECT
+        SUM(rushing_tds) / COUNT(DISTINCT week) as avg_tds_season
+    FROM player_stats
+    WHERE player_display_name = ?
+      AND team = ?
+      AND season = ?
+      AND season_type = 'REG'
+    '''
+    df_season = pd.read_sql_query(query_season, conn, params=(player_name, team, season))
+
+    # Get opponent's rush TD vulnerability
+    query_defense = '''
+    SELECT
+        SUM(rushing_tds) / COUNT(DISTINCT week) as rush_tds_allowed_per_game
+    FROM player_stats
+    WHERE opponent_team = ?
+      AND position = 'RB'
+      AND season = ?
+      AND season_type = 'REG'
+    '''
+    df_defense = pd.read_sql_query(query_defense, conn, params=(opponent_team, season))
+
+    conn.close()
+
+    # Calculate weighted TD projection
+    avg_tds_recent = df_recent.iloc[0]['avg_tds_recent'] if not df_recent.empty and df_recent.iloc[0]['avg_tds_recent'] else 0
+    avg_tds_season = df_season.iloc[0]['avg_tds_season'] if not df_season.empty and df_season.iloc[0]['avg_tds_season'] else 0
+    tds_allowed = df_defense.iloc[0]['rush_tds_allowed_per_game'] if not df_defense.empty and df_defense.iloc[0]['rush_tds_allowed_per_game'] else 0
+
+    # Weighted average: 70% recent, 30% season
+    player_td_rate = (avg_tds_recent * RECENCY_WEIGHT) + (avg_tds_season * (1 - RECENCY_WEIGHT))
+
+    # Blend player rate (65%) with defensive vulnerability (35%)
+    projected_rush_tds = (player_td_rate * 0.65) + (tds_allowed * 0.35)
+
+    # Apply cap
+    projected_rush_tds = min(TD_CAP_PER_GAME, projected_rush_tds)
+
+    return round(projected_rush_tds, 2)
+
+
+def calculate_enhanced_rb_projection(
+    player_name,
+    team,
+    opponent_team,
+    season=2025
+):
+    """
+    Calculate comprehensive enhanced projection for RB.
+
+    Returns dict with:
+    - projected_rush_yards: Enhanced rushing yards projection
+    - projected_rush_yards_low: Low confidence bound (75%)
+    - projected_rush_yards_high: High confidence bound (125%)
+    - projected_rush_tds: Rushing TD projection
+    - projected_rec_tds: Receiving TD projection (using existing function)
+    - projected_carries: Carries projection
+    - projected_receptions: Receptions projection
+    - carry_share_pct: Recency-weighted carry share
+    - matchup_grade: Overall matchup grade (A+ to D)
+    """
+    # Get team stats
+    rush_offense_df = get_rb_rushing_team_stats(season)
+    rush_defense_df = get_rb_defensive_rush_stats(season)
+
+    # Get team-level projection
+    off_stats = rush_offense_df[rush_offense_df['team'] == team]
+    def_stats = rush_defense_df[rush_defense_df['defense'] == opponent_team]
+
+    if off_stats.empty or def_stats.empty:
+        return None
+
+    off_avg = off_stats.iloc[0]['avg_rush_yards_per_game']
+    def_avg = def_stats.iloc[0]['avg_rush_allowed_per_game']
+
+    # 60% offense capability, 40% defensive vulnerability
+    team_rush_proj = (off_avg * 0.6) + (def_avg * 0.4)
+
+    # Apply caps
+    team_rush_proj = max(TEAM_RUSH_YARDS_FLOOR, min(TEAM_RUSH_YARDS_CAP, team_rush_proj))
+
+    # Get player carry shares (recency-weighted)
+    recent_share_data = get_rb_carry_share(player_name, team, season, recent_only=True)
+    season_share_data = get_rb_carry_share(player_name, team, season, recent_only=False)
+
+    if not recent_share_data or not season_share_data:
+        return None
+
+    # Weighted carry share: 70% recent, 30% season
+    weighted_carry_share = (
+        (recent_share_data['carry_share'] * RECENCY_WEIGHT) +
+        (season_share_data['carry_share'] * (1 - RECENCY_WEIGHT))
+    )
+
+    # Calculate player rushing yards projection
+    base_rush_proj = team_rush_proj * (weighted_carry_share / 100)
+
+    # Confidence ranges
+    proj_low = base_rush_proj * 0.75
+    proj_high = base_rush_proj * 1.25
+
+    # Calculate TD projections
+    projected_rush_tds = calculate_rb_rushing_td_projection(player_name, team, opponent_team, season)
+
+    # Receiving TDs for dual-threat RBs
+    projected_rec_tds = calculate_td_projection(player_name, team, opponent_team, 'RB', season)
+
+    # Calculate carries and receptions projections
+    avg_carries = (
+        (recent_share_data['avg_carries'] * RECENCY_WEIGHT) +
+        (season_share_data['avg_carries'] * (1 - RECENCY_WEIGHT))
+    )
+
+    avg_receptions = (
+        (recent_share_data['avg_receptions'] * RECENCY_WEIGHT) +
+        (season_share_data['avg_receptions'] * (1 - RECENCY_WEIGHT))
+    )
+
+    # Matchup grade based on defensive strength
+    # Lower def_avg = tougher defense
+    league_avg_rush_def = 115  # Approximate NFL average
+    if def_avg >= league_avg_rush_def * 1.15:
+        matchup_grade = "A"
+    elif def_avg >= league_avg_rush_def * 1.05:
+        matchup_grade = "B+"
+    elif def_avg >= league_avg_rush_def * 0.95:
+        matchup_grade = "B"
+    elif def_avg >= league_avg_rush_def * 0.85:
+        matchup_grade = "C"
+    else:
+        matchup_grade = "D"
+
+    return {
+        'projected_rush_yards': round(base_rush_proj, 1),
+        'projected_rush_yards_low': round(proj_low, 1),
+        'projected_rush_yards_high': round(proj_high, 1),
+        'projected_rush_tds': projected_rush_tds,
+        'projected_rec_tds': projected_rec_tds,
+        'projected_carries': round(avg_carries, 1),
+        'projected_receptions': round(avg_receptions, 1),
+        'carry_share_pct': round(weighted_carry_share, 1),
+        'matchup_grade': matchup_grade
+    }
+
+
+def calculate_rb_dfs_score(projection_data, player_salary=None):
+    """
+    Calculate comprehensive DFS score (0-100) for RBs based on 5 components:
+
+    1. Projection Score (30 pts): Projected fantasy points
+    2. Value Score (25 pts): Fantasy points per $1K salary
+    3. Matchup Score (20 pts): Rush defense matchup quality
+    4. Volume Score (15 pts): Carry share and receiving role
+    5. Consistency Score (10 pts): Projection range tightness
+
+    Args:
+        projection_data: Dict from calculate_enhanced_rb_projection()
+        player_salary: DFS salary (optional, defaults to $6500 if not provided)
+
+    Returns dict with:
+    - dfs_score: Total DFS score (0-100)
+    - score_breakdown: Dict with individual component scores
+    - dfs_rating: Text rating (Elite/Excellent/Good/Moderate/Avoid)
+    """
+    if projection_data is None:
+        return None
+
+    # Default salary if not provided
+    if player_salary is None:
+        player_salary = 6500
+
+    # Component 1: Projection Score (30 pts)
+    # Calculate projected fantasy points (PPR scoring)
+    # Rushing: 0.1 pts/yard + 6 pts/TD
+    # Receiving: 0.1 pts/yard + 1 pt/catch + 6 pts/TD
+    projected_fp = (
+        projection_data['projected_rush_yards'] * 0.1 +
+        projection_data['projected_rush_tds'] * 6.0 +
+        projection_data.get('projected_rec_yards', projection_data['projected_receptions'] * 8) * 0.1 +  # Estimate rec yards
+        projection_data['projected_receptions'] * 1.0 +
+        projection_data['projected_rec_tds'] * 6.0
+    )
+
+    # Scale to 30 points (assume 20 FP = max 30 pts for RBs)
+    projection_score = min(30, (projected_fp / 20) * 30)
+
+    # Component 2: Value Score (25 pts)
+    fp_per_1k = projected_fp / (player_salary / 1000)
+    value_score = min(25, (fp_per_1k / 3.0) * 25)
+
+    # Component 3: Matchup Score (20 pts)
+    grade_to_score = {'A+': 20, 'A': 18, 'B+': 15, 'B': 12, 'C': 8, 'D': 4, 'F': 0}
+    matchup_score = grade_to_score.get(projection_data['matchup_grade'], 10)
+
+    # Component 4: Volume Score (15 pts)
+    # Based on carry share (assume 35% = max 15 pts)
+    volume_score = min(15, (projection_data['carry_share_pct'] / 35) * 15)
+
+    # Component 5: Consistency Score (10 pts)
+    proj_range = (projection_data['projected_rush_yards_high'] -
+                  projection_data['projected_rush_yards_low'])
+    range_pct = proj_range / projection_data['projected_rush_yards'] if projection_data['projected_rush_yards'] > 0 else 1
+
     consistency_score = max(0, min(10, ((1 - range_pct) / 0.5) * 10))
 
     # Total DFS Score

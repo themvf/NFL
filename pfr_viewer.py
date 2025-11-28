@@ -4935,7 +4935,7 @@ def generate_defensive_pass_summary(season, week=None, teams_filter=None):
             classified_df = classified_df[classified_df['team'].isin(teams_filter)]
 
         # Select and rename columns for display
-    summary_df = classified_df[['team', 'defensive_pass_style', 'pass_yards_allowed']].copy()
+        summary_df = classified_df[['team', 'defensive_pass_style', 'pass_yards_allowed']].copy()
         summary_df = summary_df.rename(columns={
             'team': 'Team',
             'defensive_pass_style': 'Defensive Pass Style',

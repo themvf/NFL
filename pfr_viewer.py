@@ -10984,6 +10984,84 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     st.divider()
 
+    # ========== DEFENSIVE STYLE SUMMARY (from Upcoming Matchup page) ==========
+    st.subheader("🛡️ Defensive Style Summary")
+    st.caption("Defensive characteristics and vulnerabilities for both teams")
+
+    # Get defensive summary for both teams
+    teams_to_compare = [team1, team2]
+
+    with st.spinner("Loading defensive style analysis..."):
+        defensive_summary_df = generate_defensive_summary(season, week, teams_to_compare)
+
+    if defensive_summary_df is not None and not defensive_summary_df.empty:
+        st.dataframe(
+            defensive_summary_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Team": st.column_config.TextColumn("Team", width="small"),
+                "Defensive Style": st.column_config.TextColumn("Defensive Run Style", width="medium"),
+                "Avg Rush Yds Allowed": st.column_config.NumberColumn("Rush Yds/Gm", format="%.1f", width="small"),
+                "Avg Pass Yds Allowed": st.column_config.NumberColumn("Pass Yds/Gm", format="%.1f", width="small"),
+                "Style Explanation": st.column_config.TextColumn("Style Details", width="large")
+            }
+        )
+
+        # Defensive Run Summary
+        st.markdown("#### 🏃 Defensive Rush Analysis")
+        defensive_rush_df = generate_defensive_rush_summary(season, week, teams_to_compare)
+
+        if defensive_rush_df is not None and not defensive_rush_df.empty:
+            st.dataframe(
+                defensive_rush_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Team": st.column_config.TextColumn("Team", width="small"),
+                    "Defensive Rush Style": st.column_config.TextColumn("Def Rush Style", width="medium"),
+                    "Rush Yds Allowed/Game": st.column_config.NumberColumn("Rush Yds/Gm", format="%.1f", width="small")
+                }
+            )
+
+        # Defensive Pass Summary
+        st.markdown("#### 🎯 Defensive Pass Analysis")
+        defensive_pass_df = generate_defensive_pass_summary(season, week, teams_to_compare)
+
+        if defensive_pass_df is not None and not defensive_pass_df.empty:
+            st.dataframe(
+                defensive_pass_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Team": st.column_config.TextColumn("Team", width="small"),
+                    "Defensive Pass Style": st.column_config.TextColumn("Def Pass Style", width="medium"),
+                    "Pass Yds Allowed/Game": st.column_config.NumberColumn("Pass Yds/Gm", format="%.1f", width="small")
+                }
+            )
+
+        # Add defensive style definitions
+        with st.expander("ℹ️ Defensive Style Definitions"):
+            st.markdown("""
+            **Defensive run styles are based on Yards Before Contact (YBC) and Yards After Contact (YAC) metrics:**
+
+            - **🚜 Dominant Front / High RSWR**: No running room - Wins at the line with strong run stop win rate (low YBC) and finishes tackles cleanly (low YAC).
+
+            - **🌊 Bend-Don't-Break / Rally Defense**: YBC allowed but explosives limited - Allows yards before contact yet rallies to the ball to cap gains (high YBC allowed, low YAC allowed).
+
+            - **🛡️ Soft Front / Light Box**: Poor line control - Soft fronts/light boxes create easy yards before contact (high YBC allowed).
+
+            - **🚨 Poor Tackling Defense**: Missed tackles and angles - Gives up yards after contact due to tackling issues (high YAC allowed).
+
+            - **⚖️ League-Average Defense**: No extreme tendencies - Middle of the pack in both YBC and YAC (mid YBC + mid YAC).
+
+            _Metrics are calculated from Pro Football Reference advanced rushing stats and ranked on a percentile basis (0-100, where higher percentile = better defense)._
+            """)
+    else:
+        st.info("Defensive style summary data not available for selected teams.")
+
+    st.divider()
+
     # Home/Away Splits and Margin Analysis
     st.subheader("🏠 Home/Away Performance & Margins")
 

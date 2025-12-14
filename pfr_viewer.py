@@ -8312,6 +8312,55 @@ def get_dova_tier(dova_pct: float) -> tuple:
         return ("Poor", "🚨", "red")
 
 
+@st.cache_data(ttl=300)
+def get_opponent_dova_cached(season: int, week: Optional[int] = None) -> dict:
+    """
+    Cache all teams' DOVA for quick lookup.
+    Returns {team: {pass_dova, rush_dova, rec_dova, total_dova}}
+    """
+    all_dova_df = get_all_teams_dova(season, week)
+    if all_dova_df.empty:
+        return {}
+    dova_dict = {}
+    for _, row in all_dova_df.iterrows():
+        dova_dict[row['Team']] = {
+            'pass_dova': row.get('Pass DOVA%', 0),
+            'rush_dova': row.get('Rush DOVA%', 0),
+            'rec_dova': row.get('Rec DOVA%', 0),
+            'total_dova': row.get('DOVA%', 0)
+        }
+    return dova_dict
+
+
+def format_dova_value(dova_pct: float) -> str:
+    """Format DOVA as '+X.X%' or '-X.X%'"""
+    if dova_pct is None:
+        return "N/A"
+    sign = "+" if dova_pct >= 0 else ""
+    return f"{sign}{dova_pct:.1f}%"
+
+
+def get_dova_color(dova_pct: float) -> str:
+    """
+    Return CSS background-color from player's perspective.
+    Positive DOVA = tough matchup (red), Negative = easy matchup (green)
+    """
+    if dova_pct is None:
+        return ''
+    if dova_pct >= 15:
+        return 'background-color: #FFB3B3'  # Red - elite defense, hard for player
+    elif dova_pct >= 8:
+        return 'background-color: #FFCCCC'  # Light red - above avg defense
+    elif dova_pct >= 0:
+        return 'background-color: #FFFFCC'  # Yellow - average defense
+    elif dova_pct >= -8:
+        return 'background-color: #CCFFCC'  # Light green - below avg defense
+    else:
+        return 'background-color: #B3FFB3'  # Green - poor defense, easy for player
+
+
+
+
 
 def calculate_success_rates(team_abbr: str, season: int, week: Optional[int] = None) -> dict:
     """Calculate success rate proxies using efficiency stats."""
@@ -11771,6 +11820,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             pass_players_with_games['is_away'] = pass_players_with_games.apply(determine_is_away, axis=1)
 
+            # Load DOVA cache for opponent strength of schedule
+            dova_cache = get_opponent_dova_cached(season, week)
+
             col1, col2 = st.columns(2)
 
             with col1:
@@ -11833,9 +11885,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     else:
                                         drop_display = "0 (0.0%)"
 
+                                    # Get opponent's pass defense DOVA
+                                    opp_dova_data = dova_cache.get(row['opponent'], {})
+                                    opp_pass_dova = opp_dova_data.get('pass_dova', None)
+
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Pass DOVA': format_dova_value(opp_pass_dova),
+                                        '_opp_pass_dova_raw': opp_pass_dova,  # Keep raw for coloring
                                         'Yards': int(row['pass_yds']),
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
@@ -11850,7 +11908,29 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Pass DOVA)
+                                raw_dovas = [g['_opp_pass_dova_raw'] for g in game_data if g.get('_opp_pass_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Pass DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Pass DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_pass_dova_raw'], errors='ignore')
+                                
+                                def color_dova(val):
+                                    # Find the raw DOVA value for this row
+                                    for g in game_data:
+                                        if g.get('Opp Pass DOVA') == val:
+                                            return get_dova_color(g.get('_opp_pass_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_dova, subset=['Opp Pass DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
             with col2:
@@ -11913,9 +11993,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     else:
                                         drop_display = "0 (0.0%)"
 
+                                    # Get opponent's pass defense DOVA
+                                    opp_dova_data = dova_cache.get(row['opponent'], {})
+                                    opp_pass_dova = opp_dova_data.get('pass_dova', None)
+
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Pass DOVA': format_dova_value(opp_pass_dova),
+                                        '_opp_pass_dova_raw': opp_pass_dova,
                                         'Yards': int(row['pass_yds']),
                                         'Cmp/Att': cmp_att,
                                         'TD': int(row['pass_td']),
@@ -11930,7 +12016,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Pass DOVA)
+                                raw_dovas = [g['_opp_pass_dova_raw'] for g in game_data if g.get('_opp_pass_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Pass DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Pass DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_pass_dova_raw'], errors='ignore')
+                                
+                                def color_dova_t2(val):
+                                    for g in game_data:
+                                        if g.get('Opp Pass DOVA') == val:
+                                            return get_dova_color(g.get('_opp_pass_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_dova_t2, subset=['Opp Pass DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
         with tab2:
@@ -11974,6 +12081,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             players_with_games['is_away'] = players_with_games.apply(determine_is_away, axis=1)
 
+            # Load DOVA cache for opponent strength of schedule
+            rush_dova_cache = get_opponent_dova_cached(season, week)
+
             col1, col2 = st.columns(2)
 
             with col1:
@@ -12011,9 +12121,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     ]['rush_att'].sum()
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
+                                    
+                                    # Get opponent's rush defense DOVA
+                                    opp_dova_data = rush_dova_cache.get(row['opponent'], {})
+                                    opp_rush_dova = opp_dova_data.get('rush_dova', None)
+                                    
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Rush DOVA': format_dova_value(opp_rush_dova),
+                                        '_opp_rush_dova_raw': opp_rush_dova,
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
                                         'TD': int(row['rush_td']),
@@ -12021,7 +12138,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Rush DOVA)
+                                raw_dovas = [g['_opp_rush_dova_raw'] for g in game_data if g.get('_opp_rush_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Rush DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Rush DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_rush_dova_raw'], errors='ignore')
+                                
+                                def color_rush_dova(val):
+                                    for g in game_data:
+                                        if g.get('Opp Rush DOVA') == val:
+                                            return get_dova_color(g.get('_opp_rush_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_rush_dova, subset=['Opp Rush DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
             with col2:
@@ -12059,9 +12197,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     ]['rush_att'].sum()
                                     att_pct = (row['rush_att'] / team_total * 100) if team_total > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
+                                    
+                                    # Get opponent's rush defense DOVA
+                                    opp_dova_data = rush_dova_cache.get(row['opponent'], {})
+                                    opp_rush_dova = opp_dova_data.get('rush_dova', None)
+                                    
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Rush DOVA': format_dova_value(opp_rush_dova),
+                                        '_opp_rush_dova_raw': opp_rush_dova,
                                         'Yards': int(row['rush_yds']),
                                         'Att': int(row['rush_att']),
                                         'TD': int(row['rush_td']),
@@ -12069,7 +12214,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Rush DOVA)
+                                raw_dovas = [g['_opp_rush_dova_raw'] for g in game_data if g.get('_opp_rush_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Rush DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Rush DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_rush_dova_raw'], errors='ignore')
+                                
+                                def color_rush_dova_t2(val):
+                                    for g in game_data:
+                                        if g.get('Opp Rush DOVA') == val:
+                                            return get_dova_color(g.get('_opp_rush_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_rush_dova_t2, subset=['Opp Rush DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
         with tab3:
@@ -12113,6 +12279,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 return False
 
             rec_players_with_games['is_away'] = rec_players_with_games.apply(determine_is_away_rec, axis=1)
+
+            # Load DOVA cache for opponent strength of schedule
+            rec_dova_cache = get_opponent_dova_cached(season, week)
 
             col1, col2 = st.columns(2)
 
@@ -12159,9 +12328,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     tgt_pct = (row['targets'] / team_total_tgt * 100) if team_total_tgt > 0 else 0
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
+                                    
+                                    # Get opponent's receiving defense DOVA
+                                    opp_dova_data = rec_dova_cache.get(row['opponent'], {})
+                                    opp_rec_dova = opp_dova_data.get('rec_dova', None)
+                                    
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Rec DOVA': format_dova_value(opp_rec_dova),
+                                        '_opp_rec_dova_raw': opp_rec_dova,
                                         'Tgts': int(row['targets']),
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
@@ -12171,7 +12347,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Rec DOVA)
+                                raw_dovas = [g['_opp_rec_dova_raw'] for g in game_data if g.get('_opp_rec_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Rec DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Rec DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_rec_dova_raw'], errors='ignore')
+                                
+                                def color_rec_dova(val):
+                                    for g in game_data:
+                                        if g.get('Opp Rec DOVA') == val:
+                                            return get_dova_color(g.get('_opp_rec_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_rec_dova, subset=['Opp Rec DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
             with col2:
@@ -12217,9 +12414,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     tgt_pct = (row['targets'] / team_total_tgt * 100) if team_total_tgt > 0 else 0
                                     rec_pct = (row['rec'] / team_total_rec * 100) if team_total_rec > 0 else 0
                                     location = "@ " if row['is_away'] else "vs "
+                                    
+                                    # Get opponent's receiving defense DOVA
+                                    opp_dova_data = rec_dova_cache.get(row['opponent'], {})
+                                    opp_rec_dova = opp_dova_data.get('rec_dova', None)
+                                    
                                     game_data.append({
                                         'Week': int(row['week']),
                                         'Opponent': f"{location}{row['opponent']}",
+                                        'Opp Rec DOVA': format_dova_value(opp_rec_dova),
+                                        '_opp_rec_dova_raw': opp_rec_dova,
                                         'Tgts': int(row['targets']),
                                         'Yards': int(row['rec_yds']),
                                         'Rec': int(row['rec']),
@@ -12229,7 +12433,28 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     })
 
                                 last_3_df = pd.DataFrame(game_data)
-                                st.dataframe(last_3_df, hide_index=True, use_container_width=True)
+                                
+                                # Calculate SOS (average opponent Rec DOVA)
+                                raw_dovas = [g['_opp_rec_dova_raw'] for g in game_data if g.get('_opp_rec_dova_raw') is not None]
+                                if raw_dovas:
+                                    avg_opp_dova = sum(raw_dovas) / len(raw_dovas)
+                                    tier, emoji, _ = get_dova_tier(avg_opp_dova)
+                                    sos_text = f"**Avg Opponent Rec DOVA:** {format_dova_value(avg_opp_dova)} ({emoji} {tier})"
+                                else:
+                                    sos_text = "**Avg Opponent Rec DOVA:** N/A"
+                                
+                                # Style the DOVA column with colors
+                                display_df = last_3_df.drop(columns=['_opp_rec_dova_raw'], errors='ignore')
+                                
+                                def color_rec_dova_t2(val):
+                                    for g in game_data:
+                                        if g.get('Opp Rec DOVA') == val:
+                                            return get_dova_color(g.get('_opp_rec_dova_raw'))
+                                    return ''
+                                
+                                styled_df = display_df.style.applymap(color_rec_dova_t2, subset=['Opp Rec DOVA'])
+                                st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                st.caption(sos_text)
                                 st.markdown("---")
 
         st.divider()

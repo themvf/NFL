@@ -8140,7 +8140,7 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
 
         if league_df.empty:
             conn.close()
-            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'rec_dova': 0, 'games': 0}
 
         league_pass_epa = league_df['league_pass_epa'].iloc[0] or 0
         league_rush_epa = league_df['league_rush_epa'].iloc[0] or 0
@@ -8167,7 +8167,7 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
 
         if def_df.empty:
             conn.close()
-            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'rec_dova': 0, 'games': 0}
 
         games = len(def_df)
 
@@ -8180,6 +8180,7 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
         # Positive = good defense (allows less than average)
         raw_pass_dova = league_pass_epa - def_pass_epa_allowed
         raw_rush_dova = league_rush_epa - def_rush_epa_allowed
+        raw_rec_dova = league_rec_epa - def_rec_epa_allowed
 
         # Opponent adjustment
         if opponent_adjust and games > 0:
@@ -8190,7 +8191,8 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
                 SELECT
                     team,
                     AVG(passing_epa) as off_pass_epa,
-                    AVG(rushing_epa) as off_rush_epa
+                    AVG(rushing_epa) as off_rush_epa,
+                    AVG(receiving_epa) as off_rec_epa
                 FROM team_stats_week
                 WHERE season = {season}
                 AND team IN ({teams_str})
@@ -8203,16 +8205,18 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
                 # Average offensive strength of opponents faced
                 avg_opp_pass_str = opp_df['off_pass_epa'].mean() - league_pass_epa
                 avg_opp_rush_str = opp_df['off_rush_epa'].mean() - league_rush_epa
+                avg_opp_rec_str = opp_df['off_rec_epa'].mean() - league_rec_epa
 
                 # Adjust DOVA by opponent strength
                 # If faced strong offenses, add credit; if faced weak, subtract
                 raw_pass_dova += avg_opp_pass_str * 0.5  # 50% adjustment weight
                 raw_rush_dova += avg_opp_rush_str * 0.5
+                raw_rec_dova += avg_opp_rec_str * 0.5
 
         conn.close()
 
-        # Combined DOVA (weighted: 60% pass, 40% rush for modern NFL)
-        total_dova = (raw_pass_dova * 0.60) + (raw_rush_dova * 0.40)
+        # Combined DOVA (weighted: 40% pass, 30% receiving, 30% rush for modern NFL)
+        total_dova = (raw_pass_dova * 0.40) + (raw_rec_dova * 0.30) + (raw_rush_dova * 0.30)
 
         # Convert to percentage (multiply by 100 and scale)
         # Scale factor to get into -30% to +30% range like DVOA
@@ -8222,13 +8226,17 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
             'total_dova': round(total_dova * scale_factor, 1),
             'pass_dova': round(raw_pass_dova * scale_factor, 1),
             'rush_dova': round(raw_rush_dova * scale_factor, 1),
+            'rec_dova': round(raw_rec_dova * scale_factor, 1),
             'total_dova_raw': round(total_dova, 3),
             'pass_dova_raw': round(raw_pass_dova, 3),
             'rush_dova_raw': round(raw_rush_dova, 3),
+            'rec_dova_raw': round(raw_rec_dova, 3),
             'def_pass_epa_allowed': round(def_pass_epa_allowed, 2),
             'def_rush_epa_allowed': round(def_rush_epa_allowed, 2),
+            'def_rec_epa_allowed': round(def_rec_epa_allowed, 2),
             'league_pass_epa': round(league_pass_epa, 2),
             'league_rush_epa': round(league_rush_epa, 2),
+            'league_rec_epa': round(league_rec_epa, 2),
             'games': games,
             'opponent_adjusted': opponent_adjust
         }
@@ -8237,7 +8245,7 @@ def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
         print(f"Error calculating DOVA: {e}")
         import traceback
         traceback.print_exc()
-        return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+        return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'rec_dova': 0, 'games': 0}
 
 
 def get_all_teams_dova(season: int, week: Optional[int] = None) -> pd.DataFrame:
@@ -8257,9 +8265,11 @@ def get_all_teams_dova(season: int, week: Optional[int] = None) -> pd.DataFrame:
                     'Team': team,
                     'DOVA%': dova['total_dova'],
                     'Pass DOVA%': dova['pass_dova'],
+                    'Rec DOVA%': dova.get('rec_dova', 0),
                     'Rush DOVA%': dova['rush_dova'],
-                    'Pass EPA Allowed': dova['def_pass_epa_allowed'],
-                    'Rush EPA Allowed': dova['def_rush_epa_allowed'],
+                    'Pass EPA Allowed': dova.get('def_pass_epa_allowed', 0),
+                    'Rec EPA Allowed': dova.get('def_rec_epa_allowed', 0),
+                    'Rush EPA Allowed': dova.get('def_rush_epa_allowed', 0),
                     'Games': dova['games']
                 })
 
@@ -8271,6 +8281,7 @@ def get_all_teams_dova(season: int, week: Optional[int] = None) -> pd.DataFrame:
         # Add rankings (higher DOVA = better defense = lower rank number)
         df['DOVA Rank'] = df['DOVA%'].rank(ascending=False).astype(int)
         df['Pass DOVA Rank'] = df['Pass DOVA%'].rank(ascending=False).astype(int)
+        df['Rec DOVA Rank'] = df['Rec DOVA%'].rank(ascending=False).astype(int)
         df['Rush DOVA Rank'] = df['Rush DOVA%'].rank(ascending=False).astype(int)
 
         # Sort by total DOVA (best first)
@@ -11293,6 +11304,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 help="Opponent-adjusted defensive efficiency. Positive = better than average."
             )
             st.metric("Pass DOVA%", f"{t1_dova['pass_dova']:+.1f}%")
+            st.metric("Rec DOVA%", f"{t1_dova.get('rec_dova', 0):+.1f}%")
             st.metric("Rush DOVA%", f"{t1_dova['rush_dova']:+.1f}%")
             st.markdown(f"**Tier:** {t1_emoji} {t1_tier}")
 
@@ -11304,6 +11316,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 help="Opponent-adjusted defensive efficiency. Positive = better than average."
             )
             st.metric("Pass DOVA%", f"{t2_dova['pass_dova']:+.1f}%")
+            st.metric("Rec DOVA%", f"{t2_dova.get('rec_dova', 0):+.1f}%")
             st.metric("Rush DOVA%", f"{t2_dova['rush_dova']:+.1f}%")
             st.markdown(f"**Tier:** {t2_emoji} {t2_tier}")
 
@@ -11317,6 +11330,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             better_pass = team1 if pass_diff > 0 else team2
             st.metric("Pass Defense", better_pass, f"{abs(pass_diff):.1f}%")
 
+            rec_diff = t1_dova.get('rec_dova', 0) - t2_dova.get('rec_dova', 0)
+            better_rec = team1 if rec_diff > 0 else team2
+            st.metric("Rec Defense", better_rec, f"{abs(rec_diff):.1f}%")
+
             rush_diff = t1_dova['rush_dova'] - t2_dova['rush_dova']
             better_rush = team1 if rush_diff > 0 else team2
             st.metric("Rush Defense", better_rush, f"{abs(rush_diff):.1f}%")
@@ -11327,14 +11344,16 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             with epa_col1:
                 st.markdown(f"**{team1} EPA Allowed:**")
-                st.write(f"- Pass EPA/Game: {t1_dova['def_pass_epa_allowed']:.2f}")
-                st.write(f"- Rush EPA/Game: {t1_dova['def_rush_epa_allowed']:.2f}")
+                st.write(f"- Pass EPA/Game: {t1_dova.get('def_pass_epa_allowed', 0):.2f}")
+                st.write(f"- Rec EPA/Game: {t1_dova.get('def_rec_epa_allowed', 0):.2f}")
+                st.write(f"- Rush EPA/Game: {t1_dova.get('def_rush_epa_allowed', 0):.2f}")
                 st.write(f"- Games Analyzed: {t1_dova['games']}")
 
             with epa_col2:
                 st.markdown(f"**{team2} EPA Allowed:**")
-                st.write(f"- Pass EPA/Game: {t2_dova['def_pass_epa_allowed']:.2f}")
-                st.write(f"- Rush EPA/Game: {t2_dova['def_rush_epa_allowed']:.2f}")
+                st.write(f"- Pass EPA/Game: {t2_dova.get('def_pass_epa_allowed', 0):.2f}")
+                st.write(f"- Rec EPA/Game: {t2_dova.get('def_rec_epa_allowed', 0):.2f}")
+                st.write(f"- Rush EPA/Game: {t2_dova.get('def_rush_epa_allowed', 0):.2f}")
                 st.write(f"- Games Analyzed: {t2_dova['games']}")
 
             st.markdown("---")
@@ -11344,7 +11363,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             1. **Baseline**: Compare to league average EPA allowed
             2. **Value Calculation**: `DOVA = League Avg EPA - Defense EPA Allowed`
             3. **Opponent Adjustment**: Credit/penalty for strength of offenses faced (50% weight)
-            4. **Weighting**: Pass (60%) + Rush (40%) for total DOVA
+            4. **Weighting**: Pass (40%) + Receiving (30%) + Rush (30%) for total DOVA
 
             **Interpretation:**
             - 🔒 **Elite** (+15% or better): Top-tier defense
@@ -11364,11 +11383,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         return ['background-color: #e6f3ff'] * len(row)
                     return [''] * len(row)
 
-                display_df = all_dova_df[['Team', 'DOVA%', 'DOVA Rank', 'Pass DOVA%', 'Rush DOVA%', 'Games']].copy()
+                display_df = all_dova_df[['Team', 'DOVA%', 'DOVA Rank', 'Pass DOVA%', 'Rec DOVA%', 'Rush DOVA%', 'Games']].copy()
                 st.dataframe(
                     display_df.style.apply(highlight_teams, axis=1).format({
                         'DOVA%': '{:+.1f}%',
                         'Pass DOVA%': '{:+.1f}%',
+                        'Rec DOVA%': '{:+.1f}%',
                         'Rush DOVA%': '{:+.1f}%'
                     }),
                     use_container_width=True,

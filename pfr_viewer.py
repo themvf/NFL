@@ -8096,6 +8096,212 @@ def calculate_team_epa(team_abbr: str, season: int, week: Optional[int] = None) 
     }
 
 
+# ============================================================================
+# DOVA (Defense Over Value Average) Functions
+# ============================================================================
+
+def calculate_team_dova(team_abbr: str, season: int, week: Optional[int] = None,
+                        opponent_adjust: bool = True) -> dict:
+    """
+    Calculate DOVA (Defense Over Value Average) for a team.
+
+    DOVA measures how much better/worse a defense performs compared to league average,
+    similar to DVOA but using EPA-based calculations.
+
+    Positive DOVA = Good defense (allows less EPA than average)
+    Negative DOVA = Bad defense (allows more EPA than average)
+
+    Args:
+        team_abbr: Team abbreviation
+        season: Season year
+        week: Optional week filter (uses all games up to this week)
+        opponent_adjust: Whether to adjust for opponent offensive strength
+
+    Returns:
+        dict with DOVA metrics including pass_dova, rush_dova, total_dova, and rankings
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+
+        # Build week filter
+        week_filter = f" AND week <= {week}" if week else ""
+
+        # Get league average EPA for the season
+        league_avg_query = f"""
+            SELECT
+                AVG(passing_epa) as league_pass_epa,
+                AVG(rushing_epa) as league_rush_epa,
+                AVG(receiving_epa) as league_rec_epa
+            FROM team_stats_week
+            WHERE season = {season}
+            {week_filter}
+        """
+        league_df = pd.read_sql_query(league_avg_query, conn)
+
+        if league_df.empty:
+            conn.close()
+            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+
+        league_pass_epa = league_df['league_pass_epa'].iloc[0] or 0
+        league_rush_epa = league_df['league_rush_epa'].iloc[0] or 0
+        league_rec_epa = league_df['league_rec_epa'].iloc[0] or 0
+
+        # Get defensive EPA allowed (opponent's offensive EPA when playing this team)
+        # This measures what offenses score AGAINST this defense
+        def_epa_query = f"""
+            SELECT
+                t.team,
+                t.week,
+                t.opponent_team,
+                t.passing_epa as opp_pass_epa,
+                t.rushing_epa as opp_rush_epa,
+                t.receiving_epa as opp_rec_epa,
+                t.passing_yards,
+                t.rushing_yards
+            FROM team_stats_week t
+            WHERE t.season = {season}
+            AND t.opponent_team = '{team_abbr}'
+            {week_filter}
+        """
+        def_df = pd.read_sql_query(def_epa_query, conn)
+
+        if def_df.empty:
+            conn.close()
+            return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+
+        games = len(def_df)
+
+        # Calculate raw defensive EPA allowed (per game average)
+        def_pass_epa_allowed = def_df['opp_pass_epa'].mean()
+        def_rush_epa_allowed = def_df['opp_rush_epa'].mean()
+        def_rec_epa_allowed = def_df['opp_rec_epa'].mean()
+
+        # Calculate raw DOVA (league avg - defensive EPA allowed)
+        # Positive = good defense (allows less than average)
+        raw_pass_dova = league_pass_epa - def_pass_epa_allowed
+        raw_rush_dova = league_rush_epa - def_rush_epa_allowed
+
+        # Opponent adjustment
+        if opponent_adjust and games > 0:
+            # Get offensive strength of teams faced
+            teams_faced = def_df['team'].unique().tolist()
+            teams_str = ','.join(["'" + t + "'" for t in teams_faced])
+            opp_strength_query = f"""
+                SELECT
+                    team,
+                    AVG(passing_epa) as off_pass_epa,
+                    AVG(rushing_epa) as off_rush_epa
+                FROM team_stats_week
+                WHERE season = {season}
+                AND team IN ({teams_str})
+                {week_filter}
+                GROUP BY team
+            """
+            opp_df = pd.read_sql_query(opp_strength_query, conn)
+
+            if not opp_df.empty:
+                # Average offensive strength of opponents faced
+                avg_opp_pass_str = opp_df['off_pass_epa'].mean() - league_pass_epa
+                avg_opp_rush_str = opp_df['off_rush_epa'].mean() - league_rush_epa
+
+                # Adjust DOVA by opponent strength
+                # If faced strong offenses, add credit; if faced weak, subtract
+                raw_pass_dova += avg_opp_pass_str * 0.5  # 50% adjustment weight
+                raw_rush_dova += avg_opp_rush_str * 0.5
+
+        conn.close()
+
+        # Combined DOVA (weighted: 60% pass, 40% rush for modern NFL)
+        total_dova = (raw_pass_dova * 0.60) + (raw_rush_dova * 0.40)
+
+        # Convert to percentage (multiply by 100 and scale)
+        # Scale factor to get into -30% to +30% range like DVOA
+        scale_factor = 5.0
+
+        return {
+            'total_dova': round(total_dova * scale_factor, 1),
+            'pass_dova': round(raw_pass_dova * scale_factor, 1),
+            'rush_dova': round(raw_rush_dova * scale_factor, 1),
+            'total_dova_raw': round(total_dova, 3),
+            'pass_dova_raw': round(raw_pass_dova, 3),
+            'rush_dova_raw': round(raw_rush_dova, 3),
+            'def_pass_epa_allowed': round(def_pass_epa_allowed, 2),
+            'def_rush_epa_allowed': round(def_rush_epa_allowed, 2),
+            'league_pass_epa': round(league_pass_epa, 2),
+            'league_rush_epa': round(league_rush_epa, 2),
+            'games': games,
+            'opponent_adjusted': opponent_adjust
+        }
+
+    except Exception as e:
+        print(f"Error calculating DOVA: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'total_dova': 0, 'pass_dova': 0, 'rush_dova': 0, 'games': 0}
+
+
+def get_all_teams_dova(season: int, week: Optional[int] = None) -> pd.DataFrame:
+    """
+    Calculate DOVA for all teams in a season.
+
+    Returns DataFrame with team rankings by DOVA.
+    """
+    try:
+        teams = get_teams(season)
+        dova_data = []
+
+        for team in teams:
+            dova = calculate_team_dova(team, season, week, opponent_adjust=True)
+            if dova['games'] > 0:
+                dova_data.append({
+                    'Team': team,
+                    'DOVA%': dova['total_dova'],
+                    'Pass DOVA%': dova['pass_dova'],
+                    'Rush DOVA%': dova['rush_dova'],
+                    'Pass EPA Allowed': dova['def_pass_epa_allowed'],
+                    'Rush EPA Allowed': dova['def_rush_epa_allowed'],
+                    'Games': dova['games']
+                })
+
+        if not dova_data:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(dova_data)
+
+        # Add rankings (higher DOVA = better defense = lower rank number)
+        df['DOVA Rank'] = df['DOVA%'].rank(ascending=False).astype(int)
+        df['Pass DOVA Rank'] = df['Pass DOVA%'].rank(ascending=False).astype(int)
+        df['Rush DOVA Rank'] = df['Rush DOVA%'].rank(ascending=False).astype(int)
+
+        # Sort by total DOVA (best first)
+        df = df.sort_values('DOVA%', ascending=False)
+
+        return df
+
+    except Exception as e:
+        print(f"Error getting all teams DOVA: {e}")
+        return pd.DataFrame()
+
+
+def get_dova_tier(dova_pct: float) -> tuple:
+    """
+    Get defensive tier based on DOVA percentage.
+
+    Returns (tier_name, emoji, color)
+    """
+    if dova_pct >= 15:
+        return ("Elite", "🔒", "green")
+    elif dova_pct >= 8:
+        return ("Above Average", "🛡️", "lightgreen")
+    elif dova_pct >= 0:
+        return ("Average", "⚖️", "gray")
+    elif dova_pct >= -8:
+        return ("Below Average", "⚠️", "orange")
+    else:
+        return ("Poor", "🚨", "red")
+
+
+
 def calculate_success_rates(team_abbr: str, season: int, week: Optional[int] = None) -> dict:
     """Calculate success rate proxies using efficiency stats."""
     sql = """
@@ -11059,6 +11265,120 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             """)
     else:
         st.info("Defensive style summary data not available for selected teams.")
+
+    st.divider()
+
+    # ========== DOVA (Defense Over Value Average) ==========
+    st.subheader("📊 DOVA - Defense Over Value Average")
+    st.caption("EPA-based defensive efficiency metric (positive = better than league average)")
+
+    # Calculate DOVA for both teams
+    with st.spinner("Calculating DOVA metrics..."):
+        t1_dova = calculate_team_dova(team1, season, week, opponent_adjust=True)
+        t2_dova = calculate_team_dova(team2, season, week, opponent_adjust=True)
+
+    if t1_dova['games'] > 0 and t2_dova['games'] > 0:
+        # Get tiers
+        t1_tier, t1_emoji, t1_color = get_dova_tier(t1_dova['total_dova'])
+        t2_tier, t2_emoji, t2_color = get_dova_tier(t2_dova['total_dova'])
+
+        # Display DOVA comparison
+        dova_col1, dova_col2, dova_col3 = st.columns(3)
+
+        with dova_col1:
+            st.markdown(f"**{team1} Defense**")
+            st.metric(
+                "Total DOVA%",
+                f"{t1_dova['total_dova']:+.1f}%",
+                help="Opponent-adjusted defensive efficiency. Positive = better than average."
+            )
+            st.metric("Pass DOVA%", f"{t1_dova['pass_dova']:+.1f}%")
+            st.metric("Rush DOVA%", f"{t1_dova['rush_dova']:+.1f}%")
+            st.markdown(f"**Tier:** {t1_emoji} {t1_tier}")
+
+        with dova_col3:
+            st.markdown(f"**{team2} Defense**")
+            st.metric(
+                "Total DOVA%",
+                f"{t2_dova['total_dova']:+.1f}%",
+                help="Opponent-adjusted defensive efficiency. Positive = better than average."
+            )
+            st.metric("Pass DOVA%", f"{t2_dova['pass_dova']:+.1f}%")
+            st.metric("Rush DOVA%", f"{t2_dova['rush_dova']:+.1f}%")
+            st.markdown(f"**Tier:** {t2_emoji} {t2_tier}")
+
+        with dova_col2:
+            st.markdown("**Advantage**")
+            dova_diff = t1_dova['total_dova'] - t2_dova['total_dova']
+            better_def = team1 if dova_diff > 0 else team2
+            st.metric("Better DOVA", better_def, f"{abs(dova_diff):.1f}% edge")
+
+            pass_diff = t1_dova['pass_dova'] - t2_dova['pass_dova']
+            better_pass = team1 if pass_diff > 0 else team2
+            st.metric("Pass Defense", better_pass, f"{abs(pass_diff):.1f}%")
+
+            rush_diff = t1_dova['rush_dova'] - t2_dova['rush_dova']
+            better_rush = team1 if rush_diff > 0 else team2
+            st.metric("Rush Defense", better_rush, f"{abs(rush_diff):.1f}%")
+
+        # EPA Details
+        with st.expander("📈 EPA Details & Methodology"):
+            epa_col1, epa_col2 = st.columns(2)
+
+            with epa_col1:
+                st.markdown(f"**{team1} EPA Allowed:**")
+                st.write(f"- Pass EPA/Game: {t1_dova['def_pass_epa_allowed']:.2f}")
+                st.write(f"- Rush EPA/Game: {t1_dova['def_rush_epa_allowed']:.2f}")
+                st.write(f"- Games Analyzed: {t1_dova['games']}")
+
+            with epa_col2:
+                st.markdown(f"**{team2} EPA Allowed:**")
+                st.write(f"- Pass EPA/Game: {t2_dova['def_pass_epa_allowed']:.2f}")
+                st.write(f"- Rush EPA/Game: {t2_dova['def_rush_epa_allowed']:.2f}")
+                st.write(f"- Games Analyzed: {t2_dova['games']}")
+
+            st.markdown("---")
+            st.markdown("""
+            **DOVA Methodology:**
+
+            1. **Baseline**: Compare to league average EPA allowed
+            2. **Value Calculation**: `DOVA = League Avg EPA - Defense EPA Allowed`
+            3. **Opponent Adjustment**: Credit/penalty for strength of offenses faced (50% weight)
+            4. **Weighting**: Pass (60%) + Rush (40%) for total DOVA
+
+            **Interpretation:**
+            - 🔒 **Elite** (+15% or better): Top-tier defense
+            - 🛡️ **Above Average** (+8% to +15%): Solid defensive unit
+            - ⚖️ **Average** (0% to +8%): Middle of the pack
+            - ⚠️ **Below Average** (-8% to 0%): Defensive concerns
+            - 🚨 **Poor** (-8% or worse): Significant vulnerability
+            """)
+
+        # League Rankings
+        with st.expander("🏆 League DOVA Rankings"):
+            all_dova_df = get_all_teams_dova(season, week)
+            if not all_dova_df.empty:
+                # Highlight our teams
+                def highlight_teams(row):
+                    if row['Team'] == team1 or row['Team'] == team2:
+                        return ['background-color: #e6f3ff'] * len(row)
+                    return [''] * len(row)
+
+                display_df = all_dova_df[['Team', 'DOVA%', 'DOVA Rank', 'Pass DOVA%', 'Rush DOVA%', 'Games']].copy()
+                st.dataframe(
+                    display_df.style.apply(highlight_teams, axis=1).format({
+                        'DOVA%': '{:+.1f}%',
+                        'Pass DOVA%': '{:+.1f}%',
+                        'Rush DOVA%': '{:+.1f}%'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.info("DOVA rankings not available.")
+
+    else:
+        st.info("DOVA metrics require at least 1 game of data for each team.")
 
     st.divider()
 

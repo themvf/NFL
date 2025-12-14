@@ -11842,17 +11842,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t1_pass_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details for QBs
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t1_passers.iterrows():
                             player_games = pass_players_with_games[(pass_players_with_games['team'] == p['team']) &
                                                                     (pass_players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total_att = pass_players_with_games[
                                         (pass_players_with_games['week'] == row['week']) &
                                         (pass_players_with_games['season'] == row['season']) &
@@ -11950,17 +11950,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t2_pass_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details for QBs
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t2_passers.iterrows():
                             player_games = pass_players_with_games[(pass_players_with_games['team'] == p['team']) &
                                                                     (pass_players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total_att = pass_players_with_games[
                                         (pass_players_with_games['week'] == row['week']) &
                                         (pass_players_with_games['season'] == row['season']) &
@@ -12103,17 +12103,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t1_rush_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t1_rushers.iterrows():
                             player_games = players_with_games[(players_with_games['team'] == p['team']) &
                                                              (players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total = players_with_games[
                                         (players_with_games['week'] == row['week']) &
                                         (players_with_games['season'] == row['season']) &
@@ -12179,17 +12179,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t2_rush_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t2_rushers.iterrows():
                             player_games = players_with_games[(players_with_games['team'] == p['team']) &
                                                              (players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total = players_with_games[
                                         (players_with_games['week'] == row['week']) &
                                         (players_with_games['season'] == row['season']) &
@@ -12304,17 +12304,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t1_rec_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t1_receivers.iterrows():
                             player_games = rec_players_with_games[(rec_players_with_games['team'] == p['team']) &
                                                                   (rec_players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total_tgt = rec_players_with_games[
                                         (rec_players_with_games['week'] == row['week']) &
                                         (rec_players_with_games['season'] == row['season']) &
@@ -12390,17 +12390,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.dataframe(t2_rec_display, hide_index=True, use_container_width=True)
 
                     # Last 3 games details
-                    with st.expander("📊 Last 3 Games Details"):
+                    with st.expander("📊 Last 5 Games Details"):
                         for _, p in t2_receivers.iterrows():
                             player_games = rec_players_with_games[(rec_players_with_games['team'] == p['team']) &
                                                                   (rec_players_with_games['player'] == p['player'])].sort_values('week')
-                            if len(player_games) >= 3:
-                                last_3 = player_games.tail(3)
+                            if len(player_games) >= 5:
+                                last_5 = player_games.tail(5)
                                 st.markdown(f"**{p['player']}**")
 
                                 # Build dataframe for last 3 games
                                 game_data = []
-                                for _, row in last_3.iterrows():
+                                for _, row in last_5.iterrows():
                                     team_total_tgt = rec_players_with_games[
                                         (rec_players_with_games['week'] == row['week']) &
                                         (rec_players_with_games['season'] == row['season']) &
@@ -14293,7 +14293,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.markdown("**Rushing:**")
                     for player in t1_rush_players['player'].unique()[:3]:
                         player_games = t1_rush_players[t1_rush_players['player'] == player]['rush_yds']
-                        if len(player_games) >= 3:
+                        if len(player_games) >= 5:
                             avg_yds = player_games.mean()
                             threshold = 50  # Bust = under 50 yards
                             bust_rate = (player_games < threshold).sum() / len(player_games) * 100
@@ -14313,7 +14313,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     rec_player_list = t1_rec_players.groupby('player')['rec_yds'].sum().nlargest(3).index
                     for player in rec_player_list:
                         player_games = t1_rec_players[t1_rec_players['player'] == player]['rec_yds']
-                        if len(player_games) >= 3:
+                        if len(player_games) >= 5:
                             avg_yds = player_games.mean()
                             threshold = 40  # Bust = under 40 yards
                             bust_rate = (player_games < threshold).sum() / len(player_games) * 100
@@ -14334,7 +14334,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.markdown("**Rushing:**")
                     for player in t2_rush_players['player'].unique()[:3]:
                         player_games = t2_rush_players[t2_rush_players['player'] == player]['rush_yds']
-                        if len(player_games) >= 3:
+                        if len(player_games) >= 5:
                             avg_yds = player_games.mean()
                             threshold = 50
                             bust_rate = (player_games < threshold).sum() / len(player_games) * 100
@@ -14353,7 +14353,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     rec_player_list = t2_rec_players.groupby('player')['rec_yds'].sum().nlargest(3).index
                     for player in rec_player_list:
                         player_games = t2_rec_players[t2_rec_players['player'] == player]['rec_yds']
-                        if len(player_games) >= 3:
+                        if len(player_games) >= 5:
                             avg_yds = player_games.mean()
                             threshold = 40
                             bust_rate = (player_games < threshold).sum() / len(player_games) * 100
@@ -15844,7 +15844,7 @@ def render_stats_trends(season: Optional[int], week: Optional[int]):
                 ypr = rec_yds_total / rec_total if rec_total > 0 else 0
 
                 # Last 3 games for trend analysis
-                last_3 = player_games.tail(3)
+                last_5 = player_games.tail(5)
                 last_3_pass_yds = last_3['pass_yds'].mean() if len(last_3) > 0 else 0
                 last_3_rush_yds = last_3['rush_yds'].mean() if len(last_3) > 0 else 0
                 last_3_rec_yds = last_3['rec_yds'].mean() if len(last_3) > 0 else 0

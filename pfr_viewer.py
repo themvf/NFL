@@ -21,6 +21,7 @@ from historical_trends import render_historical_trends
 import player_impact_analytics as pia
 import enhanced_projections as ep
 import yardage_dvoa as ydvoa
+import rb_projections as rbp
 
 # Configure logging
 logging.basicConfig(
@@ -12492,6 +12493,118 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 st.dataframe(styled_df, hide_index=True, use_container_width=True)
                                 st.caption(sos_text)
                                 st.markdown("---")
+
+
+        # ========================================================================
+        # RB Projections Section
+        # ========================================================================
+        st.subheader("🎯 RB Projections")
+        st.caption("DVOA-adjusted rushing and receiving yard projections for running backs with game script adjustments")
+
+        # Get spread for this matchup
+        try:
+            spread_line = rbp.get_matchup_spread(team1, team2, season, week if week else 14)
+            spread_display = rbp.format_spread_display(spread_line, team2)
+            st.info(f"**{spread_display}**")
+        except Exception as e:
+            spread_line = None
+            st.warning("Spread data not available for this matchup")
+
+        # Get RB projections for both teams
+        try:
+            proj_week = week if week else 14  # Use week or default
+            away_projs, home_projs = rbp.get_matchup_projections(team1, team2, season, proj_week, min_carries=10)
+
+            rb_col1, rb_col2 = st.columns(2)
+
+            with rb_col1:
+                st.markdown(f"### {team1} RBs (Away)")
+                if away_projs:
+                    for proj in away_projs[:3]:  # Top 3 RBs
+                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.1f} total yards", expanded=True):
+                            # Summary metrics
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
+                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
+                            m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+
+                            st.markdown("---")
+                            st.markdown("**📊 RUSHING PROJECTION**")
+                            rush_data = {
+                                'Component': ['Baseline Carries', 'Team Rush Base', 'Spread Adjustment',
+                                              'Projected Team Rush', 'Rush Share', 'Projected Carries',
+                                              'League Avg YPC', 'RB Rush DVOA', 'DEF Rush DVOA',
+                                              'Projected YPC', '**RUSH YARDS**'],
+                                'Value': [f"{proj.baseline_carries:.1f}", f"{proj.team_rush_base:.1f}",
+                                         f"{proj.spread_adjustment:+.1f}",
+                                         f"{proj.projected_team_rush:.1f}", f"{proj.rush_share:.1%}",
+                                         f"{proj.projected_carries:.1f}", f"{proj.league_avg_ypc:.2f}",
+                                         f"{proj.rb_rush_dvoa:+.1f}%", f"{proj.def_rush_dvoa:+.1f}%",
+                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.1f}**"]
+                            }
+                            st.dataframe(pd.DataFrame(rush_data), hide_index=True, use_container_width=True)
+
+                            st.markdown("**🎯 RECEIVING PROJECTION**")
+                            recv_data = {
+                                'Component': ['Baseline Targets', 'Team Target Base', 'Target Share',
+                                              'Projected Targets', 'Catch Rate', 'League Avg Y/Tgt',
+                                              'RB Recv DVOA', 'DEF Pass DVOA', 'Projected Y/Tgt',
+                                              '**RECV YARDS**'],
+                                'Value': [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
+                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.1f}",
+                                         f"{proj.catch_rate:.1%}", f"{proj.league_avg_ypt:.2f}",
+                                         f"{proj.rb_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
+                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.1f}**"]
+                            }
+                            st.dataframe(pd.DataFrame(recv_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info(f"No RBs found for {team1} with sufficient carries")
+
+            with rb_col2:
+                st.markdown(f"### {team2} RBs (Home)")
+                if home_projs:
+                    for proj in home_projs[:3]:  # Top 3 RBs
+                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.1f} total yards", expanded=True):
+                            # Summary metrics
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
+                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
+                            m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+
+                            st.markdown("---")
+                            st.markdown("**📊 RUSHING PROJECTION**")
+                            rush_data = {
+                                'Component': ['Baseline Carries', 'Team Rush Base', 'Spread Adjustment',
+                                              'Projected Team Rush', 'Rush Share', 'Projected Carries',
+                                              'League Avg YPC', 'RB Rush DVOA', 'DEF Rush DVOA',
+                                              'Projected YPC', '**RUSH YARDS**'],
+                                'Value': [f"{proj.baseline_carries:.1f}", f"{proj.team_rush_base:.1f}",
+                                         f"{proj.spread_adjustment:+.1f}",
+                                         f"{proj.projected_team_rush:.1f}", f"{proj.rush_share:.1%}",
+                                         f"{proj.projected_carries:.1f}", f"{proj.league_avg_ypc:.2f}",
+                                         f"{proj.rb_rush_dvoa:+.1f}%", f"{proj.def_rush_dvoa:+.1f}%",
+                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.1f}**"]
+                            }
+                            st.dataframe(pd.DataFrame(rush_data), hide_index=True, use_container_width=True)
+
+                            st.markdown("**🎯 RECEIVING PROJECTION**")
+                            recv_data = {
+                                'Component': ['Baseline Targets', 'Team Target Base', 'Target Share',
+                                              'Projected Targets', 'Catch Rate', 'League Avg Y/Tgt',
+                                              'RB Recv DVOA', 'DEF Pass DVOA', 'Projected Y/Tgt',
+                                              '**RECV YARDS**'],
+                                'Value': [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
+                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.1f}",
+                                         f"{proj.catch_rate:.1%}", f"{proj.league_avg_ypt:.2f}",
+                                         f"{proj.rb_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
+                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.1f}**"]
+                            }
+                            st.dataframe(pd.DataFrame(recv_data), hide_index=True, use_container_width=True)
+                else:
+                    st.info(f"No RBs found for {team2} with sufficient carries")
+
+        except Exception as e:
+            st.error(f"Error calculating RB projections: {e}")
 
         st.divider()
 

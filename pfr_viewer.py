@@ -12088,6 +12088,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             col1, col2 = st.columns(2)
 
+            # Get player rushing DVOA for both teams
+            try:
+                rush_dvoa_df = ydvoa.player_rushing_dvoa_to_df(season, week, min_carries=1)
+                rush_dvoa_lookup = {row['Player']: (row['DVOA %'], row['Grade']) for _, row in rush_dvoa_df.iterrows()}
+            except Exception as e:
+                rush_dvoa_lookup = {}
+
             with col1:
                 st.markdown(f"### {team1} Rushers")
                 t1_rushers = rush_stats[rush_stats['team'] == team1].head(5)
@@ -12095,8 +12102,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t1_rush_display = t1_rushers.copy()
                     t1_rush_display['YPC'] = (t1_rush_display['total_yds'] / t1_rush_display['total_att']).round(2)
                     t1_rush_display['Att/G'] = (t1_rush_display['total_att'] / t1_rush_display['games']).round(1)
-                    t1_rush_display = t1_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'max_yds']].copy()
-                    t1_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'Long']
+                    # Add DVOA columns
+                    t1_rush_display['DVOA'] = t1_rush_display['player'].apply(lambda x: rush_dvoa_lookup.get(x, (None, None))[0])
+                    t1_rush_display['Grade'] = t1_rush_display['player'].apply(lambda x: rush_dvoa_lookup.get(x, (None, None))[1])
+                    t1_rush_display['DVOA'] = t1_rush_display['DVOA'].apply(lambda x: f"{x:+.1f}%" if x is not None else "N/A")
+                    t1_rush_display['Grade'] = t1_rush_display['Grade'].fillna("N/A")
+                    t1_rush_display = t1_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'DVOA', 'Grade', 'max_yds']].copy()
+                    t1_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'DVOA', 'Grade', 'Long']
                     t1_rush_display['Games'] = t1_rush_display['Games'].astype(int)
                     t1_rush_display['Tot Yds'] = t1_rush_display['Tot Yds'].astype(int)
                     t1_rush_display['Avg Yds'] = t1_rush_display['Avg Yds'].round(1)
@@ -12171,8 +12183,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t2_rush_display = t2_rushers.copy()
                     t2_rush_display['YPC'] = (t2_rush_display['total_yds'] / t2_rush_display['total_att']).round(2)
                     t2_rush_display['Att/G'] = (t2_rush_display['total_att'] / t2_rush_display['games']).round(1)
-                    t2_rush_display = t2_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'max_yds']].copy()
-                    t2_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'Long']
+                    # Add DVOA columns
+                    t2_rush_display['DVOA'] = t2_rush_display['player'].apply(lambda x: rush_dvoa_lookup.get(x, (None, None))[0])
+                    t2_rush_display['Grade'] = t2_rush_display['player'].apply(lambda x: rush_dvoa_lookup.get(x, (None, None))[1])
+                    t2_rush_display['DVOA'] = t2_rush_display['DVOA'].apply(lambda x: f"{x:+.1f}%" if x is not None else "N/A")
+                    t2_rush_display['Grade'] = t2_rush_display['Grade'].fillna("N/A")
+                    t2_rush_display = t2_rush_display[['player', 'games', 'total_yds', 'avg_yds', 'Att/G', 'total_td', 'YPC', 'DVOA', 'Grade', 'max_yds']].copy()
+                    t2_rush_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Att/G', 'TD', 'YPC', 'DVOA', 'Grade', 'Long']
                     t2_rush_display['Games'] = t2_rush_display['Games'].astype(int)
                     t2_rush_display['Tot Yds'] = t2_rush_display['Tot Yds'].astype(int)
                     t2_rush_display['Avg Yds'] = t2_rush_display['Avg Yds'].round(1)
@@ -12285,6 +12302,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             # Load DOVA cache for opponent strength of schedule
             rec_dova_cache = get_opponent_dova_cached(season, week)
 
+            # Get player receiving DVOA for both teams
+            try:
+                rec_dvoa_df = ydvoa.player_receiving_dvoa_to_df(season, week, min_targets=1)
+                rec_dvoa_lookup = {row['Player']: (row['DVOA %'], row['Grade']) for _, row in rec_dvoa_df.iterrows()}
+            except Exception as e:
+                rec_dvoa_lookup = {}
+
             col1, col2 = st.columns(2)
 
             with col1:
@@ -12295,8 +12319,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t1_rec_display['YPR'] = (t1_rec_display['total_yds'] / t1_rec_display['total_rec']).round(1)
                     t1_rec_display['Catch%'] = (t1_rec_display['total_rec'] / t1_rec_display['total_tgt'] * 100).round(1)
                     t1_rec_display['Rec/G'] = (t1_rec_display['total_rec'] / t1_rec_display['games']).round(1)
-                    t1_rec_display = t1_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'max_yds']].copy()
-                    t1_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'Catch%', 'Long']
+                    # Add DVOA columns
+                    t1_rec_display['DVOA'] = t1_rec_display['player'].apply(lambda x: rec_dvoa_lookup.get(x, (None, None))[0])
+                    t1_rec_display['Grade'] = t1_rec_display['player'].apply(lambda x: rec_dvoa_lookup.get(x, (None, None))[1])
+                    t1_rec_display['DVOA'] = t1_rec_display['DVOA'].apply(lambda x: f"{x:+.1f}%" if x is not None else "N/A")
+                    t1_rec_display['Grade'] = t1_rec_display['Grade'].fillna("N/A")
+                    t1_rec_display = t1_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'DVOA', 'Grade', 'Catch%', 'max_yds']].copy()
+                    t1_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'DVOA', 'Grade', 'Catch%', 'Long']
                     t1_rec_display['Games'] = t1_rec_display['Games'].astype(int)
                     t1_rec_display['Tot Yds'] = t1_rec_display['Tot Yds'].astype(int)
                     t1_rec_display['Avg Yds'] = t1_rec_display['Avg Yds'].round(1)
@@ -12381,8 +12410,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     t2_rec_display['YPR'] = (t2_rec_display['total_yds'] / t2_rec_display['total_rec']).round(1)
                     t2_rec_display['Catch%'] = (t2_rec_display['total_rec'] / t2_rec_display['total_tgt'] * 100).round(1)
                     t2_rec_display['Rec/G'] = (t2_rec_display['total_rec'] / t2_rec_display['games']).round(1)
-                    t2_rec_display = t2_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'Catch%', 'max_yds']].copy()
-                    t2_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'Catch%', 'Long']
+                    # Add DVOA columns
+                    t2_rec_display['DVOA'] = t2_rec_display['player'].apply(lambda x: rec_dvoa_lookup.get(x, (None, None))[0])
+                    t2_rec_display['Grade'] = t2_rec_display['player'].apply(lambda x: rec_dvoa_lookup.get(x, (None, None))[1])
+                    t2_rec_display['DVOA'] = t2_rec_display['DVOA'].apply(lambda x: f"{x:+.1f}%" if x is not None else "N/A")
+                    t2_rec_display['Grade'] = t2_rec_display['Grade'].fillna("N/A")
+                    t2_rec_display = t2_rec_display[['player', 'games', 'total_yds', 'avg_yds', 'total_rec', 'Rec/G', 'total_td', 'YPR', 'DVOA', 'Grade', 'Catch%', 'max_yds']].copy()
+                    t2_rec_display.columns = ['Player', 'Games', 'Tot Yds', 'Avg Yds', 'Tot Rec', 'Rec/G', 'TD', 'YPR', 'DVOA', 'Grade', 'Catch%', 'Long']
                     t2_rec_display['Games'] = t2_rec_display['Games'].astype(int)
                     t2_rec_display['Tot Yds'] = t2_rec_display['Tot Yds'].astype(int)
                     t2_rec_display['Avg Yds'] = t2_rec_display['Avg Yds'].round(1)

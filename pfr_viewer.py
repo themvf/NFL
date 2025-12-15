@@ -20,6 +20,7 @@ import json
 from historical_trends import render_historical_trends
 import player_impact_analytics as pia
 import enhanced_projections as ep
+import yardage_dvoa as ydvoa
 
 # Configure logging
 logging.basicConfig(
@@ -9086,7 +9087,8 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Projection Analytics",
             "Player Impact",
             "Database Manager",
-            "Transaction Manager"
+            "Transaction Manager",
+            "Yardage DVOA"
         ],
         index=0
     )
@@ -23196,6 +23198,280 @@ def render_skill_player_yards_touches_chart(season: Optional[int], week: Optiona
         st.error(f"Error generating chart: {e}")
 
 
+
+# ============================================================================
+# Section: Yardage DVOA
+# ============================================================================
+
+def render_yardage_dvoa(season: Optional[int], week: Optional[int]):
+    """
+    Render the Yardage-Only DVOA analytics view.
+
+    This view shows defense-adjusted value over average for offensive players,
+    using only yardage data (no proprietary play-by-play required).
+    """
+    st.header("📊 Yardage-Only DVOA")
+    st.markdown(
+        """
+        **Defense-adjusted Value Over Average** measures how much better or worse than
+        league average a player is at generating yards per opportunity, after adjusting
+        for opponent strength.
+
+        - **Positive DVOA** = Better than league average
+        - **Negative DVOA** = Worse than league average
+        - **Adjustment Factor** shows how opponent difficulty affects yard value
+        """
+    )
+
+    if not season:
+        st.warning("Please select a season from the sidebar.")
+        return
+
+    # Tabs for different views
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 League Overview",
+        "🛡️ Defensive Rankings",
+        "🏃 Rushing DVOA",
+        "🎯 Receiving DVOA"
+    ])
+
+    # TAB 1: League Overview
+    with tab1:
+        st.subheader("League Baselines")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("#### Rushing")
+            rush_baseline = ydvoa.calculate_league_rushing_baseline(season, week)
+            st.metric("League Avg YPC", f"{rush_baseline['league_avg_ypc']:.2f}")
+            st.metric("Total Rush Yards", f"{rush_baseline['total_yards']:,}")
+            st.metric("Total Carries", f"{rush_baseline['total_carries']:,}")
+
+        with col2:
+            st.markdown("#### Receiving")
+            recv_baseline = ydvoa.calculate_league_receiving_baseline(season, week)
+            st.metric("League Avg Y/Target", f"{recv_baseline['league_avg_ypt']:.2f}")
+            st.metric("Total Recv Yards", f"{recv_baseline['total_yards']:,}")
+            st.metric("Total Targets", f"{recv_baseline['total_targets']:,}")
+
+        st.divider()
+
+        # Summary of top performers
+        st.subheader("Quick Summary")
+
+        summary = ydvoa.get_dvoa_summary(season, week)
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("##### Top 5 Rushing Defenses")
+            for d in summary['top_rushing_defenses']:
+                logo_url = get_team_logo_url(d['team'])
+                st.write(f"🛡️ **{d['team']}**: DVOA {d['dvoa']:+.1f}%")
+
+        with col2:
+            st.markdown("##### Top 5 Rushing Players")
+            for p in summary['top_rushing_players'][:5]:
+                st.write(f"🏃 **{p['name']}** ({p['team']}): {p['grade']} ({p['dvoa']:+.1f}%)")
+
+    # TAB 2: Defensive Rankings
+    with tab2:
+        st.subheader("Defensive DVOA Rankings")
+        st.markdown(
+            """
+            **Negative DVOA** = Strong defense (allows fewer yards)
+            **Positive DVOA** = Weak defense (allows more yards)
+            **Adj Factor** > 1.0 = Yards against this team are worth MORE (boost player stats)
+            """
+        )
+
+        def_type = st.radio("Defense Type", ["Rush Defense", "Pass Defense"], horizontal=True)
+
+        if def_type == "Rush Defense":
+            df = ydvoa.defensive_rush_dvoa_to_df(season, week)
+            st.dataframe(
+                df.style.background_gradient(subset=['DVOA %'], cmap='RdYlGn_r'),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Visualize with bar chart
+            st.subheader("Rush Defense DVOA Chart")
+            import plotly.express as px
+            fig = px.bar(
+                df.sort_values('DVOA %'),
+                x='DVOA %',
+                y='Team',
+                orientation='h',
+                color='DVOA %',
+                color_continuous_scale='RdYlGn_r',
+                title='Rush Defense DVOA (Negative = Better)'
+            )
+            fig.update_layout(height=700, yaxis={'categoryorder': 'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            df = ydvoa.defensive_pass_dvoa_to_df(season, week)
+            st.dataframe(
+                df.style.background_gradient(subset=['DVOA %'], cmap='RdYlGn_r'),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Visualize with bar chart
+            st.subheader("Pass Defense DVOA Chart")
+            import plotly.express as px
+            fig = px.bar(
+                df.sort_values('DVOA %'),
+                x='DVOA %',
+                y='Team',
+                orientation='h',
+                color='DVOA %',
+                color_continuous_scale='RdYlGn_r',
+                title='Pass Defense DVOA (Negative = Better)'
+            )
+            fig.update_layout(height=700, yaxis={'categoryorder': 'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+    # TAB 3: Rushing DVOA
+    with tab3:
+        st.subheader("Player Rushing DVOA")
+        st.markdown(
+            """
+            Player rushing efficiency after adjusting for opponent defensive strength.
+
+            - **Raw YPC**: Actual yards per carry
+            - **Adj YPC**: Schedule-adjusted yards per carry
+            - **DVOA %**: Percentage above/below league average
+            """
+        )
+
+        min_carries = st.slider("Minimum Carries", 10, 100, 30, 5)
+
+        df = ydvoa.player_rushing_dvoa_to_df(season, week, min_carries)
+
+        if df.empty:
+            st.warning("No players found matching criteria.")
+        else:
+            # Color the Grade column
+            st.dataframe(
+                df.style.background_gradient(subset=['DVOA %'], cmap='RdYlGn'),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Top performers chart
+            st.subheader("Top 15 RBs by Rushing DVOA")
+            top_15 = df.head(15)
+
+            import plotly.express as px
+            fig = px.bar(
+                top_15,
+                x='DVOA %',
+                y='Player',
+                orientation='h',
+                color='Grade',
+                color_discrete_map={
+                    'A+': '#1a9850', 'A': '#66bd63', 'A-': '#a6d96a',
+                    'B+': '#d9ef8b', 'B': '#fee08b', 'B-': '#fdae61',
+                    'C+': '#f46d43', 'C': '#d73027', 'C-': '#a50026',
+                    'D': '#7f0000', 'F': '#4d0000'
+                },
+                title='Rushing DVOA - Top 15 Players',
+                hover_data=['Team', 'Carries', 'Raw YPC', 'Adj YPC']
+            )
+            fig.update_layout(height=500, yaxis={'categoryorder': 'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Raw vs Adjusted comparison
+            st.subheader("Raw vs Adjusted YPC")
+            fig2 = px.scatter(
+                df,
+                x='Raw YPC',
+                y='Adj YPC',
+                color='DVOA %',
+                size='Carries',
+                hover_name='Player',
+                color_continuous_scale='RdYlGn',
+                title='Raw YPC vs Schedule-Adjusted YPC'
+            )
+            # Add diagonal reference line
+            max_val = max(df['Raw YPC'].max(), df['Adj YPC'].max()) + 0.5
+            fig2.add_shape(type='line', x0=0, y0=0, x1=max_val, y1=max_val,
+                          line=dict(color='gray', dash='dash'))
+            fig2.update_layout(height=500)
+            st.plotly_chart(fig2, use_container_width=True)
+            st.caption("Points above the line faced harder schedules. Points below faced easier schedules.")
+
+    # TAB 4: Receiving DVOA
+    with tab4:
+        st.subheader("Player Receiving DVOA")
+        st.markdown(
+            """
+            Player receiving efficiency (yards per target) after adjusting for opponent pass defense.
+
+            - **Raw Y/Tgt**: Actual yards per target
+            - **Adj Y/Tgt**: Schedule-adjusted yards per target
+            - **DVOA %**: Percentage above/below league average
+            """
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            min_targets = st.slider("Minimum Targets", 10, 60, 20, 5)
+        with col2:
+            pos_filter = st.selectbox("Position", ["All", "WR", "TE", "RB"])
+
+        pos = None if pos_filter == "All" else pos_filter
+        df = ydvoa.player_receiving_dvoa_to_df(season, week, min_targets, pos)
+
+        if df.empty:
+            st.warning("No players found matching criteria.")
+        else:
+            st.dataframe(
+                df.style.background_gradient(subset=['DVOA %'], cmap='RdYlGn'),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # Top performers chart
+            st.subheader("Top 15 Receivers by DVOA")
+            top_15 = df.head(15)
+
+            import plotly.express as px
+            fig = px.bar(
+                top_15,
+                x='DVOA %',
+                y='Player',
+                orientation='h',
+                color='Grade',
+                color_discrete_map={
+                    'A+': '#1a9850', 'A': '#66bd63', 'A-': '#a6d96a',
+                    'B+': '#d9ef8b', 'B': '#fee08b', 'B-': '#fdae61',
+                    'C+': '#f46d43', 'C': '#d73027', 'C-': '#a50026',
+                    'D': '#7f0000', 'F': '#4d0000'
+                },
+                title='Receiving DVOA - Top 15 Players',
+                hover_data=['Team', 'Targets', 'Raw Y/Tgt', 'Adj Y/Tgt']
+            )
+            fig.update_layout(height=500, yaxis={'categoryorder': 'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Position breakdown
+            if pos_filter == "All":
+                st.subheader("DVOA by Position")
+                import plotly.express as px
+                fig3 = px.box(
+                    df,
+                    x='Pos',
+                    y='DVOA %',
+                    color='Pos',
+                    title='DVOA Distribution by Position'
+                )
+                st.plotly_chart(fig3, use_container_width=True)
+
+
 # ============================================================================
 # Main App
 # ============================================================================
@@ -23539,6 +23815,9 @@ def main():
 
     elif view == "Transaction Manager":
         render_transaction_manager(season, week)
+
+    elif view == "Yardage DVOA":
+        render_yardage_dvoa(season, week)
 
 
 if __name__ == "__main__":

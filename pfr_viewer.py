@@ -12519,6 +12519,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.session_state.team_comp_rb_adj = {}
 
             
+            away_projs, home_projs = rbp.get_matchup_projections(team1, team2, season, proj_week, min_carries=10)
 
             rb_col1, rb_col2 = st.columns(2)
 

@@ -9370,6 +9370,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         st.session_state.comparison_team1_idx = 0
     if 'comparison_team2_idx' not in st.session_state:
         st.session_state.comparison_team2_idx = min(1, len(teams)-1)
+    if 'quick_matchup_week' not in st.session_state:
+        st.session_state.quick_matchup_week = "Manual Selection"
+    if 'quick_matchup_game' not in st.session_state:
+        st.session_state.quick_matchup_game = 0
 
     # Get available weeks and matchups from schedule
     try:
@@ -9387,9 +9391,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             col_week, col_matchup, col_button = st.columns([1, 3, 1])
 
             with col_week:
+                # Calculate week selector index from session state
+                week_options = ["Manual Selection"] + available_weeks
+                try:
+                    week_index = week_options.index(st.session_state.quick_matchup_week)
+                except (ValueError, KeyError):
+                    week_index = 0
+
                 selected_matchup_week = st.selectbox(
                     "Select Week",
-                    ["Manual Selection"] + available_weeks,
+                    week_options,
+                    index=week_index,
                     key="quick_matchup_week",
                     help="Choose a week to see matchups, or 'Manual Selection' to pick teams manually"
                 )
@@ -9418,9 +9430,18 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         })
 
                     with col_matchup:
+                        # Get matchup index from session state
+                        try:
+                            matchup_default_idx = st.session_state.quick_matchup_game
+                            if matchup_default_idx >= len(matchup_options):
+                                matchup_default_idx = 0
+                        except (KeyError, TypeError):
+                            matchup_default_idx = 0
+
                         selected_matchup_idx = st.selectbox(
                             "Select Matchup",
                             range(len(matchup_options)),
+                            index=matchup_default_idx,
                             format_func=lambda x: matchup_options[x]['display'],
                             key="quick_matchup_game"
                         )

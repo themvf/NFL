@@ -377,6 +377,11 @@ def calculate_rb_projection(
     projected_team_rush = team_rush_base + spread_adj
     projected_carries = 0.6 * baseline['median_carries'] + 0.4 * (projected_team_rush * baseline['rush_share'])
 
+    # Cap projected carries at realistic bounds
+    MIN_CARRIES = 0.0
+    MAX_CARRIES = 35.0  # Elite bell cow workload ceiling
+    projected_carries = max(MIN_CARRIES, min(MAX_CARRIES, projected_carries))
+
     # Get league baseline
     rush_baseline = ydvoa.calculate_league_rushing_baseline(season, week)
     league_avg_ypc = rush_baseline['league_avg_ypc']
@@ -392,12 +397,22 @@ def calculate_rb_projection(
     # ProjectedYPC = LgYPC * (1 + RB_DVOA/100) / (1 - DEF_DVOA/100)
     projected_ypc = league_avg_ypc * (1 + rb_rush_dvoa/100) / (1 - safe_def_rush_dvoa/100)
 
+    # Cap projected YPC at realistic bounds (prevent extreme projections)
+    MIN_YPC = 2.0  # Floor for any rushing performance
+    MAX_YPC = 8.0  # Elite single-game ceiling
+    projected_ypc = max(MIN_YPC, min(MAX_YPC, projected_ypc))
+
     # Calculate projected rush yards
     projected_rush_yards = projected_carries * projected_ypc
 
     # --- RECEIVING PROJECTION ---
     projected_team_targets = team_target_base  # Could add spread adj here too
     projected_targets = 0.6 * baseline['median_targets'] + 0.4 * (projected_team_targets * baseline['target_share'])
+
+    # Cap projected targets at realistic bounds
+    MIN_TARGETS = 0.0
+    MAX_TARGETS = 12.0  # Elite pass-catching back ceiling
+    projected_targets = max(MIN_TARGETS, min(MAX_TARGETS, projected_targets))
 
     # Get receiving baselines
     recv_baseline = ydvoa.calculate_league_receiving_baseline(season, week)
@@ -412,6 +427,11 @@ def calculate_rb_projection(
 
     # Calculate projected YPT (yards per target, not per reception)
     projected_ypt = league_avg_ypt * (1 + rb_recv_dvoa/100) / (1 - safe_def_pass_dvoa/100)
+
+    # Cap projected yards per target at realistic bounds
+    MIN_YPT = 3.0   # Floor for RB receiving efficiency
+    MAX_YPT = 12.0  # Elite pass-catching back ceiling
+    projected_ypt = max(MIN_YPT, min(MAX_YPT, projected_ypt))
 
     # Calculate projected receiving yards
     # Note: we use targets * YPT directly (YPT already accounts for incompletions)

@@ -1,0 +1,5 @@
+
+        # Initialize session state for RB projection adjustments
+        if 'team_comp_rb_adj' not in st.session_state:
+            st.session_state.team_comp_rb_adj = {}
+

@@ -12513,7 +12513,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         # Get RB projections for both teams
         try:
             proj_week = week if week else 14  # Use week or default
-            away_projs, home_projs = rbp.get_matchup_projections(team1, team2, season, proj_week, min_carries=10)
+
+            # Initialize session state for RB projection adjustments
+            if 'team_comp_rb_adj' not in st.session_state:
+                st.session_state.team_comp_rb_adj = {}
+
+            
 
             rb_col1, rb_col2 = st.columns(2)
 
@@ -12527,6 +12532,75 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
                             m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
                             m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+
+                            # Adjustment Controls
+                            st.markdown("---")
+                            st.markdown("##### 🔧 Adjust Projections")
+                            
+                            player_key = f"{proj.player_name}_{proj.team}"
+                            
+                            # Initialize adjustments for this player
+                            if player_key not in st.session_state.team_comp_rb_adj:
+                                st.session_state.team_comp_rb_adj[player_key] = {
+                                    'carry_adj': 0.0, 'ypc_adj': 0.0, 
+                                    'target_adj': 0.0, 'ypt_adj': 0.0
+                                }
+                            
+                            adj_col1, adj_col2, adj_col3, adj_col4 = st.columns(4)
+                            
+                            with adj_col1:
+                                carry_adj = st.number_input(
+                                    "Carry Adj", -20.0, 20.0, 
+                                    st.session_state.team_comp_rb_adj[player_key]['carry_adj'],
+                                    0.5, key=f"tc_carry_{player_key}"
+                                )
+                            with adj_col2:
+                                ypc_adj = st.number_input(
+                                    "YPC Adj", -3.0, 3.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['ypc_adj'],
+                                    0.1, key=f"tc_ypc_{player_key}"
+                                )
+                            with adj_col3:
+                                target_adj = st.number_input(
+                                    "Target Adj", -10.0, 10.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['target_adj'],
+                                    0.5, key=f"tc_tgt_{player_key}"
+                                )
+                            with adj_col4:
+                                ypt_adj = st.number_input(
+                                    "YPT Adj", -5.0, 5.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['ypt_adj'],
+                                    0.1, key=f"tc_ypt_{player_key}"
+                                )
+                            
+                            # Update session state
+                            st.session_state.team_comp_rb_adj[player_key] = {
+                                'carry_adj': carry_adj, 'ypc_adj': ypc_adj,
+                                'target_adj': target_adj, 'ypt_adj': ypt_adj
+                            }
+                            
+                            # Calculate adjusted values
+                            adj_carries = max(0, proj.projected_carries + carry_adj)
+                            adj_ypc = proj.projected_ypc + ypc_adj
+                            adj_rush_yds = adj_carries * adj_ypc
+                            
+                            adj_targets = max(0, proj.projected_targets + target_adj)
+                            adj_ypt = proj.projected_ypt + ypt_adj
+                            adj_recv_yds = adj_targets * proj.catch_rate * adj_ypt
+                            
+                            adj_total_yds = adj_rush_yds + adj_recv_yds
+                            
+                            # Show adjusted totals with deltas
+                            if carry_adj != 0 or ypc_adj != 0 or target_adj != 0 or ypt_adj != 0:
+                                st.markdown("##### 📈 Adjusted Totals")
+                                adj_m1, adj_m2, adj_m3 = st.columns(3)
+                                adj_m1.metric("Adj Rush", f"{adj_rush_yds:.1f}", 
+                                            f"{adj_rush_yds - proj.projected_rush_yards:+.1f}")
+                                adj_m2.metric("Adj Recv", f"{adj_recv_yds:.1f}",
+                                            f"{adj_recv_yds - proj.projected_recv_yards:+.1f}")
+                                adj_m3.metric("Adj Total", f"{adj_total_yds:.1f}",
+                                            f"{adj_total_yds - proj.projected_total_yards:+.1f}")
+                            
 
                             st.markdown("---")
                             st.markdown("**📊 RUSHING PROJECTION**")
@@ -12570,6 +12644,75 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
                             m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
                             m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+
+                            # Adjustment Controls
+                            st.markdown("---")
+                            st.markdown("##### 🔧 Adjust Projections")
+
+                            player_key = f"{proj.player_name}_{proj.team}"
+
+                            # Initialize adjustments for this player
+                            if player_key not in st.session_state.team_comp_rb_adj:
+                                st.session_state.team_comp_rb_adj[player_key] = {
+                                    'carry_adj': 0.0, 'ypc_adj': 0.0,
+                                    'target_adj': 0.0, 'ypt_adj': 0.0
+                                }
+
+                            adj_col1, adj_col2, adj_col3, adj_col4 = st.columns(4)
+
+                            with adj_col1:
+                                carry_adj = st.number_input(
+                                    "Carry Adj", -20.0, 20.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['carry_adj'],
+                                    0.5, key=f"tc_carry_{player_key}_home"
+                                )
+                            with adj_col2:
+                                ypc_adj = st.number_input(
+                                    "YPC Adj", -3.0, 3.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['ypc_adj'],
+                                    0.1, key=f"tc_ypc_{player_key}_home"
+                                )
+                            with adj_col3:
+                                target_adj = st.number_input(
+                                    "Target Adj", -10.0, 10.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['target_adj'],
+                                    0.5, key=f"tc_tgt_{player_key}_home"
+                                )
+                            with adj_col4:
+                                ypt_adj = st.number_input(
+                                    "YPT Adj", -5.0, 5.0,
+                                    st.session_state.team_comp_rb_adj[player_key]['ypt_adj'],
+                                    0.1, key=f"tc_ypt_{player_key}_home"
+                                )
+
+                            # Update session state
+                            st.session_state.team_comp_rb_adj[player_key] = {
+                                'carry_adj': carry_adj, 'ypc_adj': ypc_adj,
+                                'target_adj': target_adj, 'ypt_adj': ypt_adj
+                            }
+
+                            # Calculate adjusted values
+                            adj_carries = max(0, proj.projected_carries + carry_adj)
+                            adj_ypc = proj.projected_ypc + ypc_adj
+                            adj_rush_yds = adj_carries * adj_ypc
+
+                            adj_targets = max(0, proj.projected_targets + target_adj)
+                            adj_ypt = proj.projected_ypt + ypt_adj
+                            adj_recv_yds = adj_targets * proj.catch_rate * adj_ypt
+
+                            adj_total_yds = adj_rush_yds + adj_recv_yds
+
+                            # Show adjusted totals with deltas
+                            if carry_adj != 0 or ypc_adj != 0 or target_adj != 0 or ypt_adj != 0:
+                                st.markdown("##### 📈 Adjusted Totals")
+                                adj_m1, adj_m2, adj_m3 = st.columns(3)
+                                adj_m1.metric("Adj Rush", f"{adj_rush_yds:.1f}",
+                                            f"{adj_rush_yds - proj.projected_rush_yards:+.1f}")
+                                adj_m2.metric("Adj Recv", f"{adj_recv_yds:.1f}",
+                                            f"{adj_recv_yds - proj.projected_recv_yards:+.1f}")
+                                adj_m3.metric("Adj Total", f"{adj_total_yds:.1f}",
+                                            f"{adj_total_yds - proj.projected_total_yards:+.1f}")
+
 
                             st.markdown("---")
                             st.markdown("**📊 RUSHING PROJECTION**")
@@ -19437,10 +19580,6 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
 
                         rb_df = projections['RB'].head(30).copy()
 
-                        # Initialize session state for RB adjustments
-                        if 'rb_adjustments' not in st.session_state:
-                            st.session_state.rb_adjustments = {}
-
                         # Add enhanced projections
                         with st.spinner("Calculating enhanced RB projections with rush defense matchups..."):
                             rb_df = add_enhanced_projections_to_rb(rb_df, selected_season)
@@ -19503,168 +19642,6 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                         )
 
                         # Show storylines/recommendations in expandable section
-
-                        # ==========================================
-                        # Interactive Adjustment Controls
-                        # ==========================================
-                        st.markdown("---")
-                        st.subheader("🎯 Adjust Individual Projections")
-                        st.caption("Fine-tune projections by adjusting carries, YPC, targets, and yards per target")
-
-                        # Reset button
-                        if st.button("🔄 Reset All Adjustments", type="secondary"):
-                            st.session_state.rb_adjustments = {}
-                            st.rerun()
-
-                        # Per-player adjustment sections
-                        for idx, rb in rb_df.iterrows():
-                            player_key = f"{rb['Player']}_{rb['Team']}"
-
-                            # Initialize this player's adjustments if not exists
-                            if player_key not in st.session_state.rb_adjustments:
-                                st.session_state.rb_adjustments[player_key] = {
-                                    'carry_adj': 0.0,
-                                    'ypc_adj': 0.0,
-                                    'target_adj': 0.0,
-                                    'ypt_adj': 0.0
-                                }
-
-                            with st.expander(
-                                f"**{rb['Player']}** ({rb['Team']}) vs {rb['Opponent']} - RB Score: {rb['RB Score']:.1f}",
-                                expanded=False
-                            ):
-                                # Original projections display
-                                st.markdown("##### 📊 Original Projections")
-                                orig_col1, orig_col2 = st.columns(2)
-
-                                with orig_col1:
-                                    st.metric("Rush Yards", f"{rb['Enhanced Proj Rush Yds']:.1f}")
-                                    st.metric("Projected Carries", f"{rb['Proj Carries']:.1f}")
-
-                                with orig_col2:
-                                    st.metric("Receiving Yards", f"{rb['Rec Yds/Gm']:.1f}")
-                                    st.metric("Projected Receptions", f"{rb['Proj Rec']:.1f}")
-
-                                st.markdown("---")
-
-                                # Adjustment inputs
-                                st.markdown("##### 🔧 Adjustments")
-                                adj_col1, adj_col2, adj_col3, adj_col4 = st.columns(4)
-
-                                with adj_col1:
-                                    carry_adj = st.number_input(
-                                        "Carry Adj",
-                                        min_value=-20.0,
-                                        max_value=20.0,
-                                        value=st.session_state.rb_adjustments[player_key]['carry_adj'],
-                                        step=0.5,
-                                        key=f"carry_{player_key}",
-                                        help="Adjust projected carries (+/- carries)"
-                                    )
-
-                                with adj_col2:
-                                    ypc_adj = st.number_input(
-                                        "YPC Adj",
-                                        min_value=-3.0,
-                                        max_value=3.0,
-                                        value=st.session_state.rb_adjustments[player_key]['ypc_adj'],
-                                        step=0.1,
-                                        key=f"ypc_{player_key}",
-                                        help="Adjust yards per carry (+/- yards)"
-                                    )
-
-                                with adj_col3:
-                                    target_adj = st.number_input(
-                                        "Target Adj",
-                                        min_value=-10.0,
-                                        max_value=10.0,
-                                        value=st.session_state.rb_adjustments[player_key]['target_adj'],
-                                        step=0.5,
-                                        key=f"target_{player_key}",
-                                        help="Adjust projected targets (+/- targets)"
-                                    )
-
-                                with adj_col4:
-                                    ypt_adj = st.number_input(
-                                        "YPT Adj",
-                                        min_value=-5.0,
-                                        max_value=5.0,
-                                        value=st.session_state.rb_adjustments[player_key]['ypt_adj'],
-                                        step=0.1,
-                                        key=f"ypt_{player_key}",
-                                        help="Adjust yards per target (+/- yards)"
-                                    )
-
-                                # Update session state
-                                st.session_state.rb_adjustments[player_key] = {
-                                    'carry_adj': carry_adj,
-                                    'ypc_adj': ypc_adj,
-                                    'target_adj': target_adj,
-                                    'ypt_adj': ypt_adj
-                                }
-
-                                # Calculate adjusted values
-                                original_carries = rb['Proj Carries']
-                                original_rush_yds = rb['Enhanced Proj Rush Yds']
-                                original_ypc = original_rush_yds / original_carries if original_carries > 0 else 0
-
-                                adjusted_carries = max(0, original_carries + carry_adj)
-                                adjusted_ypc = original_ypc + ypc_adj
-                                adjusted_rush_yds = adjusted_carries * adjusted_ypc
-
-                                # For receiving (estimate original targets from receptions)
-                                original_rec = rb['Proj Rec']
-                                original_rec_yds = rb['Rec Yds/Gm']
-                                # Estimate targets (assuming ~75% catch rate)
-                                estimated_targets = original_rec / 0.75 if original_rec > 0 else 0
-                                original_ypt = original_rec_yds / estimated_targets if estimated_targets > 0 else 0
-
-                                adjusted_targets = max(0, estimated_targets + target_adj)
-                                adjusted_ypt = original_ypt + ypt_adj
-                                # Assume same catch rate
-                                adjusted_receptions = adjusted_targets * 0.75
-                                adjusted_rec_yds = adjusted_receptions * adjusted_ypt
-
-                                # Display adjusted projections
-                                st.markdown("---")
-                                st.markdown("##### 📈 Adjusted Projections")
-
-                                adj_result_col1, adj_result_col2 = st.columns(2)
-
-                                with adj_result_col1:
-                                    rush_change = adjusted_rush_yds - original_rush_yds
-                                    st.metric(
-                                        "Adjusted Rush Yards",
-                                        f"{adjusted_rush_yds:.1f}",
-                                        delta=f"{rush_change:+.1f}",
-                                        delta_color="normal"
-                                    )
-                                    st.caption(f"Original: {original_rush_yds:.1f} → Adjusted: {adjusted_rush_yds:.1f}")
-
-                                with adj_result_col2:
-                                    rec_change = adjusted_rec_yds - original_rec_yds
-                                    st.metric(
-                                        "Adjusted Rec Yards",
-                                        f"{adjusted_rec_yds:.1f}",
-                                        delta=f"{rec_change:+.1f}",
-                                        delta_color="normal"
-                                    )
-                                    st.caption(f"Original: {original_rec_yds:.1f} → Adjusted: {adjusted_rec_yds:.1f}")
-
-                                # Total yards comparison
-                                original_total = original_rush_yds + original_rec_yds
-                                adjusted_total = adjusted_rush_yds + adjusted_rec_yds
-                                total_change = adjusted_total - original_total
-
-                                st.markdown("---")
-                                st.metric(
-                                    "🎯 Total Adjusted Yards",
-                                    f"{adjusted_total:.1f}",
-                                    delta=f"{total_change:+.1f}",
-                                    delta_color="normal"
-                                )
-                                st.caption(f"Original Total: {original_total:.1f} → Adjusted Total: {adjusted_total:.1f}")
-
                         st.markdown("---")
 
                         with st.expander("📊 View Detailed RB Recommendations"):

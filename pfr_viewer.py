@@ -9455,8 +9455,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             selected_matchup = matchup_options[selected_matchup_idx]
                             if selected_matchup['away'] in teams:
                                 st.session_state.comparison_team1_idx = teams.index(selected_matchup['away'])
+                                st.session_state.team1 = selected_matchup['away']  # Update widget key
                             if selected_matchup['home'] in teams:
                                 st.session_state.comparison_team2_idx = teams.index(selected_matchup['home'])
+                                st.session_state.team2 = selected_matchup['home']  # Update widget key
                             st.session_state.matchup_selected = True
                             st.rerun()
 

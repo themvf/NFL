@@ -22,6 +22,7 @@ import player_impact_analytics as pia
 import enhanced_projections as ep
 import yardage_dvoa as ydvoa
 import rb_projections as rbp
+import wr_projections as wrp
 
 # Configure logging
 logging.basicConfig(
@@ -12788,6 +12789,189 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
         except Exception as e:
             st.error(f"Error calculating RB projections: {e}")
+
+        st.divider()
+
+        # ========================================================================
+        # WR Projections Section
+        # ========================================================================
+        st.subheader("🎯 WR Projections")
+        st.caption("DVOA-adjusted receiving yard projections for wide receivers with game script adjustments")
+
+        # Get spread for this matchup
+        try:
+            spread_line = wrp.get_matchup_spread(team1, team2, season, week if week else 14)
+
+            if spread_line is not None:
+                st.info(wrp.format_spread_display(spread_line, team2))
+            else:
+                st.info("Spread data not available")
+
+            # Initialize session state for WR adjustments
+            if 'team_comp_wr_adj' not in st.session_state:
+                st.session_state.team_comp_wr_adj = {}
+
+            # Get WR projections for both teams
+            away_wr_projs, home_wr_projs = wrp.get_matchup_projections(team1, team2, season, week if week else 14, min_targets=10)
+
+            # Display Away Team WRs
+            if away_wr_projs:
+                st.markdown(f"### {team1} WRs (Away)")
+
+                for proj in away_wr_projs:
+                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.1f} total yards"):
+                        st.markdown("**📊 BASE PROJECTION**")
+                        base_data = {
+                            "Metric": ["Baseline Tgts", "Team Base", "Tgt Share %", "Spread Adj", "Proj Tgts",
+                                       "League YPT", "WR DVOA", "DEF DVOA", "Proj YPT", "Catch Rate", "**Proj Yds**"],
+                            "Value": [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
+                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.1f}",
+                                     f"{proj.projected_targets:.1f}", f"{proj.league_avg_ypt:.2f}",
+                                     f"{proj.wr_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
+                                     f"{proj.projected_ypt:.2f}", f"{proj.catch_rate:.1%}",
+                                     f"**{proj.projected_recv_yards:.1f}**"]
+                        }
+                        st.dataframe(pd.DataFrame(base_data), hide_index=True, use_container_width=True)
+
+                        st.markdown("##### 🎛️ Manual Adjustments")
+
+                        # Player key for session state
+                        player_key = f"{proj.player_name}_{proj.team}"
+
+                        # Initialize adjustments for this player
+                        if player_key not in st.session_state.team_comp_wr_adj:
+                            st.session_state.team_comp_wr_adj[player_key] = {
+                                'targets': proj.projected_targets,
+                                'ypt': proj.projected_ypt,
+                                'catch_rate': proj.catch_rate
+                            }
+
+                        adj_col1, adj_col2, adj_col3 = st.columns(3)
+
+                        with adj_col1:
+                            target = st.number_input(
+                                "Projected Targets",
+                                min_value=0.0, max_value=20.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['targets'],
+                                step=0.5, key=f"tc_wr_tgt_{player_key}",
+                                help="Enter total projected targets"
+                            )
+                        with adj_col2:
+                            ypt = st.number_input(
+                                "Yards Per Target",
+                                min_value=0.0, max_value=20.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['ypt'],
+                                step=0.1, key=f"tc_wr_ypt_{player_key}",
+                                help="Enter projected YPT"
+                            )
+                        with adj_col3:
+                            catch_rate = st.number_input(
+                                "Catch Rate",
+                                min_value=0.0, max_value=1.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['catch_rate'],
+                                step=0.01, key=f"tc_wr_cr_{player_key}",
+                                help="Enter catch rate (0.00-1.00)",
+                                format="%.2f"
+                            )
+
+                        # Update session state
+                        st.session_state.team_comp_wr_adj[player_key] = {
+                            'targets': target, 'ypt': ypt, 'catch_rate': catch_rate
+                        }
+
+                        # Calculate adjusted values
+                        adj_recv_yds = target * catch_rate * ypt
+
+                        # Show adjusted totals with deltas
+                        if (target != proj.projected_targets or ypt != proj.projected_ypt or
+                            catch_rate != proj.catch_rate):
+                            st.markdown("##### 📈 Adjusted Totals")
+                            adj_m1 = st.columns(1)[0]
+                            adj_m1.metric("Adj Recv", f"{adj_recv_yds:.1f}",
+                                        f"{adj_recv_yds - proj.projected_recv_yards:+.1f}")
+            else:
+                st.info(f"No WRs found for {team1} with sufficient targets")
+
+            # Display Home Team WRs
+            if home_wr_projs:
+                st.markdown(f"### {team2} WRs (Home)")
+
+                for proj in home_wr_projs:
+                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.1f} total yards"):
+                        st.markdown("**📊 BASE PROJECTION**")
+                        base_data = {
+                            "Metric": ["Baseline Tgts", "Team Base", "Tgt Share %", "Spread Adj", "Proj Tgts",
+                                       "League YPT", "WR DVOA", "DEF DVOA", "Proj YPT", "Catch Rate", "**Proj Yds**"],
+                            "Value": [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
+                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.1f}",
+                                     f"{proj.projected_targets:.1f}", f"{proj.league_avg_ypt:.2f}",
+                                     f"{proj.wr_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
+                                     f"{proj.projected_ypt:.2f}", f"{proj.catch_rate:.1%}",
+                                     f"**{proj.projected_recv_yards:.1f}**"]
+                        }
+                        st.dataframe(pd.DataFrame(base_data), hide_index=True, use_container_width=True)
+
+                        st.markdown("##### 🎛️ Manual Adjustments")
+
+                        # Player key for session state (add _home suffix to avoid conflicts)
+                        player_key = f"{proj.player_name}_{proj.team}"
+
+                        # Initialize adjustments for this player
+                        if player_key not in st.session_state.team_comp_wr_adj:
+                            st.session_state.team_comp_wr_adj[player_key] = {
+                                'targets': proj.projected_targets,
+                                'ypt': proj.projected_ypt,
+                                'catch_rate': proj.catch_rate
+                            }
+
+                        adj_col1, adj_col2, adj_col3 = st.columns(3)
+
+                        with adj_col1:
+                            target = st.number_input(
+                                "Projected Targets",
+                                min_value=0.0, max_value=20.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['targets'],
+                                step=0.5, key=f"tc_wr_tgt_{player_key}_home",
+                                help="Enter total projected targets"
+                            )
+                        with adj_col2:
+                            ypt = st.number_input(
+                                "Yards Per Target",
+                                min_value=0.0, max_value=20.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['ypt'],
+                                step=0.1, key=f"tc_wr_ypt_{player_key}_home",
+                                help="Enter projected YPT"
+                            )
+                        with adj_col3:
+                            catch_rate = st.number_input(
+                                "Catch Rate",
+                                min_value=0.0, max_value=1.0,
+                                value=st.session_state.team_comp_wr_adj[player_key]['catch_rate'],
+                                step=0.01, key=f"tc_wr_cr_{player_key}_home",
+                                help="Enter catch rate (0.00-1.00)",
+                                format="%.2f"
+                            )
+
+                        # Update session state
+                        st.session_state.team_comp_wr_adj[player_key] = {
+                            'targets': target, 'ypt': ypt, 'catch_rate': catch_rate
+                        }
+
+                        # Calculate adjusted values
+                        adj_recv_yds = target * catch_rate * ypt
+
+                        # Show adjusted totals with deltas
+                        if (target != proj.projected_targets or ypt != proj.projected_ypt or
+                            catch_rate != proj.catch_rate):
+                            st.markdown("##### 📈 Adjusted Totals")
+                            adj_m1 = st.columns(1)[0]
+                            adj_m1.metric("Adj Recv", f"{adj_recv_yds:.1f}",
+                                        f"{adj_recv_yds - proj.projected_recv_yards:+.1f}")
+            else:
+                st.info(f"No WRs found for {team2} with sufficient targets")
+
+        except Exception as e:
+            st.error(f"Error calculating WR projections: {e}")
 
         st.divider()
 

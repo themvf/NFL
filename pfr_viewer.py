@@ -12625,7 +12625,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             adj_total_yds = adj_rush_yds + adj_recv_yds
                             
                             # Show adjusted totals with deltas
-                            if carry_adj != 0 or ypc_adj != 0 or target_adj != 0 or ypt_adj != 0:
+                            if (carry != proj.projected_carries or ypc != proj.projected_ypc or
+                                target != proj.projected_targets or ypt != proj.projected_ypt):
                                 st.markdown("##### 📈 Adjusted Totals")
                                 adj_m1, adj_m2, adj_m3 = st.columns(3)
                                 adj_m1.metric("Adj Rush", f"{adj_rush_yds:.1f}", 

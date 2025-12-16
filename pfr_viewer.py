@@ -12577,52 +12577,51 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             # Initialize adjustments for this player
                             if player_key not in st.session_state.team_comp_rb_adj:
                                 st.session_state.team_comp_rb_adj[player_key] = {
-                                    'carry_adj': 0.0, 'ypc_adj': 0.0, 
-                                    'target_adj': 0.0, 'ypt_adj': 0.0
+                                    'carries': proj.projected_carries, 'ypc': proj.projected_ypc,
+                                    'targets': proj.projected_targets, 'ypt': proj.projected_ypt
                                 }
                             
                             adj_col1, adj_col2, adj_col3, adj_col4 = st.columns(4)
                             
                             with adj_col1:
-                                carry_adj = st.number_input(
-                                    "Carry Adj", -20.0, 20.0, 
-                                    st.session_state.team_comp_rb_adj[player_key]['carry_adj'],
-                                    0.5, key=f"tc_carry_{player_key}"
+                                carry = st.number_input(
+                                    "Projected Carries",
+                                    min_value=0.0, max_value=40.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['carries'],
+                                    step=0.5, key=f"tc_carry_{player_key}",
+                                    help="Enter total projected carries"
                                 )
-                            with adj_col2:
-                                ypc_adj = st.number_input(
-                                    "YPC Adj", -3.0, 3.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['ypc_adj'],
-                                    0.1, key=f"tc_ypc_{player_key}"
+                                ypc = st.number_input(
+                                    "Yards Per Carry",
+                                    min_value=0.0, max_value=12.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['ypc'],
+                                    step=0.1, key=f"tc_ypc_{player_key}",
+                                    help="Enter projected YPC"
                                 )
-                            with adj_col3:
-                                target_adj = st.number_input(
-                                    "Target Adj", -10.0, 10.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['target_adj'],
-                                    0.5, key=f"tc_tgt_{player_key}"
+                                target = st.number_input(
+                                    "Projected Targets",
+                                    min_value=0.0, max_value=20.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['targets'],
+                                    step=0.5, key=f"tc_tgt_{player_key}",
+                                    help="Enter total projected targets"
                                 )
-                            with adj_col4:
-                                ypt_adj = st.number_input(
-                                    "YPT Adj", -5.0, 5.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['ypt_adj'],
-                                    0.1, key=f"tc_ypt_{player_key}"
+                                ypt = st.number_input(
+                                    "Yards Per Target",
+                                    min_value=0.0, max_value=20.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['ypt'],
+                                    step=0.1, key=f"tc_ypt_{player_key}",
+                                    help="Enter projected yards per target"
                                 )
-                            
                             # Update session state
                             st.session_state.team_comp_rb_adj[player_key] = {
-                                'carry_adj': carry_adj, 'ypc_adj': ypc_adj,
-                                'target_adj': target_adj, 'ypt_adj': ypt_adj
+                                'carries': carry, 'ypc': ypc,
+                                'targets': target, 'ypt': ypt
                             }
                             
                             # Calculate adjusted values
-                            adj_carries = max(0, proj.projected_carries + carry_adj)
-                            adj_ypc = proj.projected_ypc + ypc_adj
-                            adj_rush_yds = adj_carries * adj_ypc
-                            
-                            adj_targets = max(0, proj.projected_targets + target_adj)
-                            adj_ypt = proj.projected_ypt + ypt_adj
-                            adj_recv_yds = adj_targets * proj.catch_rate * adj_ypt
-                            
+                            # Calculate adjusted values
+                            adj_rush_yds = carry * ypc
+                            adj_recv_yds = target * proj.catch_rate * ypt
                             adj_total_yds = adj_rush_yds + adj_recv_yds
                             
                             # Show adjusted totals with deltas

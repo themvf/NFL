@@ -9367,9 +9367,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     # Initialize session state for team selections if not exists
     if 'comparison_team1_idx' not in st.session_state:
-        st.session_state.comparison_team1_idx = 0
+        st.session_state.comparison_team1_idx = None  # No default
     if 'comparison_team2_idx' not in st.session_state:
-        st.session_state.comparison_team2_idx = min(1, len(teams)-1)
+        st.session_state.comparison_team2_idx = None  # No default
+    if 'matchup_selected' not in st.session_state:
+        st.session_state.matchup_selected = False
     if 'quick_matchup_week' not in st.session_state:
         st.session_state.quick_matchup_week = "Manual Selection"
     if 'quick_matchup_game' not in st.session_state:
@@ -9455,6 +9457,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 st.session_state.comparison_team1_idx = teams.index(selected_matchup['away'])
                             if selected_matchup['home'] in teams:
                                 st.session_state.comparison_team2_idx = teams.index(selected_matchup['home'])
+                            st.session_state.matchup_selected = True
                             st.rerun()
 
         conn.close()
@@ -9466,23 +9469,33 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
     col1, col2 = st.columns(2)
     with col1:
+        default_idx1 = st.session_state.comparison_team1_idx if st.session_state.comparison_team1_idx is not None else 0
+        default_idx2 = st.session_state.comparison_team2_idx if st.session_state.comparison_team2_idx is not None else min(1, len(teams)-1)
+
         team1 = st.selectbox(
             "Team 1",
             teams,
-            index=st.session_state.comparison_team1_idx,
+            index=default_idx1,
             key="team1"
         )
         # Update session state when manually changed
         st.session_state.comparison_team1_idx = teams.index(team1)
+        st.session_state.matchup_selected = True
     with col2:
         team2 = st.selectbox(
             "Team 2",
             teams,
-            index=st.session_state.comparison_team2_idx,
+            index=default_idx2,
             key="team2"
         )
         # Update session state when manually changed
         st.session_state.comparison_team2_idx = teams.index(team2)
+        st.session_state.matchup_selected = True
+
+    # Only show comparison if user has selected teams
+    if not st.session_state.matchup_selected or st.session_state.comparison_team1_idx is None:
+        st.info("👆 Please select a week and matchup above, or manually choose two teams to compare.")
+        st.stop()
 
     # Query team game stats
     sql = "SELECT * FROM box_score_summary WHERE season=? AND team IN (?, ?)"
@@ -12676,56 +12689,59 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             # Initialize adjustments for this player
                             if player_key not in st.session_state.team_comp_rb_adj:
                                 st.session_state.team_comp_rb_adj[player_key] = {
-                                    'carry_adj': 0.0, 'ypc_adj': 0.0,
-                                    'target_adj': 0.0, 'ypt_adj': 0.0
+                                    'carries': proj.projected_carries, 'ypc': proj.projected_ypc,
+                                    'targets': proj.projected_targets, 'ypt': proj.projected_ypt
                                 }
 
                             adj_col1, adj_col2, adj_col3, adj_col4 = st.columns(4)
 
                             with adj_col1:
-                                carry_adj = st.number_input(
-                                    "Carry Adj", -20.0, 20.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['carry_adj'],
-                                    0.5, key=f"tc_carry_{player_key}_home"
+                                carry = st.number_input(
+                                    "Projected Carries",
+                                    min_value=0.0, max_value=40.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['carries'],
+                                    step=0.5, key=f"tc_carry_{player_key}_home",
+                                    help="Enter total projected carries"
                                 )
                             with adj_col2:
-                                ypc_adj = st.number_input(
-                                    "YPC Adj", -3.0, 3.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['ypc_adj'],
-                                    0.1, key=f"tc_ypc_{player_key}_home"
+                                ypc = st.number_input(
+                                    "Yards Per Carry",
+                                    min_value=0.0, max_value=12.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['ypc'],
+                                    step=0.1, key=f"tc_ypc_{player_key}_home",
+                                    help="Enter projected YPC"
                                 )
                             with adj_col3:
-                                target_adj = st.number_input(
-                                    "Target Adj", -10.0, 10.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['target_adj'],
-                                    0.5, key=f"tc_tgt_{player_key}_home"
+                                target = st.number_input(
+                                    "Projected Targets",
+                                    min_value=0.0, max_value=20.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['targets'],
+                                    step=0.5, key=f"tc_tgt_{player_key}_home",
+                                    help="Enter total projected targets"
                                 )
                             with adj_col4:
-                                ypt_adj = st.number_input(
-                                    "YPT Adj", -5.0, 5.0,
-                                    st.session_state.team_comp_rb_adj[player_key]['ypt_adj'],
-                                    0.1, key=f"tc_ypt_{player_key}_home"
+                                ypt = st.number_input(
+                                    "Yards Per Target",
+                                    min_value=0.0, max_value=20.0,
+                                    value=st.session_state.team_comp_rb_adj[player_key]['ypt'],
+                                    step=0.1, key=f"tc_ypt_{player_key}_home",
+                                    help="Enter projected yards per target"
                                 )
 
                             # Update session state
                             st.session_state.team_comp_rb_adj[player_key] = {
-                                'carry_adj': carry_adj, 'ypc_adj': ypc_adj,
-                                'target_adj': target_adj, 'ypt_adj': ypt_adj
+                                'carries': carry, 'ypc': ypc,
+                                'targets': target, 'ypt': ypt
                             }
 
                             # Calculate adjusted values
-                            adj_carries = max(0, proj.projected_carries + carry_adj)
-                            adj_ypc = proj.projected_ypc + ypc_adj
-                            adj_rush_yds = adj_carries * adj_ypc
-
-                            adj_targets = max(0, proj.projected_targets + target_adj)
-                            adj_ypt = proj.projected_ypt + ypt_adj
-                            adj_recv_yds = adj_targets * proj.catch_rate * adj_ypt
-
+                            adj_rush_yds = carry * ypc
+                            adj_recv_yds = target * proj.catch_rate * ypt
                             adj_total_yds = adj_rush_yds + adj_recv_yds
 
                             # Show adjusted totals with deltas
-                            if carry_adj != 0 or ypc_adj != 0 or target_adj != 0 or ypt_adj != 0:
+                            if (carry != proj.projected_carries or ypc != proj.projected_ypc or
+                                target != proj.projected_targets or ypt != proj.projected_ypt):
                                 st.markdown("##### 📈 Adjusted Totals")
                                 adj_m1, adj_m2, adj_m3 = st.columns(3)
                                 adj_m1.metric("Adj Rush", f"{adj_rush_yds:.1f}",

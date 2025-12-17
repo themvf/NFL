@@ -418,6 +418,13 @@ def allocate_rushing_volume(
             else:
                 projections_sorted[idx].projected_carries -= increment
 
+        # Force exact conservation by giving any remaining drift to the highest-share player
+        allocated_total = sum(p.projected_carries for p in projections)
+        final_drift = team_rush_att - allocated_total
+        if abs(final_drift) > 0.01:
+            projections_sorted[0].projected_carries += final_drift
+            projections_sorted[0].projected_carries = round(projections_sorted[0].projected_carries, 1)
+
     return projections
 
 
@@ -503,6 +510,13 @@ def allocate_passing_volume(
                 projections_sorted[idx].projected_targets += increment
             else:
                 projections_sorted[idx].projected_targets -= increment
+
+        # Force exact conservation by giving any remaining drift to the highest-share player
+        allocated_total = sum(p.projected_targets for p in projections)
+        final_drift = total_targets - allocated_total
+        if abs(final_drift) > 0.01:
+            projections_sorted[0].projected_targets += final_drift
+            projections_sorted[0].projected_targets = round(projections_sorted[0].projected_targets, 1)
 
     return projections
 

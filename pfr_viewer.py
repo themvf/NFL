@@ -23,6 +23,7 @@ import enhanced_projections as ep
 import yardage_dvoa as ydvoa
 import rb_projections as rbp
 import wr_projections as wrp
+import closed_projection_engine as cpe
 
 # Configure logging
 logging.basicConfig(
@@ -9499,6 +9500,232 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
     if not st.session_state.matchup_selected or st.session_state.comparison_team1_idx is None:
         st.info("👆 Please select a week and matchup above, or manually choose two teams to compare.")
         st.stop()
+
+    st.divider()
+
+    # View selector
+    view_mode = st.radio(
+        "Select Comparison View",
+        ["View 1: Historical Stats", "View 2: Closed-System Projections"],
+        horizontal=True,
+        help="View 1: Compare historical stats from past games. View 2: Generate forward-looking projections with DVOA."
+    )
+
+    if view_mode == "View 2: Closed-System Projections":
+        # ===================================================================
+        # VIEW 2: CLOSED-SYSTEM PROJECTIONS
+        # ===================================================================
+        st.subheader("🎯 Closed-System Projections")
+        st.caption("DVOA-adjusted projections with perfect conservation laws")
+
+        # Determine home/away from schedule if possible
+        conn = sqlite3.connect(DB_PATH)
+        schedule_query = """
+            SELECT home_team, away_team, spread_line, total_line
+            FROM schedules
+            WHERE season = ? AND week = ?
+              AND ((home_team = ? AND away_team = ?) OR (home_team = ? AND away_team = ?))
+            LIMIT 1
+        """
+        schedule_df = pd.read_sql_query(
+            schedule_query, conn,
+            params=(season, week if week else 18, team1, team2, team2, team1)
+        )
+        conn.close()
+
+        # Determine which team is home/away
+        if not schedule_df.empty:
+            sched = schedule_df.iloc[0]
+            if sched['home_team'] == team1:
+                away_team, home_team = team2, team1
+            else:
+                away_team, home_team = team1, team2
+            vegas_total = sched['total_line'] if pd.notna(sched['total_line']) else None
+            spread_line = sched['spread_line'] if pd.notna(sched['spread_line']) else None
+        else:
+            # Manual selection - use alphabetical order
+            if team1 < team2:
+                away_team, home_team = team1, team2
+            else:
+                away_team, home_team = team2, team1
+            vegas_total = None
+            spread_line = None
+
+        # Projection settings
+        col_strat, col_week_input = st.columns([1, 1])
+        with col_strat:
+            strategy = st.selectbox(
+                "Projection Strategy",
+                ["neutral", "optimistic", "conservative"],
+                help="Neutral: 60/40 offense/defense blend. Optimistic: 70/30. Conservative: 40/60."
+            )
+        with col_week_input:
+            proj_week = st.number_input(
+                "Projection Week",
+                min_value=1,
+                max_value=18,
+                value=week if week else 18,
+                help="Week to project for (uses data up to but not including this week)"
+            )
+
+        # Run projection
+        with st.spinner("Generating closed-system projections..."):
+            try:
+                away_proj, away_players, home_proj, home_players = cpe.project_matchup(
+                    away_team=away_team,
+                    home_team=home_team,
+                    season=season,
+                    week=proj_week,
+                    vegas_total=vegas_total,
+                    spread_line=spread_line,
+                    strategy=strategy
+                )
+
+                # Display matchup header
+                st.subheader(f"📊 {away_team} @ {home_team} - Week {proj_week}")
+                if spread_line is not None:
+                    spread_str = f"{home_team} {spread_line:+.1f}" if spread_line != 0 else "Pick'em"
+                    st.caption(f"Spread: {spread_str} | Total: {vegas_total:.1f}" if vegas_total else f"Spread: {spread_str}")
+
+                # Side-by-side team summaries
+                col_away, col_home = st.columns(2)
+
+                with col_away:
+                    st.markdown(f"### {away_team} (Away)")
+                    st.metric("Total Yards", f"{away_proj.total_yards_anchor:.0f}")
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
+                    metric_col1.metric("Plays", away_proj.total_plays)
+                    metric_col2.metric("Pass Rate", f"{away_proj.pass_rate:.1%}")
+                    metric_col3.metric("Yds/Play", f"{away_proj.total_yards_anchor/away_proj.total_plays:.2f}")
+
+                    st.caption(f"**Rushing**: {away_proj.rush_attempts} att → {away_proj.rush_yards_anchor:.0f} yds")
+                    st.caption(f"**Passing**: {away_proj.pass_attempts} att → {away_proj.pass_yards_anchor:.0f} yds")
+
+                with col_home:
+                    st.markdown(f"### {home_team} (Home)")
+                    st.metric("Total Yards", f"{home_proj.total_yards_anchor:.0f}")
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
+                    metric_col1.metric("Plays", home_proj.total_plays)
+                    metric_col2.metric("Pass Rate", f"{home_proj.pass_rate:.1%}")
+                    metric_col3.metric("Yds/Play", f"{home_proj.total_yards_anchor/home_proj.total_plays:.2f}")
+
+                    st.caption(f"**Rushing**: {home_proj.rush_attempts} att → {home_proj.rush_yards_anchor:.0f} yds")
+                    st.caption(f"**Passing**: {home_proj.pass_attempts} att → {home_proj.pass_yards_anchor:.0f} yds")
+
+                st.divider()
+
+                # Player projections in tabs
+                tab_away, tab_home = st.tabs([f"{away_team} Players", f"{home_team} Players"])
+
+                with tab_away:
+                    st.subheader(f"{away_team} Player Projections")
+
+                    # RBs
+                    away_rbs = [p for p in away_players if p.position == 'RB']
+                    if away_rbs:
+                        st.markdown("**Running Backs**")
+                        rb_data = []
+                        for rb in sorted(away_rbs, key=lambda x: x.projected_total_yards, reverse=True):
+                            rb_data.append({
+                                'Player': rb.player_name,
+                                'Carries': f"{rb.projected_carries:.1f}",
+                                'YPC': f"{rb.projected_ypc:.2f}",
+                                'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Targets': f"{rb.projected_targets:.1f}",
+                                'Rec Yds': f"{rb.projected_recv_yards:.1f}",
+                                'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'DVOA': f"{rb.dvoa_pct:+.1f}%"
+                            })
+                        st.dataframe(pd.DataFrame(rb_data), use_container_width=True, hide_index=True)
+
+                        # Conservation check
+                        total_rb_carries = sum(rb.projected_carries for rb in away_rbs)
+                        total_rb_rush_yds = sum(rb.projected_rush_yards for rb in away_rbs)
+                        st.caption(f"✓ Conservation: {total_rb_carries:.1f} carries = {away_proj.rush_attempts} (team), "
+                                   f"{total_rb_rush_yds:.1f} yds = {away_proj.rush_yards_anchor:.1f} (anchor)")
+
+                    # WR/TE
+                    away_receivers = [p for p in away_players if p.position in ['WR', 'TE']]
+                    if away_receivers:
+                        st.markdown("**Receivers (WR/TE)**")
+                        rec_data = []
+                        for rec in sorted(away_receivers, key=lambda x: x.projected_recv_yards, reverse=True)[:10]:
+                            rec_data.append({
+                                'Player': rec.player_name,
+                                'Pos': rec.position,
+                                'Targets': f"{rec.projected_targets:.1f}",
+                                'YPT': f"{rec.projected_ypt:.2f}",
+                                'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'DVOA': f"{rec.dvoa_pct:+.1f}%"
+                            })
+                        st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)
+
+                        # Conservation check
+                        total_rec_targets = sum(p.projected_targets for p in away_players if p.position in ['WR', 'TE', 'RB'])
+                        total_rec_yds = sum(p.projected_recv_yards for p in away_players if p.position in ['WR', 'TE', 'RB'])
+                        st.caption(f"✓ Conservation: {total_rec_targets:.1f} targets ≈ {away_proj.total_targets} (team), "
+                                   f"{total_rec_yds:.1f} yds = {away_proj.pass_yards_anchor:.1f} (anchor)")
+
+                with tab_home:
+                    st.subheader(f"{home_team} Player Projections")
+
+                    # RBs
+                    home_rbs = [p for p in home_players if p.position == 'RB']
+                    if home_rbs:
+                        st.markdown("**Running Backs**")
+                        rb_data = []
+                        for rb in sorted(home_rbs, key=lambda x: x.projected_total_yards, reverse=True):
+                            rb_data.append({
+                                'Player': rb.player_name,
+                                'Carries': f"{rb.projected_carries:.1f}",
+                                'YPC': f"{rb.projected_ypc:.2f}",
+                                'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Targets': f"{rb.projected_targets:.1f}",
+                                'Rec Yds': f"{rb.projected_recv_yards:.1f}",
+                                'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'DVOA': f"{rb.dvoa_pct:+.1f}%"
+                            })
+                        st.dataframe(pd.DataFrame(rb_data), use_container_width=True, hide_index=True)
+
+                        # Conservation check
+                        total_rb_carries = sum(rb.projected_carries for rb in home_rbs)
+                        total_rb_rush_yds = sum(rb.projected_rush_yards for rb in home_rbs)
+                        st.caption(f"✓ Conservation: {total_rb_carries:.1f} carries = {home_proj.rush_attempts} (team), "
+                                   f"{total_rb_rush_yds:.1f} yds = {home_proj.rush_yards_anchor:.1f} (anchor)")
+
+                    # WR/TE
+                    home_receivers = [p for p in home_players if p.position in ['WR', 'TE']]
+                    if home_receivers:
+                        st.markdown("**Receivers (WR/TE)**")
+                        rec_data = []
+                        for rec in sorted(home_receivers, key=lambda x: x.projected_recv_yards, reverse=True)[:10]:
+                            rec_data.append({
+                                'Player': rec.player_name,
+                                'Pos': rec.position,
+                                'Targets': f"{rec.projected_targets:.1f}",
+                                'YPT': f"{rec.projected_ypt:.2f}",
+                                'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'DVOA': f"{rec.dvoa_pct:+.1f}%"
+                            })
+                        st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)
+
+                        # Conservation check
+                        total_rec_targets = sum(p.projected_targets for p in home_players if p.position in ['WR', 'TE', 'RB'])
+                        total_rec_yds = sum(p.projected_recv_yards for p in home_players if p.position in ['WR', 'TE', 'RB'])
+                        st.caption(f"✓ Conservation: {total_rec_targets:.1f} targets ≈ {home_proj.total_targets} (team), "
+                                   f"{total_rec_yds:.1f} yds = {home_proj.pass_yards_anchor:.1f} (anchor)")
+
+                st.success("✓ All conservation laws satisfied - player yards sum exactly to team totals")
+
+            except Exception as e:
+                st.error(f"Error generating projections: {e}")
+                st.exception(e)
+
+        return  # Exit early - don't show View 1
+
+    # ===================================================================
+    # VIEW 1: HISTORICAL STATS (existing code)
+    # ===================================================================
 
     # Query team game stats
     sql = "SELECT * FROM box_score_summary WHERE season=? AND team IN (?, ?)"

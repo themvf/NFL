@@ -694,7 +694,10 @@ def compute_team_anchors(
     """
 
     team_df = pd.read_sql_query(team_query, conn, params=(team, season, start_week, week))
-    team_ypp = team_df['yards_per_play'].iloc[0] if len(team_df) > 0 else 5.5  # Default to league avg
+    if len(team_df) > 0 and pd.notna(team_df['yards_per_play'].iloc[0]):
+        team_ypp = team_df['yards_per_play'].iloc[0]
+    else:
+        team_ypp = 5.5  # Default to league avg
 
     # Get opponent defensive capability (yards allowed per play)
     opp_query = """
@@ -709,7 +712,10 @@ def compute_team_anchors(
     """
 
     opp_df = pd.read_sql_query(opp_query, conn, params=(opponent, season, start_week, week))
-    opp_ypp_allowed = opp_df['yards_per_play_allowed'].iloc[0] if len(opp_df) > 0 else 5.5
+    if len(opp_df) > 0 and pd.notna(opp_df['yards_per_play_allowed'].iloc[0]):
+        opp_ypp_allowed = opp_df['yards_per_play_allowed'].iloc[0]
+    else:
+        opp_ypp_allowed = 5.5  # Default to league avg
 
     conn.close()
 

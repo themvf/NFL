@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Closed-System Projection Engine
+REBUILD: Force Streamlit Cloud to pick up drift correction fix
 6-layer projection system with conservation laws ensuring internal consistency.
 
 Key Principle: Volume comes from role + game script. DVOA modifies efficiency.

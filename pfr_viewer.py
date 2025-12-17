@@ -12622,9 +12622,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             }
                             
                             # Calculate adjusted values
-                            # Calculate adjusted values
                             adj_rush_yds = carry * ypc
-                            adj_recv_yds = target * proj.catch_rate * ypt
+                            # YPT already includes incompletions, so we don't multiply by catch rate
+                            adj_recv_yds = target * ypt
                             adj_total_yds = adj_rush_yds + adj_recv_yds
                             
                             # Show adjusted totals with deltas
@@ -12739,7 +12739,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             # Calculate adjusted values
                             adj_rush_yds = carry * ypc
-                            adj_recv_yds = target * proj.catch_rate * ypt
+                            # YPT already includes incompletions, so we don't multiply by catch rate
+                            adj_recv_yds = target * ypt
                             adj_total_yds = adj_rush_yds + adj_recv_yds
 
                             # Show adjusted totals with deltas
@@ -12842,11 +12843,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         if player_key not in st.session_state.team_comp_wr_adj:
                             st.session_state.team_comp_wr_adj[player_key] = {
                                 'targets': proj.projected_targets,
-                                'ypt': proj.projected_ypt,
-                                'catch_rate': proj.catch_rate
+                                'ypt': proj.projected_ypt
                             }
 
-                        adj_col1, adj_col2, adj_col3 = st.columns(3)
+                        adj_col1, adj_col2 = st.columns(2)
 
                         with adj_col1:
                             target = st.number_input(
@@ -12862,29 +12862,20 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 min_value=0.0, max_value=20.0,
                                 value=st.session_state.team_comp_wr_adj[player_key]['ypt'],
                                 step=0.1, key=f"tc_wr_ypt_{player_key}",
-                                help="Enter projected YPT"
-                            )
-                        with adj_col3:
-                            catch_rate = st.number_input(
-                                "Catch Rate",
-                                min_value=0.0, max_value=1.0,
-                                value=st.session_state.team_comp_wr_adj[player_key]['catch_rate'],
-                                step=0.01, key=f"tc_wr_cr_{player_key}",
-                                help="Enter catch rate (0.00-1.00)",
-                                format="%.2f"
+                                help="Enter projected YPT (already includes incompletions)"
                             )
 
                         # Update session state
                         st.session_state.team_comp_wr_adj[player_key] = {
-                            'targets': target, 'ypt': ypt, 'catch_rate': catch_rate
+                            'targets': target, 'ypt': ypt
                         }
 
                         # Calculate adjusted values
-                        adj_recv_yds = target * catch_rate * ypt
+                        # YPT already includes incompletions, so we don't multiply by catch rate
+                        adj_recv_yds = target * ypt
 
                         # Show adjusted totals with deltas
-                        if (target != proj.projected_targets or ypt != proj.projected_ypt or
-                            catch_rate != proj.catch_rate):
+                        if (target != proj.projected_targets or ypt != proj.projected_ypt):
                             st.markdown("##### 📈 Adjusted Totals")
                             adj_m1 = st.columns(1)[0]
                             adj_m1.metric("Adj Recv", f"{adj_recv_yds:.1f}",
@@ -12920,11 +12911,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         if player_key not in st.session_state.team_comp_wr_adj:
                             st.session_state.team_comp_wr_adj[player_key] = {
                                 'targets': proj.projected_targets,
-                                'ypt': proj.projected_ypt,
-                                'catch_rate': proj.catch_rate
+                                'ypt': proj.projected_ypt
                             }
 
-                        adj_col1, adj_col2, adj_col3 = st.columns(3)
+                        adj_col1, adj_col2 = st.columns(2)
 
                         with adj_col1:
                             target = st.number_input(
@@ -12940,29 +12930,20 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                 min_value=0.0, max_value=20.0,
                                 value=st.session_state.team_comp_wr_adj[player_key]['ypt'],
                                 step=0.1, key=f"tc_wr_ypt_{player_key}_home",
-                                help="Enter projected YPT"
-                            )
-                        with adj_col3:
-                            catch_rate = st.number_input(
-                                "Catch Rate",
-                                min_value=0.0, max_value=1.0,
-                                value=st.session_state.team_comp_wr_adj[player_key]['catch_rate'],
-                                step=0.01, key=f"tc_wr_cr_{player_key}_home",
-                                help="Enter catch rate (0.00-1.00)",
-                                format="%.2f"
+                                help="Enter projected YPT (already includes incompletions)"
                             )
 
                         # Update session state
                         st.session_state.team_comp_wr_adj[player_key] = {
-                            'targets': target, 'ypt': ypt, 'catch_rate': catch_rate
+                            'targets': target, 'ypt': ypt
                         }
 
                         # Calculate adjusted values
-                        adj_recv_yds = target * catch_rate * ypt
+                        # YPT already includes incompletions, so we don't multiply by catch rate
+                        adj_recv_yds = target * ypt
 
                         # Show adjusted totals with deltas
-                        if (target != proj.projected_targets or ypt != proj.projected_ypt or
-                            catch_rate != proj.catch_rate):
+                        if (target != proj.projected_targets or ypt != proj.projected_ypt):
                             st.markdown("##### 📈 Adjusted Totals")
                             adj_m1 = st.columns(1)[0]
                             adj_m1.metric("Adj Recv", f"{adj_recv_yds:.1f}",

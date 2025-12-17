@@ -326,7 +326,8 @@ def calculate_wr_projection(
     projected_ypt = max(MIN_YPT, min(MAX_YPT, projected_ypt))
 
     # Calculate projected receiving yards
-    projected_recv_yards = projected_targets * baseline['catch_rate'] * projected_ypt
+    # YPT already includes incompletions, so we don't multiply by catch rate
+    projected_recv_yards = projected_targets * projected_ypt
 
     return WRProjection(
         player_name=player_name,

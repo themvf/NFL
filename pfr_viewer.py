@@ -9620,6 +9620,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 with tab_away:
                     st.subheader(f"{away_team} Player Projections")
 
+                    # DEBUG: Show QB status
+                    st.caption(f"DEBUG: away_qb = {away_qb is not None}, QB name = {away_qb.player_name if away_qb else 'None'}")
+
                     # QB
                     if away_qb is not None:
                         st.markdown("**Quarterback**")
@@ -9686,6 +9689,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                 with tab_home:
                     st.subheader(f"{home_team} Player Projections")
+
+                    # DEBUG: Show QB status
+                    st.caption(f"DEBUG: home_qb = {home_qb is not None}, QB name = {home_qb.player_name if home_qb else 'None'}")
 
                     # QB
                     if home_qb is not None:

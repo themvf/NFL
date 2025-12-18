@@ -9571,7 +9571,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         # Run projection
         with st.spinner("Generating closed-system projections..."):
             try:
-                away_proj, away_players, home_proj, home_players = cpe.project_matchup(
+                away_proj, away_players, away_qb, home_proj, home_players, home_qb = cpe.project_matchup(
                     away_team=away_team,
                     home_team=home_team,
                     season=season,
@@ -9619,6 +9619,24 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                 with tab_away:
                     st.subheader(f"{away_team} Player Projections")
+
+                    # QB
+                    if away_qb is not None:
+                        st.markdown("**Quarterback**")
+                        qb_col1, qb_col2 = st.columns(2)
+                        with qb_col1:
+                            st.write(f"**{away_qb.player_name}**")
+                            st.write(f"**Passing:** {away_qb.projected_pass_att} att, "
+                                     f"{away_qb.projected_completions:.1f} comp ({away_qb.projected_completion_pct:.1f}%), "
+                                     f"{away_qb.projected_pass_yards:.1f} yds")
+                            st.write(f"**Pass TDs:** {away_qb.projected_pass_tds:.1f} | **INTs:** {away_qb.projected_interceptions:.1f} | **YPA:** {away_qb.projected_ypa:.2f}")
+                        with qb_col2:
+                            if away_qb.projected_carries > 0:
+                                st.write(f"**Rushing:** {away_qb.projected_carries:.1f} carries, {away_qb.projected_rush_yards:.1f} yds ({away_qb.projected_ypc:.2f} YPC)")
+                                st.caption("Mobile QB")
+                            else:
+                                st.caption("Pocket Passer")
+                        st.divider()
 
                     # RBs
                     away_rbs = [p for p in away_players if p.position == 'RB']
@@ -9668,6 +9686,24 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                 with tab_home:
                     st.subheader(f"{home_team} Player Projections")
+
+                    # QB
+                    if home_qb is not None:
+                        st.markdown("**Quarterback**")
+                        qb_col1, qb_col2 = st.columns(2)
+                        with qb_col1:
+                            st.write(f"**{home_qb.player_name}**")
+                            st.write(f"**Passing:** {home_qb.projected_pass_att} att, "
+                                     f"{home_qb.projected_completions:.1f} comp ({home_qb.projected_completion_pct:.1f}%), "
+                                     f"{home_qb.projected_pass_yards:.1f} yds")
+                            st.write(f"**Pass TDs:** {home_qb.projected_pass_tds:.1f} | **INTs:** {home_qb.projected_interceptions:.1f} | **YPA:** {home_qb.projected_ypa:.2f}")
+                        with qb_col2:
+                            if home_qb.projected_carries > 0:
+                                st.write(f"**Rushing:** {home_qb.projected_carries:.1f} carries, {home_qb.projected_rush_yards:.1f} yds ({home_qb.projected_ypc:.2f} YPC)")
+                                st.caption("Mobile QB")
+                            else:
+                                st.caption("Pocket Passer")
+                        st.divider()
 
                     # RBs
                     home_rbs = [p for p in home_players if p.position == 'RB']

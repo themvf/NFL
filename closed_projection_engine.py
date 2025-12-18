@@ -80,6 +80,32 @@ class PlayerProjection:
     dvoa_pct: float = 0.0
 
 
+@dataclass
+class QBProjection:
+    """Quarterback projection."""
+    player_name: str
+    team: str
+
+    # Passing
+    projected_pass_att: int = 0
+    projected_completions: float = 0.0
+    projected_pass_yards: float = 0.0
+    projected_pass_tds: float = 0.0
+    projected_interceptions: float = 0.0
+    projected_completion_pct: float = 0.0
+    projected_ypa: float = 0.0  # yards per attempt
+
+    # Rushing (for mobile QBs)
+    projected_carries: float = 0.0
+    projected_rush_yards: float = 0.0
+    projected_rush_tds: float = 0.0
+    projected_ypc: float = 0.0
+
+    # DVOAs
+    pass_dvoa_pct: float = 0.0
+    rush_dvoa_pct: float = 0.0
+
+
 def get_connection():
     """Get database connection."""
     return sqlite3.connect(DB_PATH)
@@ -269,6 +295,57 @@ def split_plays_pass_rush(
 # Helper function for database queries
 # ============================================================================
 
+def get_team_total_stat(
+    team: str,
+    season: int,
+    start_week: int,
+    end_week: int,
+    stat_col: str  # 'carries' or 'targets'
+) -> int:
+    """
+    Get total team stat across ALL positions for share calculation.
+
+    For 'carries': sum RB carries only
+    For 'targets': sum WR + TE + RB targets (all receiving positions)
+
+    This ensures shares are calculated as "% of TEAM stat" not "% of POSITION stat".
+    """
+    conn = get_connection()
+
+    # Determine which positions to include
+    if stat_col == 'carries':
+        # Only RBs carry the ball
+        positions = ('RB',)
+    elif stat_col == 'targets':
+        # All pass-catching positions
+        positions = ('WR', 'TE', 'RB')
+    else:
+        conn.close()
+        return 0
+
+    # Build position filter
+    position_placeholders = ','.join('?' * len(positions))
+
+    query = f"""
+        SELECT SUM({stat_col}) as total_stat
+        FROM player_stats
+        WHERE team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+          AND season_type = 'REG'
+          AND position IN ({position_placeholders})
+    """
+
+    params = (team, season, start_week, end_week) + positions
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+
+    if len(df) > 0 and pd.notna(df['total_stat'].iloc[0]):
+        return int(df['total_stat'].iloc[0])
+    return 0
+
+
 def get_player_stats_weighted(
     team: str,
     season: int,
@@ -278,6 +355,9 @@ def get_player_stats_weighted(
 ) -> List[Tuple[str, float, float]]:
     """
     Get weighted player shares (70% last 4 games, 30% season).
+
+    CRITICAL: Shares calculated as "% of TEAM stat" (all positions),
+    NOT "% of POSITION stat" to avoid double normalization bug.
 
     Returns:
         List of (player_name, weighted_share, confidence_level)
@@ -321,9 +401,16 @@ def get_player_stats_weighted(
     season_df = pd.read_sql_query(season_query, conn, params=(team, season, position, week))
     conn.close()
 
-    # Calculate total team stats for share calculation
-    team_recent_total = recent_df['recent_stat'].sum() if len(recent_df) > 0 else 0
-    team_season_total = season_df['season_stat'].sum() if len(season_df) > 0 else 0
+    # FIX: Calculate total TEAM stats (not position-only) to avoid double normalization
+    # This is the critical fix for the target under-projection bug
+    team_recent_total = get_team_total_stat(team, season, recent_start, week, stat_col)
+    team_season_total = get_team_total_stat(team, season, 1, week, stat_col)
+
+    # Fallback to position-only if team total is 0 (shouldn't happen)
+    if team_recent_total == 0:
+        team_recent_total = recent_df['recent_stat'].sum() if len(recent_df) > 0 else 1
+    if team_season_total == 0:
+        team_season_total = season_df['season_stat'].sum() if len(season_df) > 0 else 1
 
     # Merge and calculate weighted shares
     merged = pd.merge(recent_df, season_df, on='player_display_name', how='outer').fillna(0)
@@ -523,6 +610,108 @@ def allocate_passing_volume(
 
 
 # ============================================================================
+# Layer 3C: QB Volume Allocation
+# ============================================================================
+
+def allocate_qb_stats(
+    team: str,
+    season: int,
+    week: int,
+    team_pass_att: int,
+    team_rush_att: int
+) -> Optional[QBProjection]:
+    """
+    Allocate QB stats based on team totals.
+
+    For teams with one dominant QB, they get all pass attempts.
+    For mobile QBs (Lamar, Hurts, Allen, etc.), project rushing carries.
+
+    Returns:
+        QBProjection object, or None if no QB found
+    """
+    conn = get_connection()
+
+    # Get QB from recent games (most pass attempts)
+    lookback = min(4, week - 1)
+    start_week = max(1, week - lookback)
+
+    qb_query = """
+        SELECT player_display_name,
+               SUM(pass_attempts) as total_pass_att,
+               SUM(completions) as total_completions,
+               SUM(passing_tds) as total_pass_tds,
+               SUM(interceptions) as total_ints,
+               SUM(carries) as total_carries,
+               SUM(rushing_yards) as total_rush_yards,
+               SUM(rushing_tds) as total_rush_tds,
+               COUNT(*) as games_played
+        FROM player_stats
+        WHERE team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+          AND season_type = 'REG'
+          AND position = 'QB'
+        GROUP BY player_display_name
+        ORDER BY total_pass_att DESC
+        LIMIT 1
+    """
+
+    qb_df = pd.read_sql_query(qb_query, conn, params=(team, season, start_week, week))
+    conn.close()
+
+    if len(qb_df) == 0:
+        # No QB found
+        return None
+
+    qb_row = qb_df.iloc[0]
+    qb_name = qb_row['player_display_name']
+
+    # Calculate historical rates
+    total_pass_att = qb_row['total_pass_att']
+    total_completions = qb_row['total_completions']
+    total_pass_tds = qb_row['total_pass_tds']
+    total_ints = qb_row['total_ints']
+    total_carries = qb_row['total_carries']
+    games_played = qb_row['games_played']
+
+    # Completion rate (historical)
+    completion_rate = total_completions / total_pass_att if total_pass_att > 0 else 0.65
+
+    # TD rate (TDs per attempt)
+    td_rate = total_pass_tds / total_pass_att if total_pass_att > 0 else 0.04
+
+    # INT rate (INTs per attempt)
+    int_rate = total_ints / total_pass_att if total_pass_att > 0 else 0.02
+
+    # Mobile QB detection: avg >2 carries/game
+    is_mobile_qb = (total_carries / games_played) > 2.0 if games_played > 0 else False
+
+    # Create QB projection
+    qb_proj = QBProjection(
+        player_name=qb_name,
+        team=team
+    )
+
+    # Passing allocation
+    qb_proj.projected_pass_att = team_pass_att
+    qb_proj.projected_completions = round(team_pass_att * completion_rate, 1)
+    qb_proj.projected_completion_pct = round(completion_rate * 100, 1)
+    qb_proj.projected_pass_tds = round(team_pass_att * td_rate, 1)
+    qb_proj.projected_interceptions = round(team_pass_att * int_rate, 1)
+
+    # Rushing allocation (mobile QBs only)
+    if is_mobile_qb:
+        # Project carries based on recent average
+        avg_carries_per_game = total_carries / games_played
+        qb_proj.projected_carries = round(avg_carries_per_game, 1)
+    else:
+        qb_proj.projected_carries = 0.0
+
+    return qb_proj
+
+
+# ============================================================================
 # Layer 4: Efficiency Layer - Use DVOA to Turn Volume into Yards
 # ============================================================================
 
@@ -662,6 +851,112 @@ def apply_receiving_efficiency(
             rec.projected_total_yards = round(projected_recv_yards, 1)
 
         rec.dvoa_pct = round(player_dvoa, 1)
+
+
+def apply_qb_efficiency(
+    qb_proj: Optional[QBProjection],
+    opponent: str,
+    season: int,
+    week: int,
+    pass_yards_anchor: float,
+    rush_yards_anchor: float
+) -> None:
+    """
+    Apply DVOA to calculate QB passing and rushing yards.
+
+    Formula for passing:
+        ProjectedYPA = LeagueAvgYPA * (1 + QB_PassDVOA/100) / (1 - Def_PassDVOA/100)
+        ProjectedPassYards = ProjectedPassAtt * ProjectedYPA
+
+    Formula for rushing (mobile QBs):
+        ProjectedYPC = LeagueAvgYPC * (1 + QB_RushDVOA/100) / (1 - Def_RushDVOA/100)
+        ProjectedRushYards = ProjectedCarries * ProjectedYPC
+
+    Modifies QBProjection object in place.
+    """
+    if qb_proj is None:
+        return
+
+    # --- PASSING EFFICIENCY ---
+
+    # Get league baseline YPA (yards per attempt)
+    recv_baseline = ydvoa.calculate_league_receiving_baseline(season, week)
+    league_avg_ypt = recv_baseline['league_avg_ypt']
+
+    # Convert YPT to YPA: YPA ≈ YPT * completion_rate (since YPT includes incompletions)
+    # Actually, YPT already accounts for incompletions, so we can use it directly
+    league_avg_ypa = league_avg_ypt  # YPT and YPA are conceptually similar for our purposes
+
+    # Get QB passing DVOA (from receiving DVOA, filtered by position='QB')
+    # Note: yardage_dvoa doesn't have QB-specific DVOA, so we'll use team passing efficiency
+    # For now, default to 0.0 (league average) - could enhance later with QB-specific metrics
+    qb_pass_dvoa = 0.0  # TODO: Add QB-specific DVOA calculation
+
+    # Get defensive pass DVOA
+    def_dvoa_list = ydvoa.calculate_defensive_pass_dvoa(season, week)
+    def_pass_dvoa = 0.0
+    for d in def_dvoa_list:
+        if d.team == opponent:
+            def_pass_dvoa = d.dvoa_pct
+            break
+
+    # Cap defensive DVOA
+    safe_def_pass_dvoa = max(-25.0, min(25.0, def_pass_dvoa))
+
+    # Calculate projected YPA
+    projected_ypa = league_avg_ypa * (1 + qb_pass_dvoa/100) / (1 - safe_def_pass_dvoa/100)
+
+    # Cap projected YPA to realistic bounds
+    MIN_YPA = 5.0
+    MAX_YPA = 10.0
+    projected_ypa = max(MIN_YPA, min(MAX_YPA, projected_ypa))
+
+    # Calculate passing yards
+    # NOTE: We'll use the pass_yards_anchor directly for conservation
+    qb_proj.projected_pass_yards = round(pass_yards_anchor, 1)
+    qb_proj.projected_ypa = round(qb_proj.projected_pass_yards / qb_proj.projected_pass_att, 2) if qb_proj.projected_pass_att > 0 else 0.0
+    qb_proj.pass_dvoa_pct = round(qb_pass_dvoa, 1)
+
+    # --- RUSHING EFFICIENCY (mobile QBs only) ---
+
+    if qb_proj.projected_carries > 0:
+        # Get league baseline YPC
+        rush_baseline = ydvoa.calculate_league_rushing_baseline(season, week)
+        league_ypc = rush_baseline['league_avg_ypc']
+
+        # QB rushing DVOA (use 0.0 for now, could enhance with QB-specific metrics)
+        qb_rush_dvoa = 0.0  # TODO: Add QB-specific rushing DVOA
+
+        # Get defensive rush DVOA
+        def_rush_dvoa_list = ydvoa.calculate_defensive_rush_dvoa(season, week)
+        def_rush_dvoa = 0.0
+        for d in def_rush_dvoa_list:
+            if d.team == opponent:
+                def_rush_dvoa = d.dvoa_pct
+                break
+
+        # Cap defensive DVOA
+        safe_def_rush_dvoa = max(-25.0, min(25.0, def_rush_dvoa))
+
+        # Calculate projected YPC for QB
+        projected_ypc = league_ypc * (1 + qb_rush_dvoa/100) / (1 - safe_def_rush_dvoa/100)
+
+        # Cap projected YPC
+        MIN_YPC = 3.0
+        MAX_YPC = 8.0
+        projected_ypc = max(MIN_YPC, min(MAX_YPC, projected_ypc))
+
+        # Calculate rushing yards
+        qb_proj.projected_rush_yards = round(qb_proj.projected_carries * projected_ypc, 1)
+        qb_proj.projected_ypc = round(projected_ypc, 2)
+        qb_proj.rush_dvoa_pct = round(qb_rush_dvoa, 1)
+
+        # Calculate rushing TDs (historical rate)
+        # Already have total_rush_tds from allocation, use that rate
+    else:
+        qb_proj.projected_rush_yards = 0.0
+        qb_proj.projected_ypc = 0.0
+        qb_proj.rush_dvoa_pct = 0.0
 
 
 # ============================================================================
@@ -901,7 +1196,7 @@ def project_matchup(
     vegas_total: Optional[float] = None,
     spread_line: Optional[float] = None,
     strategy: str = 'neutral'
-) -> Tuple[TeamProjection, List[PlayerProjection], TeamProjection, List[PlayerProjection]]:
+) -> Tuple[TeamProjection, List[PlayerProjection], Optional[QBProjection], TeamProjection, List[PlayerProjection], Optional[QBProjection]]:
     """
     Complete closed-system projection for a matchup.
 
@@ -915,7 +1210,7 @@ def project_matchup(
         strategy: 'neutral' (60/40), 'optimistic' (70/30), 'conservative' (40/60)
 
     Returns:
-        Tuple of (away_team_proj, away_players, home_team_proj, home_players)
+        Tuple of (away_team_proj, away_players, away_qb, home_team_proj, home_players, home_qb)
     """
     # --- AWAY TEAM ---
 
@@ -926,7 +1221,16 @@ def project_matchup(
     away_pass, away_rush = split_plays_pass_rush(away_team, season, week, away_plays, spread_line, is_home=False)
 
     # Layer 3: Volume - Allocate to players
-    away_rbs = allocate_rushing_volume(away_team, season, week, away_rush)
+    # Layer 3C: QB allocation first (to determine mobile QB carries)
+    away_qb = allocate_qb_stats(away_team, season, week, away_pass, away_rush)
+
+    # Adjust RB rush attempts for mobile QB carries
+    away_rb_rush_att = away_rush
+    if away_qb is not None and away_qb.projected_carries > 0:
+        away_rb_rush_att = max(0, away_rush - int(away_qb.projected_carries))
+
+    # Layer 3A/3B: RB and receiver allocation
+    away_rbs = allocate_rushing_volume(away_team, season, week, away_rb_rush_att)
     away_recs = allocate_passing_volume(away_team, season, week, away_pass)
 
     # Layer 4: Efficiency - Apply DVOA
@@ -937,7 +1241,24 @@ def project_matchup(
     away_rush_anchor, away_pass_anchor, away_total_anchor = compute_team_anchors(
         away_team, home_team, season, week, away_plays, away_pass / away_plays, strategy
     )
-    reconcile_to_anchors(away_rbs, away_recs, away_rush_anchor, away_pass_anchor)
+
+    # For mobile QBs, allocate some rush yards to QB
+    if away_qb is not None and away_qb.projected_carries > 0:
+        # QB gets proportional share of rush yards based on projected carries
+        qb_rush_share = away_qb.projected_carries / away_rush if away_rush > 0 else 0
+        qb_rush_yards = away_rush_anchor * qb_rush_share
+        rb_rush_anchor = away_rush_anchor - qb_rush_yards
+        # Update QB rushing yards
+        away_qb.projected_rush_yards = round(qb_rush_yards, 1)
+        away_qb.projected_ypc = round(qb_rush_yards / away_qb.projected_carries, 2) if away_qb.projected_carries > 0 else 0.0
+    else:
+        rb_rush_anchor = away_rush_anchor
+
+    # Reconcile RBs and receivers
+    reconcile_to_anchors(away_rbs, away_recs, rb_rush_anchor, away_pass_anchor)
+
+    # Layer 4C: Apply QB efficiency (after anchors are computed)
+    apply_qb_efficiency(away_qb, home_team, season, week, away_pass_anchor, away_rush_anchor)
 
     # Create away team projection
     away_proj = TeamProjection(
@@ -966,7 +1287,16 @@ def project_matchup(
     home_pass, home_rush = split_plays_pass_rush(home_team, season, week, home_plays, spread_line, is_home=True)
 
     # Layer 3: Volume - Allocate to players
-    home_rbs = allocate_rushing_volume(home_team, season, week, home_rush)
+    # Layer 3C: QB allocation first (to determine mobile QB carries)
+    home_qb = allocate_qb_stats(home_team, season, week, home_pass, home_rush)
+
+    # Adjust RB rush attempts for mobile QB carries
+    home_rb_rush_att = home_rush
+    if home_qb is not None and home_qb.projected_carries > 0:
+        home_rb_rush_att = max(0, home_rush - int(home_qb.projected_carries))
+
+    # Layer 3A/3B: RB and receiver allocation
+    home_rbs = allocate_rushing_volume(home_team, season, week, home_rb_rush_att)
     home_recs = allocate_passing_volume(home_team, season, week, home_pass)
 
     # Layer 4: Efficiency - Apply DVOA
@@ -977,7 +1307,24 @@ def project_matchup(
     home_rush_anchor, home_pass_anchor, home_total_anchor = compute_team_anchors(
         home_team, away_team, season, week, home_plays, home_pass / home_plays, strategy
     )
-    reconcile_to_anchors(home_rbs, home_recs, home_rush_anchor, home_pass_anchor)
+
+    # For mobile QBs, allocate some rush yards to QB
+    if home_qb is not None and home_qb.projected_carries > 0:
+        # QB gets proportional share of rush yards based on projected carries
+        qb_rush_share = home_qb.projected_carries / home_rush if home_rush > 0 else 0
+        qb_rush_yards = home_rush_anchor * qb_rush_share
+        rb_rush_anchor = home_rush_anchor - qb_rush_yards
+        # Update QB rushing yards
+        home_qb.projected_rush_yards = round(qb_rush_yards, 1)
+        home_qb.projected_ypc = round(qb_rush_yards / home_qb.projected_carries, 2) if home_qb.projected_carries > 0 else 0.0
+    else:
+        rb_rush_anchor = home_rush_anchor
+
+    # Reconcile RBs and receivers
+    reconcile_to_anchors(home_rbs, home_recs, rb_rush_anchor, home_pass_anchor)
+
+    # Layer 4C: Apply QB efficiency (after anchors are computed)
+    apply_qb_efficiency(home_qb, away_team, season, week, home_pass_anchor, home_rush_anchor)
 
     # Create home team projection
     home_proj = TeamProjection(
@@ -1005,7 +1352,7 @@ def project_matchup(
     away_players = away_rbs + away_recs
     home_players = home_rbs + home_recs
 
-    return away_proj, away_players, home_proj, home_players
+    return away_proj, away_players, away_qb, home_proj, home_players, home_qb
 
 
 if __name__ == "__main__":

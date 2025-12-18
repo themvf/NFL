@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Closed-System Projection Engine
-REBUILD 3: Fix QB query column names (attempts, passing_interceptions)
+REBUILD 4: Fix QB query to use available data (not future weeks)
 6-layer projection system with conservation laws ensuring internal consistency.
 
 Key Principle: Volume comes from role + game script. DVOA modifies efficiency.
@@ -632,8 +632,19 @@ def allocate_qb_stats(
     conn = get_connection()
 
     # Get QB from recent games (most pass attempts)
-    lookback = min(4, week - 1)
-    start_week = max(1, week - lookback)
+    # First, find the max week with actual data for this team
+    max_week_query = """
+        SELECT MAX(week) as max_week
+        FROM player_stats
+        WHERE team = ? AND season = ? AND season_type = 'REG' AND position = 'QB'
+    """
+    max_week_df = pd.read_sql_query(max_week_query, conn, params=(team, season))
+    actual_max_week = max_week_df['max_week'].iloc[0] if len(max_week_df) > 0 and pd.notna(max_week_df['max_week'].iloc[0]) else week - 1
+
+    # Use last 4 weeks of available data
+    lookback = min(4, actual_max_week)
+    start_week = max(1, actual_max_week - lookback + 1)
+    end_week = actual_max_week + 1  # +1 because query uses < not <=
 
     qb_query = """
         SELECT player_display_name,
@@ -657,7 +668,7 @@ def allocate_qb_stats(
         LIMIT 1
     """
 
-    qb_df = pd.read_sql_query(qb_query, conn, params=(team, season, start_week, week))
+    qb_df = pd.read_sql_query(qb_query, conn, params=(team, season, start_week, end_week))
     conn.close()
 
     if len(qb_df) == 0:

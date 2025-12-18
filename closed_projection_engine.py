@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Closed-System Projection Engine
-REBUILD 2: Force Streamlit to pick up QB projections and target fix
+REBUILD 3: Fix QB query column names (attempts, passing_interceptions)
 6-layer projection system with conservation laws ensuring internal consistency.
 
 Key Principle: Volume comes from role + game script. DVOA modifies efficiency.
@@ -637,10 +637,10 @@ def allocate_qb_stats(
 
     qb_query = """
         SELECT player_display_name,
-               SUM(pass_attempts) as total_pass_att,
+               SUM(attempts) as total_pass_att,
                SUM(completions) as total_completions,
                SUM(passing_tds) as total_pass_tds,
-               SUM(interceptions) as total_ints,
+               SUM(passing_interceptions) as total_ints,
                SUM(carries) as total_carries,
                SUM(rushing_yards) as total_rush_yards,
                SUM(rushing_tds) as total_rush_tds,

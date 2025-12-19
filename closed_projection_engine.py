@@ -62,22 +62,45 @@ class PlayerProjection:
     team: str
     position: str  # RB, WR, TE
 
-    # Volume
+    # Volume (median)
     projected_carries: float = 0.0  # RBs only
     projected_targets: float = 0.0  # WR/TE/RB receiving
 
-    # Efficiency
+    # Efficiency (median)
     projected_ypc: float = 0.0  # RBs only
     projected_ypt: float = 0.0
 
-    # Yards
+    # Yards (median)
     projected_rush_yards: float = 0.0  # RBs only
     projected_recv_yards: float = 0.0
     projected_total_yards: float = 0.0
 
+    # Ranges (P10 = 10th percentile, P90 = 90th percentile)
+    # Rush stats
+    projected_carries_p10: float = 0.0
+    projected_carries_p90: float = 0.0
+    projected_ypc_p10: float = 0.0
+    projected_ypc_p90: float = 0.0
+    projected_rush_yards_p10: float = 0.0
+    projected_rush_yards_p90: float = 0.0
+
+    # Receiving stats
+    projected_targets_p10: float = 0.0
+    projected_targets_p90: float = 0.0
+    projected_ypt_p10: float = 0.0
+    projected_ypt_p90: float = 0.0
+    projected_recv_yards_p10: float = 0.0
+    projected_recv_yards_p90: float = 0.0
+
+    # Total yards range
+    projected_total_yards_p10: float = 0.0
+    projected_total_yards_p90: float = 0.0
+
     # Metadata
     weighted_share: float = 0.0  # for redistribution
     dvoa_pct: float = 0.0
+    volume_volatility_cv: float = 0.0  # coefficient of variation for volume
+    efficiency_volatility_cv: float = 0.0  # coefficient of variation for efficiency
 
 
 @dataclass
@@ -86,7 +109,7 @@ class QBProjection:
     player_name: str
     team: str
 
-    # Passing
+    # Passing (median)
     projected_pass_att: int = 0
     projected_completions: float = 0.0
     projected_pass_yards: float = 0.0
@@ -95,7 +118,15 @@ class QBProjection:
     projected_completion_pct: float = 0.0
     projected_ypa: float = 0.0  # yards per attempt
 
-    # Rushing (for mobile QBs)
+    # Passing ranges
+    projected_pass_att_p10: int = 0
+    projected_pass_att_p90: int = 0
+    projected_pass_yards_p10: float = 0.0
+    projected_pass_yards_p90: float = 0.0
+    projected_completions_p10: float = 0.0
+    projected_completions_p90: float = 0.0
+
+    # Rushing (for mobile QBs) (median)
     projected_carries: float = 0.0
     projected_rush_yards: float = 0.0
     projected_rush_tds: float = 0.0
@@ -105,10 +136,246 @@ class QBProjection:
     pass_dvoa_pct: float = 0.0
     rush_dvoa_pct: float = 0.0
 
+    # Volatility
+    volume_volatility_cv: float = 0.0  # pass attempts CV
+    efficiency_volatility_cv: float = 0.0  # YPA CV
+
 
 def get_connection():
     """Get database connection."""
     return sqlite3.connect(DB_PATH)
+
+
+# ============================================================================
+# Volatility Functions - Calculate Projection Ranges (P10/P90)
+# ============================================================================
+
+def get_player_recent_stats(
+    player_name: str,
+    team: str,
+    season: int,
+    week: int,
+    lookback: int = 6
+) -> pd.DataFrame:
+    """
+    Get player's recent game stats for volatility calculation.
+
+    Args:
+        player_name: Player display name
+        team: Team abbreviation
+        season: Season year
+        week: Week to project (exclusive - gets games before this week)
+        lookback: Number of recent games to include
+
+    Returns:
+        DataFrame with carries, targets, yards, etc. for recent games
+    """
+    conn = get_connection()
+
+    start_week = max(1, week - lookback)
+
+    query = """
+        SELECT week,
+               carries,
+               rushing_yards,
+               targets,
+               receptions,
+               receiving_yards
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+          AND season_type = 'REG'
+        ORDER BY week DESC
+    """
+
+    df = pd.read_sql_query(query, conn, params=(player_name, team, season, start_week, week))
+    conn.close()
+
+    return df
+
+
+def calculate_volume_volatility(
+    player_name: str,
+    team: str,
+    season: int,
+    week: int,
+    stat: str = 'carries'
+) -> float:
+    """
+    Calculate coefficient of variation (CV) for player volume.
+
+    CV = std_dev / mean
+
+    Args:
+        player_name: Player display name
+        team: Team abbreviation
+        season: Season year
+        week: Week to project
+        stat: 'carries' or 'targets'
+
+    Returns:
+        float: CV (0.0-1.0, typically 0.15-0.45)
+               Returns default if insufficient data
+    """
+    df = get_player_recent_stats(player_name, team, season, week, lookback=6)
+
+    if len(df) < 3:
+        # Insufficient data - return position-based default
+        # RBs: lower volatility (~25%), WRs: higher volatility (~35%)
+        return 0.25 if stat == 'carries' else 0.35
+
+    # Remove zeros (inactive weeks)
+    values = df[stat].replace(0, np.nan).dropna()
+
+    if len(values) < 2:
+        return 0.25 if stat == 'carries' else 0.35
+
+    mean_vol = values.mean()
+    std_vol = values.std()
+
+    if mean_vol == 0:
+        return 0.25 if stat == 'carries' else 0.35
+
+    cv = std_vol / mean_vol
+
+    # Cap CV at reasonable bounds
+    # RB carries: typically 15-40% volatility
+    # WR/TE targets: typically 25-50% volatility
+    if stat == 'carries':
+        cv = max(0.10, min(0.50, cv))
+    else:  # targets
+        cv = max(0.20, min(0.60, cv))
+
+    return cv
+
+
+def calculate_efficiency_volatility(
+    player_name: str,
+    team: str,
+    season: int,
+    week: int,
+    stat: str = 'ypc'
+) -> float:
+    """
+    Calculate coefficient of variation (CV) for player efficiency.
+
+    Args:
+        player_name: Player display name
+        team: Team abbreviation
+        season: Season year
+        week: Week to project
+        stat: 'ypc' (yards per carry) or 'ypt' (yards per target)
+
+    Returns:
+        float: CV for efficiency (typically 0.15-0.40)
+    """
+    df = get_player_recent_stats(player_name, team, season, week, lookback=6)
+
+    if len(df) < 3:
+        # Insufficient data - return default
+        # YPC: ~30% volatility, YPT: ~25% volatility
+        return 0.30 if stat == 'ypc' else 0.25
+
+    # Calculate efficiency for each game
+    if stat == 'ypc':
+        # Filter games with carries > 0
+        valid_games = df[df['carries'] > 0].copy()
+        if len(valid_games) < 2:
+            return 0.30
+        valid_games['efficiency'] = valid_games['rushing_yards'] / valid_games['carries']
+    else:  # ypt
+        # Filter games with targets > 0
+        valid_games = df[df['targets'] > 0].copy()
+        if len(valid_games) < 2:
+            return 0.25
+        valid_games['efficiency'] = valid_games['receiving_yards'] / valid_games['targets']
+
+    efficiency = valid_games['efficiency']
+    mean_eff = efficiency.mean()
+    std_eff = efficiency.std()
+
+    if mean_eff == 0:
+        return 0.30 if stat == 'ypc' else 0.25
+
+    cv = std_eff / mean_eff
+
+    # Cap CV at reasonable bounds
+    # YPC: typically 15-45% volatility
+    # YPT: typically 15-35% volatility
+    if stat == 'ypc':
+        cv = max(0.10, min(0.50, cv))
+    else:  # ypt
+        cv = max(0.10, min(0.45, cv))
+
+    return cv
+
+
+def apply_projection_ranges(player_proj: PlayerProjection, position: str) -> None:
+    """
+    Calculate P10 and P90 bounds for player projections using volatility.
+
+    For normal distribution:
+    - P10 ≈ mean - 1.28 * std
+    - P90 ≈ mean + 1.28 * std
+
+    Since CV = std/mean, then std = CV * mean
+
+    Args:
+        player_proj: PlayerProjection object to update (modified in-place)
+        position: Player position ('RB', 'WR', 'TE')
+
+    Modifies player_proj in-place with P10/P90 values.
+    """
+    vol_cv = player_proj.volume_volatility_cv
+    eff_cv = player_proj.efficiency_volatility_cv
+
+    # RB rushing projections
+    if position == 'RB' and player_proj.projected_carries > 0:
+        # Carries range
+        std_carries = vol_cv * player_proj.projected_carries
+        player_proj.projected_carries_p10 = max(0, player_proj.projected_carries - 1.28 * std_carries)
+        player_proj.projected_carries_p90 = player_proj.projected_carries + 1.28 * std_carries
+
+        # YPC range
+        std_ypc = eff_cv * player_proj.projected_ypc
+        player_proj.projected_ypc_p10 = max(2.0, player_proj.projected_ypc - 1.28 * std_ypc)
+        player_proj.projected_ypc_p90 = min(10.0, player_proj.projected_ypc + 1.28 * std_ypc)
+
+        # Rush yards range (compound: carries × YPC)
+        # For product of independent variables: CV_product ≈ sqrt(CV_X² + CV_Y²)
+        combined_cv = math.sqrt(vol_cv**2 + eff_cv**2)
+        std_rush_yds = combined_cv * player_proj.projected_rush_yards
+        player_proj.projected_rush_yards_p10 = max(0, player_proj.projected_rush_yards - 1.28 * std_rush_yds)
+        player_proj.projected_rush_yards_p90 = player_proj.projected_rush_yards + 1.28 * std_rush_yds
+
+    # Receiving projections (all positions with targets)
+    if player_proj.projected_targets > 0:
+        # Targets range
+        std_targets = vol_cv * player_proj.projected_targets
+        player_proj.projected_targets_p10 = max(0, player_proj.projected_targets - 1.28 * std_targets)
+        player_proj.projected_targets_p90 = player_proj.projected_targets + 1.28 * std_targets
+
+        # YPT range
+        std_ypt = eff_cv * player_proj.projected_ypt
+        player_proj.projected_ypt_p10 = max(4.0, player_proj.projected_ypt - 1.28 * std_ypt)
+        player_proj.projected_ypt_p90 = min(15.0, player_proj.projected_ypt + 1.28 * std_ypt)
+
+        # Receiving yards range (compound: targets × YPT)
+        combined_cv = math.sqrt(vol_cv**2 + eff_cv**2)
+        std_recv_yds = combined_cv * player_proj.projected_recv_yards
+        player_proj.projected_recv_yards_p10 = max(0, player_proj.projected_recv_yards - 1.28 * std_recv_yds)
+        player_proj.projected_recv_yards_p90 = player_proj.projected_recv_yards + 1.28 * std_recv_yds
+
+    # Total yards range
+    if position == 'RB':
+        player_proj.projected_total_yards_p10 = player_proj.projected_rush_yards_p10 + player_proj.projected_recv_yards_p10
+        player_proj.projected_total_yards_p90 = player_proj.projected_rush_yards_p90 + player_proj.projected_recv_yards_p90
+    else:  # WR/TE
+        player_proj.projected_total_yards_p10 = player_proj.projected_recv_yards_p10
+        player_proj.projected_total_yards_p90 = player_proj.projected_recv_yards_p90
 
 
 # ============================================================================

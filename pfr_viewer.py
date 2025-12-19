@@ -9647,14 +9647,25 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Running Backs**")
                         rb_data = []
                         for rb in sorted(away_rbs, key=lambda x: x.projected_total_yards, reverse=True):
+                            # Determine volatility label
+                            combined_cv = (rb.volume_volatility_cv + rb.efficiency_volatility_cv) / 2
+                            if combined_cv < 0.25:
+                                volatility = "Low"
+                            elif combined_cv < 0.35:
+                                volatility = "Med"
+                            else:
+                                volatility = "High"
+
                             rb_data.append({
                                 'Player': rb.player_name,
                                 'Carries': f"{rb.projected_carries:.1f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
                                 'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Range (P10-P90)': f"{rb.projected_rush_yards_p10:.0f}-{rb.projected_rush_yards_p90:.0f}",
                                 'Targets': f"{rb.projected_targets:.1f}",
                                 'Rec Yds': f"{rb.projected_recv_yards:.1f}",
                                 'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'Vol': volatility,
                                 'DVOA': f"{rb.dvoa_pct:+.1f}%"
                             })
                         st.dataframe(pd.DataFrame(rb_data), use_container_width=True, hide_index=True)
@@ -9671,12 +9682,23 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Receivers (WR/TE)**")
                         rec_data = []
                         for rec in sorted(away_receivers, key=lambda x: x.projected_recv_yards, reverse=True)[:10]:
+                            # Determine volatility label
+                            combined_cv = (rec.volume_volatility_cv + rec.efficiency_volatility_cv) / 2
+                            if combined_cv < 0.25:
+                                volatility = "Low"
+                            elif combined_cv < 0.35:
+                                volatility = "Med"
+                            else:
+                                volatility = "High"
+
                             rec_data.append({
                                 'Player': rec.player_name,
                                 'Pos': rec.position,
                                 'Targets': f"{rec.projected_targets:.1f}",
                                 'YPT': f"{rec.projected_ypt:.2f}",
                                 'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'Range (P10-P90)': f"{rec.projected_recv_yards_p10:.0f}-{rec.projected_recv_yards_p90:.0f}",
+                                'Vol': volatility,
                                 'DVOA': f"{rec.dvoa_pct:+.1f}%"
                             })
                         st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)
@@ -9717,14 +9739,25 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Running Backs**")
                         rb_data = []
                         for rb in sorted(home_rbs, key=lambda x: x.projected_total_yards, reverse=True):
+                            # Determine volatility label
+                            combined_cv = (rb.volume_volatility_cv + rb.efficiency_volatility_cv) / 2
+                            if combined_cv < 0.25:
+                                volatility = "Low"
+                            elif combined_cv < 0.35:
+                                volatility = "Med"
+                            else:
+                                volatility = "High"
+
                             rb_data.append({
                                 'Player': rb.player_name,
                                 'Carries': f"{rb.projected_carries:.1f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
                                 'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Range (P10-P90)': f"{rb.projected_rush_yards_p10:.0f}-{rb.projected_rush_yards_p90:.0f}",
                                 'Targets': f"{rb.projected_targets:.1f}",
                                 'Rec Yds': f"{rb.projected_recv_yards:.1f}",
                                 'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'Vol': volatility,
                                 'DVOA': f"{rb.dvoa_pct:+.1f}%"
                             })
                         st.dataframe(pd.DataFrame(rb_data), use_container_width=True, hide_index=True)
@@ -9741,12 +9774,23 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Receivers (WR/TE)**")
                         rec_data = []
                         for rec in sorted(home_receivers, key=lambda x: x.projected_recv_yards, reverse=True)[:10]:
+                            # Determine volatility label
+                            combined_cv = (rec.volume_volatility_cv + rec.efficiency_volatility_cv) / 2
+                            if combined_cv < 0.25:
+                                volatility = "Low"
+                            elif combined_cv < 0.35:
+                                volatility = "Med"
+                            else:
+                                volatility = "High"
+
                             rec_data.append({
                                 'Player': rec.player_name,
                                 'Pos': rec.position,
                                 'Targets': f"{rec.projected_targets:.1f}",
                                 'YPT': f"{rec.projected_ypt:.2f}",
                                 'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'Range (P10-P90)': f"{rec.projected_recv_yards_p10:.0f}-{rec.projected_recv_yards_p90:.0f}",
+                                'Vol': volatility,
                                 'DVOA': f"{rec.dvoa_pct:+.1f}%"
                             })
                         st.dataframe(pd.DataFrame(rec_data), use_container_width=True, hide_index=True)

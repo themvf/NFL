@@ -1052,6 +1052,19 @@ def apply_rushing_efficiency(
         rb.projected_total_yards = round(projected_rush_yards, 1)  # Will add recv yards in Layer 4B
         rb.dvoa_pct = round(player_dvoa, 1)
 
+    # Calculate projection ranges (P10/P90) for each RB
+    for rb in rb_projections:
+        # Calculate volatility from recent games
+        vol_cv = calculate_volume_volatility(rb.player_name, rb.team, season, week, 'carries')
+        eff_cv = calculate_efficiency_volatility(rb.player_name, rb.team, season, week, 'ypc')
+
+        # Store CVs
+        rb.volume_volatility_cv = vol_cv
+        rb.efficiency_volatility_cv = eff_cv
+
+        # Apply ranges (P10 = mean - 1.28*std, P90 = mean + 1.28*std)
+        apply_projection_ranges(rb, 'RB')
+
 
 def apply_receiving_efficiency(
     rec_projections: List[PlayerProjection],
@@ -1129,6 +1142,23 @@ def apply_receiving_efficiency(
             rec.projected_total_yards = round(projected_recv_yards, 1)
 
         rec.dvoa_pct = round(player_dvoa, 1)
+
+    # Calculate projection ranges (P10/P90) for each receiver
+    for rec in rec_projections:
+        # Skip if no targets
+        if rec.projected_targets == 0:
+            continue
+
+        # Calculate volatility from recent games
+        vol_cv = calculate_volume_volatility(rec.player_name, rec.team, season, week, 'targets')
+        eff_cv = calculate_efficiency_volatility(rec.player_name, rec.team, season, week, 'ypt')
+
+        # Store CVs
+        rec.volume_volatility_cv = vol_cv
+        rec.efficiency_volatility_cv = eff_cv
+
+        # Apply ranges (P10 = mean - 1.28*std, P90 = mean + 1.28*std)
+        apply_projection_ranges(rec, rec.position)
 
 
 def apply_qb_efficiency(

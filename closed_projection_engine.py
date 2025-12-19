@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Closed-System Projection Engine
-REBUILD 4: Fix QB query to use available data (not future weeks)
+REBUILD 5: Add High-Pace Game Toggle with Projection Ranges (P10/P90)
 6-layer projection system with conservation laws ensuring internal consistency.
 
 Key Principle: Volume comes from role + game script. DVOA modifies efficiency.

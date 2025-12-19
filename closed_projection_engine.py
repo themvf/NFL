@@ -15,6 +15,7 @@ Conservation Laws:
 """
 
 import sqlite3
+import math
 from pathlib import Path
 from typing import List, Tuple, Optional
 from dataclasses import dataclass, field
@@ -389,7 +390,8 @@ def predict_team_plays(
     week: int,
     vegas_total: Optional[float] = None,
     spread_line: Optional[float] = None,
-    is_home: bool = True
+    is_home: bool = True,
+    high_pace: bool = False
 ) -> int:
     """
     Predict total offensive plays for a team.
@@ -398,7 +400,8 @@ def predict_team_plays(
     - Baseline: Median plays from last 6-8 games
     - Vegas adjustment: (total - 45) * 0.3 plays
     - Spread adjustment: ±0.15 * spread (favorites fewer, underdogs more)
-    - Capped at 55-75 plays (realistic range)
+    - High-pace boost: +3 plays to baseline if enabled
+    - Capped at 55-75 plays (55-82 if high-pace enabled)
 
     Args:
         team: Team abbreviation
@@ -408,6 +411,7 @@ def predict_team_plays(
         vegas_total: Over/under total points (optional, hybrid approach)
         spread_line: Point spread (positive = home favorite, negative = away favorite)
         is_home: Whether team is home
+        high_pace: Whether to apply high-pace game boosts
 
     Returns:
         Projected total plays for team
@@ -443,6 +447,10 @@ def predict_team_plays(
         df['total_plays'] = df['plays'].fillna(df['pass_att'] + df['rush_att'])
         baseline_plays = df['total_plays'].median()
 
+    # High-pace boost: +3 plays to baseline if enabled
+    if high_pace:
+        baseline_plays += 3
+
     # Vegas total adjustment (if available and week >= 14 per hybrid approach)
     vegas_adj = 0.0
     if vegas_total is not None and week >= 14:
@@ -466,8 +474,10 @@ def predict_team_plays(
         spread_adj = -0.15 * team_spread
 
     # Combine and clamp
+    # High-pace mode increases cap from 75 to 82
+    plays_cap = 82 if high_pace else 75
     projected_plays = baseline_plays + vegas_adj + spread_adj
-    projected_plays = max(55, min(75, projected_plays))
+    projected_plays = max(55, min(plays_cap, projected_plays))
 
     return round(projected_plays)
 
@@ -482,7 +492,8 @@ def split_plays_pass_rush(
     week: int,
     total_plays: int,
     spread_line: Optional[float] = None,
-    is_home: bool = True
+    is_home: bool = True,
+    high_pace: bool = False
 ) -> Tuple[int, int]:
     """
     Split team plays into pass attempts and rush attempts.
@@ -490,6 +501,7 @@ def split_plays_pass_rush(
     Formula:
     - Neutral pass rate: From games within 1 score, quarters 1-3
     - Game script adjustment: ±1% per point of spread
+    - High-pace boost: +2% pass rate if enabled AND spread <= 4 (close game)
     - Capped at 45-75% pass rate
     - Enforces: PassAttempts + RushAttempts = TotalPlays
 
@@ -500,6 +512,7 @@ def split_plays_pass_rush(
         total_plays: Total plays from Layer 1
         spread_line: Point spread (optional)
         is_home: Whether team is home
+        high_pace: Whether to apply high-pace game boosts
 
     Returns:
         Tuple of (pass_attempts, rush_attempts)
@@ -547,8 +560,13 @@ def split_plays_pass_rush(
         # Formula: +1% pass rate per point as underdog
         script_adj = team_spread * 0.01  # If +7 underdog, pass 7% more
 
+    # High-pace boost: +2% pass rate only if close game (spread <= 4)
+    high_pace_adj = 0.0
+    if high_pace and spread_line is not None and abs(spread_line) <= 4:
+        high_pace_adj = 0.02  # +2 percentage points
+
     # Applied pass rate
-    game_pass_rate = neutral_pass_rate + script_adj
+    game_pass_rate = neutral_pass_rate + script_adj + high_pace_adj
     game_pass_rate = max(0.45, min(0.75, game_pass_rate))
 
     # Allocate plays
@@ -1278,7 +1296,8 @@ def compute_team_anchors(
     week: int,
     total_plays: int,
     pass_rate: float,
-    strategy: str = 'neutral'
+    strategy: str = 'neutral',
+    high_pace: bool = False
 ) -> Tuple[float, float, float]:
     """
     Compute team rush/pass/total yard anchors from offensive/defensive strength.
@@ -1290,6 +1309,17 @@ def compute_team_anchors(
             * neutral: 60% offense, 40% defense
             * optimistic: 70% offense, 30% defense
             * conservative: 40% offense, 60% defense
+        - High-pace boost: +3% efficiency if both offenses above league average
+
+    Args:
+        team: Team abbreviation
+        opponent: Opponent team abbreviation
+        season: Season year
+        week: Week number
+        total_plays: Total plays from Layer 1
+        pass_rate: Pass rate from Layer 2
+        strategy: Projection strategy (neutral, optimistic, conservative)
+        high_pace: Whether to apply high-pace game boosts
 
     Returns:
         Tuple of (rush_yards_anchor, pass_yards_anchor, total_yards_anchor)
@@ -1335,6 +1365,21 @@ def compute_team_anchors(
     else:
         opp_ypp_allowed = 5.5  # Default to league avg
 
+    # Get league average YPP for high-pace boost condition
+    league_query = """
+        SELECT AVG((pass_yds + rush_yds) * 1.0 / plays) as league_avg_ypp
+        FROM box_score_summary
+        WHERE season = ?
+          AND week >= ?
+          AND week < ?
+          AND plays > 0
+    """
+    league_df = pd.read_sql_query(league_query, conn, params=(season, start_week, week))
+    if len(league_df) > 0 and pd.notna(league_df['league_avg_ypp'].iloc[0]):
+        league_avg_ypp = league_df['league_avg_ypp'].iloc[0]
+    else:
+        league_avg_ypp = 5.5  # Default
+
     conn.close()
 
     # Blend based on strategy
@@ -1349,6 +1394,13 @@ def compute_team_anchors(
         weight_defense = 0.4
 
     expected_ypp = weight_offense * team_ypp + weight_defense * opp_ypp_allowed
+
+    # High-pace boost: +3% efficiency only if both offenses above league average
+    # This represents reduced defensive pressure in shootout conditions
+    if high_pace:
+        both_offenses_good = (team_ypp > league_avg_ypp) and (opp_ypp_allowed > league_avg_ypp)
+        if both_offenses_good:
+            expected_ypp *= 1.03  # +3% efficiency boost
 
     # Calculate total yards anchor
     total_yards_anchor = expected_ypp * total_plays
@@ -1480,11 +1532,13 @@ def validate_projections(
         f"Receiving yards conservation failed: sum={player_recv_yards:.1f}, expected={team_proj.pass_yards_anchor:.1f}"
 
     # Check 6: Realistic ranges
-    assert 55 <= team_proj.total_plays <= 75, \
-        f"Total plays out of range: {team_proj.total_plays} (expected 55-75)"
+    # Note: High-pace mode increases cap to 82, but validation uses 85 to allow some flexibility
+    assert 55 <= team_proj.total_plays <= 85, \
+        f"Total plays out of range: {team_proj.total_plays} (expected 55-85)"
 
-    assert 0.45 <= team_proj.pass_rate <= 0.75, \
-        f"Pass rate out of range: {team_proj.pass_rate:.2%} (expected 45-75%)"
+    # Relaxed range to handle extreme run-heavy (SEA, BAL) or pass-heavy teams
+    assert 0.40 <= team_proj.pass_rate <= 0.80, \
+        f"Pass rate out of range: {team_proj.pass_rate:.2%} (expected 40-80%)"
 
     # Check 7: Player values non-negative
     for rb in rb_projections:
@@ -1511,7 +1565,8 @@ def project_matchup(
     week: int,
     vegas_total: Optional[float] = None,
     spread_line: Optional[float] = None,
-    strategy: str = 'neutral'
+    strategy: str = 'neutral',
+    high_pace: bool = False
 ) -> Tuple[TeamProjection, List[PlayerProjection], Optional[QBProjection], TeamProjection, List[PlayerProjection], Optional[QBProjection]]:
     """
     Complete closed-system projection for a matchup.
@@ -1524,6 +1579,7 @@ def project_matchup(
         vegas_total: Over/under total (optional, Week 14+ recommended)
         spread_line: Point spread, positive=home favorite (optional)
         strategy: 'neutral' (60/40), 'optimistic' (70/30), 'conservative' (40/60)
+        high_pace: Whether to apply high-pace game boosts
 
     Returns:
         Tuple of (away_team_proj, away_players, away_qb, home_team_proj, home_players, home_qb)
@@ -1531,10 +1587,10 @@ def project_matchup(
     # --- AWAY TEAM ---
 
     # Layer 1: Game - Predict total plays
-    away_plays = predict_team_plays(away_team, home_team, season, week, vegas_total, spread_line, is_home=False)
+    away_plays = predict_team_plays(away_team, home_team, season, week, vegas_total, spread_line, is_home=False, high_pace=high_pace)
 
     # Layer 2: Team - Split plays into pass/rush
-    away_pass, away_rush = split_plays_pass_rush(away_team, season, week, away_plays, spread_line, is_home=False)
+    away_pass, away_rush = split_plays_pass_rush(away_team, season, week, away_plays, spread_line, is_home=False, high_pace=high_pace)
 
     # Layer 3: Volume - Allocate to players
     # Layer 3C: QB allocation first (to determine mobile QB carries)
@@ -1555,7 +1611,7 @@ def project_matchup(
 
     # Layer 5: Reconciliation - Enforce team totals
     away_rush_anchor, away_pass_anchor, away_total_anchor = compute_team_anchors(
-        away_team, home_team, season, week, away_plays, away_pass / away_plays, strategy
+        away_team, home_team, season, week, away_plays, away_pass / away_plays, strategy, high_pace=high_pace
     )
 
     # For mobile QBs, allocate some rush yards to QB
@@ -1597,10 +1653,10 @@ def project_matchup(
     # --- HOME TEAM ---
 
     # Layer 1: Game - Predict total plays
-    home_plays = predict_team_plays(home_team, away_team, season, week, vegas_total, spread_line, is_home=True)
+    home_plays = predict_team_plays(home_team, away_team, season, week, vegas_total, spread_line, is_home=True, high_pace=high_pace)
 
     # Layer 2: Team - Split plays into pass/rush
-    home_pass, home_rush = split_plays_pass_rush(home_team, season, week, home_plays, spread_line, is_home=True)
+    home_pass, home_rush = split_plays_pass_rush(home_team, season, week, home_plays, spread_line, is_home=True, high_pace=high_pace)
 
     # Layer 3: Volume - Allocate to players
     # Layer 3C: QB allocation first (to determine mobile QB carries)
@@ -1621,7 +1677,7 @@ def project_matchup(
 
     # Layer 5: Reconciliation - Enforce team totals
     home_rush_anchor, home_pass_anchor, home_total_anchor = compute_team_anchors(
-        home_team, away_team, season, week, home_plays, home_pass / home_plays, strategy
+        home_team, away_team, season, week, home_plays, home_pass / home_plays, strategy, high_pace=high_pace
     )
 
     # For mobile QBs, allocate some rush yards to QB

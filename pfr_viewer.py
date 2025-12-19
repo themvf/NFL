@@ -9568,6 +9568,13 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 help="Week to project for (uses data up to but not including this week)"
             )
 
+        # High-pace toggle
+        high_pace = st.checkbox(
+            "🏃 High-Pace Game",
+            value=False,
+            help="Select if expecting faster tempo, more plays, or shootout conditions. Conditional boosts: +3 plays baseline, +7 cap increase, +2% pass rate (if spread ≤4), +3% efficiency (if both offenses above average)."
+        )
+
         # Run projection
         with st.spinner("Generating closed-system projections..."):
             try:
@@ -9578,7 +9585,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     week=proj_week,
                     vegas_total=vegas_total,
                     spread_line=spread_line,
-                    strategy=strategy
+                    strategy=strategy,
+                    high_pace=high_pace
                 )
 
                 # Display matchup header

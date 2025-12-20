@@ -66,10 +66,13 @@ class PlayerProjection:
     # Volume (median)
     projected_carries: float = 0.0  # RBs only
     projected_targets: float = 0.0  # WR/TE/RB receiving
+    projected_receptions: float = 0.0  # Actual catches (targets × catch_rate)
 
     # Efficiency (median)
     projected_ypc: float = 0.0  # RBs only
-    projected_ypt: float = 0.0
+    projected_ypt: float = 0.0  # Yards per target
+    projected_ypr: float = 0.0  # Yards per reception
+    projected_catch_rate: float = 0.0  # Targets → receptions conversion rate
 
     # Yards (median)
     projected_rush_yards: float = 0.0  # RBs only
@@ -88,8 +91,12 @@ class PlayerProjection:
     # Receiving stats
     projected_targets_p10: float = 0.0
     projected_targets_p90: float = 0.0
+    projected_receptions_p10: float = 0.0
+    projected_receptions_p90: float = 0.0
     projected_ypt_p10: float = 0.0
     projected_ypt_p90: float = 0.0
+    projected_ypr_p10: float = 0.0
+    projected_ypr_p90: float = 0.0
     projected_recv_yards_p10: float = 0.0
     projected_recv_yards_p90: float = 0.0
 
@@ -314,6 +321,103 @@ def calculate_efficiency_volatility(
     return cv
 
 
+def get_player_catch_rate(
+    player_name: str,
+    team: str,
+    season: int,
+    week: int,
+    position: str
+) -> float:
+    """
+    Calculate player's catch rate (receptions / targets).
+
+    Uses weighted average: 70% recent (last 4-6 games), 30% season.
+
+    Args:
+        player_name: Player display name
+        team: Team abbreviation
+        season: Season year
+        week: Week to project
+        position: Player position (for defaults)
+
+    Returns:
+        float: Catch rate (0.0-1.0), typically:
+            - WRs: 0.60-0.70 (harder catches, deep routes)
+            - TEs: 0.65-0.75 (check-downs, safer targets)
+            - RBs: 0.70-0.80 (dump-offs, very safe)
+    """
+    conn = get_connection()
+
+    # Position-based defaults (if insufficient data)
+    default_catch_rates = {
+        'WR': 0.65,  # ~65% catch rate for WRs
+        'TE': 0.70,  # ~70% for TEs
+        'RB': 0.75   # ~75% for RBs (check-downs)
+    }
+    default_rate = default_catch_rates.get(position, 0.65)
+
+    # Get recent games (last 4-6 games, weighted 70%)
+    recent_lookback = 6
+    recent_start = max(1, week - recent_lookback)
+
+    recent_query = """
+        SELECT SUM(receptions) as total_receptions,
+               SUM(targets) as total_targets
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+          AND season_type = 'REG'
+          AND targets > 0
+    """
+
+    recent_df = pd.read_sql_query(recent_query, conn, params=(player_name, team, season, recent_start, week))
+
+    # Get season stats (all games, weighted 30%)
+    season_query = """
+        SELECT SUM(receptions) as total_receptions,
+               SUM(targets) as total_targets
+        FROM player_stats
+        WHERE player_display_name = ?
+          AND team = ?
+          AND season = ?
+          AND week < ?
+          AND season_type = 'REG'
+          AND targets > 0
+    """
+
+    season_df = pd.read_sql_query(season_query, conn, params=(player_name, team, season, week))
+    conn.close()
+
+    # Calculate catch rates
+    recent_rate = None
+    if len(recent_df) > 0 and pd.notna(recent_df['total_targets'].iloc[0]) and recent_df['total_targets'].iloc[0] > 0:
+        recent_rate = recent_df['total_receptions'].iloc[0] / recent_df['total_targets'].iloc[0]
+
+    season_rate = None
+    if len(season_df) > 0 and pd.notna(season_df['total_targets'].iloc[0]) and season_df['total_targets'].iloc[0] > 0:
+        season_rate = season_df['total_receptions'].iloc[0] / season_df['total_targets'].iloc[0]
+
+    # Weighted average (70% recent, 30% season)
+    if recent_rate is not None and season_rate is not None:
+        catch_rate = 0.7 * recent_rate + 0.3 * season_rate
+    elif recent_rate is not None:
+        catch_rate = recent_rate
+    elif season_rate is not None:
+        catch_rate = season_rate
+    else:
+        # No data - use position default
+        catch_rate = default_rate
+
+    # Clamp to realistic bounds (40% - 95%)
+    # Some elite TEs/RBs can hit 80-90%, but cap at 95% for safety
+    catch_rate = max(0.40, min(0.95, catch_rate))
+
+    return catch_rate
+
+
 def apply_projection_ranges(player_proj: PlayerProjection, position: str) -> None:
     """
     Calculate P10 and P90 bounds for player projections using volatility.
@@ -359,10 +463,22 @@ def apply_projection_ranges(player_proj: PlayerProjection, position: str) -> Non
         player_proj.projected_targets_p10 = max(0, player_proj.projected_targets - 1.28 * std_targets)
         player_proj.projected_targets_p90 = player_proj.projected_targets + 1.28 * std_targets
 
+        # Receptions range (targets × catch_rate, catch rate is fairly stable)
+        # Use smaller volatility for receptions since catch rate dampens variance
+        reception_cv = vol_cv * 0.8  # Reduced volatility due to stable catch rate
+        std_receptions = reception_cv * player_proj.projected_receptions
+        player_proj.projected_receptions_p10 = max(0, player_proj.projected_receptions - 1.28 * std_receptions)
+        player_proj.projected_receptions_p90 = player_proj.projected_receptions + 1.28 * std_receptions
+
         # YPT range
         std_ypt = eff_cv * player_proj.projected_ypt
         player_proj.projected_ypt_p10 = max(4.0, player_proj.projected_ypt - 1.28 * std_ypt)
         player_proj.projected_ypt_p90 = min(15.0, player_proj.projected_ypt + 1.28 * std_ypt)
+
+        # YPR range (slightly higher volatility than YPT since it's per completed catch)
+        std_ypr = eff_cv * 1.1 * player_proj.projected_ypr
+        player_proj.projected_ypr_p10 = max(6.0, player_proj.projected_ypr - 1.28 * std_ypr)
+        player_proj.projected_ypr_p90 = min(20.0, player_proj.projected_ypr + 1.28 * std_ypr)
 
         # Receiving yards range (compound: targets × YPT)
         combined_cv = math.sqrt(vol_cv**2 + eff_cv**2)
@@ -1153,6 +1269,21 @@ def apply_receiving_efficiency(
         rec.projected_ypt = round(projected_ypt, 2)
         rec.projected_recv_yards = round(projected_recv_yards, 1)
 
+        # Calculate receptions from targets using catch rate
+        catch_rate = get_player_catch_rate(rec.player_name, rec.team, season, week, rec.position)
+        projected_receptions = rec.projected_targets * catch_rate
+
+        # Calculate yards per reception (YPR)
+        if projected_receptions > 0:
+            projected_ypr = projected_recv_yards / projected_receptions
+        else:
+            projected_ypr = 0.0
+
+        # Update reception projections
+        rec.projected_catch_rate = round(catch_rate, 3)  # e.g., 0.675 = 67.5%
+        rec.projected_receptions = round(projected_receptions, 1)
+        rec.projected_ypr = round(projected_ypr, 2)
+
         # Add to total yards (RBs may have both rush and recv yards)
         if rec.position == 'RB':
             rec.projected_total_yards = round(rec.projected_rush_yards + projected_recv_yards, 1)
@@ -1181,6 +1312,7 @@ def apply_receiving_efficiency(
 
 def apply_qb_efficiency(
     qb_proj: Optional[QBProjection],
+    rec_projections: List[PlayerProjection],
     opponent: str,
     season: int,
     week: int,
@@ -1189,10 +1321,12 @@ def apply_qb_efficiency(
 ) -> None:
     """
     Apply DVOA to calculate QB passing and rushing yards.
+    Link QB completions to sum of receiver receptions (conservation law).
 
     Formula for passing:
         ProjectedYPA = LeagueAvgYPA * (1 + QB_PassDVOA/100) / (1 - Def_PassDVOA/100)
         ProjectedPassYards = ProjectedPassAtt * ProjectedYPA
+        ProjectedCompletions = Sum(receiver.projected_receptions)  ← Conservation!
 
     Formula for rushing (mobile QBs):
         ProjectedYPC = LeagueAvgYPC * (1 + QB_RushDVOA/100) / (1 - Def_RushDVOA/100)
@@ -1202,6 +1336,17 @@ def apply_qb_efficiency(
     """
     if qb_proj is None:
         return
+
+    # --- QB COMPLETIONS (Conservation Law) ---
+    # QB completions MUST equal sum of all receiver receptions
+    total_receptions = sum(rec.projected_receptions for rec in rec_projections)
+    qb_proj.projected_completions = round(total_receptions, 1)
+
+    # Calculate completion percentage
+    if qb_proj.projected_pass_att > 0:
+        qb_proj.projected_completion_pct = round(total_receptions / qb_proj.projected_pass_att, 3)
+    else:
+        qb_proj.projected_completion_pct = 0.0
 
     # --- PASSING EFFICIENCY ---
 
@@ -1473,6 +1618,13 @@ def reconcile_to_anchors(
             rec.projected_ypt = rec.projected_recv_yards / rec.projected_targets
             rec.projected_ypt = round(rec.projected_ypt, 2)
 
+        # Recalculate YPR after scaling
+        # NOTE: Receptions DON'T scale (catch rate is constant)
+        # But yards scale, so YPR = scaled_yards / same_receptions
+        if rec.projected_receptions > 0:
+            rec.projected_ypr = rec.projected_recv_yards / rec.projected_receptions
+            rec.projected_ypr = round(rec.projected_ypr, 2)
+
         # Update total yards
         if rec.position == 'RB':
             rec.projected_total_yards = round(rec.projected_rush_yards + rec.projected_recv_yards, 1)
@@ -1530,6 +1682,18 @@ def validate_projections(
     player_recv_yards = sum(rec.projected_recv_yards for rec in rec_projections)
     assert abs(player_recv_yards - team_proj.pass_yards_anchor) < 1.0, \
         f"Receiving yards conservation failed: sum={player_recv_yards:.1f}, expected={team_proj.pass_yards_anchor:.1f}"
+
+    # Check 5B: QB completions = sum(receiver receptions) - NEW CONSERVATION LAW!
+    if qb_projection is not None:
+        total_receptions = sum(rec.projected_receptions for rec in rec_projections)
+        assert abs(total_receptions - qb_projection.projected_completions) < 0.1, \
+            f"QB completions conservation failed: QB={qb_projection.projected_completions:.1f}, sum(receptions)={total_receptions:.1f}"
+
+        # Also check completion percentage is realistic (50-75%)
+        if qb_projection.projected_pass_att > 0:
+            comp_pct = qb_projection.projected_completion_pct
+            assert 0.50 <= comp_pct <= 0.80, \
+                f"Completion % out of range: {comp_pct:.1%} (expected 50-80%)"
 
     # Check 6: Realistic ranges
     # Note: High-pace mode increases cap to 82, but validation uses 85 to allow some flexibility
@@ -1630,7 +1794,8 @@ def project_matchup(
     reconcile_to_anchors(away_rbs, away_recs, rb_rush_anchor, away_pass_anchor)
 
     # Layer 4C: Apply QB efficiency (after anchors are computed)
-    apply_qb_efficiency(away_qb, home_team, season, week, away_pass_anchor, away_rush_anchor)
+    # NOTE: Must pass away_recs to calculate QB completions = sum(receptions)
+    apply_qb_efficiency(away_qb, away_recs, home_team, season, week, away_pass_anchor, away_rush_anchor)
 
     # Create away team projection
     away_proj = TeamProjection(
@@ -1696,7 +1861,8 @@ def project_matchup(
     reconcile_to_anchors(home_rbs, home_recs, rb_rush_anchor, home_pass_anchor)
 
     # Layer 4C: Apply QB efficiency (after anchors are computed)
-    apply_qb_efficiency(home_qb, away_team, season, week, home_pass_anchor, home_rush_anchor)
+    # NOTE: Must pass home_recs to calculate QB completions = sum(receptions)
+    apply_qb_efficiency(home_qb, home_recs, away_team, season, week, home_pass_anchor, home_rush_anchor)
 
     # Create home team projection
     home_proj = TeamProjection(

@@ -918,14 +918,20 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
 
             if result:
                 logging.info(f"Successfully saved injury for {player_name} (rowid: {injury_id})")
-                # Upload database to GCS after successful save (non-blocking)
+
+                # Upload database to GCS after successful save
+                gcs_warning = None
                 try:
-                    upload_db_to_gcs()
+                    upload_success = upload_db_to_gcs()
+                    if not upload_success:
+                        gcs_warning = "⚠️ WARNING: Injury saved locally but cloud sync FAILED. Changes may be lost on refresh!"
+                        logging.error("GCS upload returned False - sync failed")
                 except Exception as gcs_error:
+                    gcs_warning = f"⚠️ WARNING: Injury saved locally but cloud sync FAILED: {gcs_error}"
                     logging.warning(f"GCS upload failed but injury saved: {gcs_error}")
-                    # Still return success since database save worked
-                # Return lastrowid as the ID (injury_id column may be NULL if no AUTOINCREMENT)
-                return injury_id if injury_id else 1, None
+
+                # Return success with warning if GCS failed
+                return injury_id if injury_id else 1, gcs_warning
             else:
                 logging.error(f"Injury saved but could not verify: {player_name}")
                 return injury_id, "Saved but verification failed"
@@ -19943,6 +19949,15 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                             # Store success message in session state to persist across rerun
                             st.session_state.injury_success = f"✅ Successfully saved injury for {inj_player} (ID: {injury_id})"
                             st.session_state.injury_last_saved = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                            # If there's a warning (GCS sync failed), store it too
+                            if error_msg:
+                                st.session_state.injury_warning = error_msg
+                            else:
+                                # Clear any previous warning
+                                if 'injury_warning' in st.session_state:
+                                    del st.session_state.injury_warning
+
                             # Increment form counter to reset form
                             st.session_state.injury_form_counter += 1
                             st.balloons()
@@ -19974,10 +19989,18 @@ Description: {inj_description if inj_description else 'None'}
                 st.success(st.session_state.injury_success)
                 if 'injury_last_saved' in st.session_state:
                     st.caption(f"Saved at: {st.session_state.injury_last_saved}")
-                # Clear the message after displaying
+
+                # Show warning if GCS sync failed
+                if 'injury_warning' in st.session_state:
+                    st.warning(st.session_state.injury_warning)
+                    st.info("💡 **To prevent data loss:** Avoid refreshing the page. Navigate to Active Injuries tab to verify the save persisted.")
+
+                # Clear the messages after displaying
                 del st.session_state.injury_success
                 if 'injury_last_saved' in st.session_state:
                     del st.session_state.injury_last_saved
+                if 'injury_warning' in st.session_state:
+                    del st.session_state.injury_warning
 
         with injury_tab2:
             st.markdown("### Active Injuries")

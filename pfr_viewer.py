@@ -1215,10 +1215,29 @@ def toggle_player_injury(player_name, team):
     st.session_state.injured_players = injured
 
 
-def is_player_injured(player_name, team):
-    """Check if a player is marked as injured."""
+def is_player_injured(player_name, team, season=None, week=None):
+    """
+    Check if a player is marked as injured (session OR persistent).
+
+    Args:
+        player_name: Player's name
+        team: Team abbreviation
+        season: Season year (optional, for persistent injury check)
+        week: Week number (optional, for persistent injury check)
+
+    Returns:
+        bool: True if player is injured in either session state or persistent database
+    """
+    # Check session state first (quick)
     key = f"{team}_{player_name}"
-    return key in get_injured_players_for_session()
+    if key in get_injured_players_for_session():
+        return True
+
+    # Check persistent injuries if season/week provided
+    if season and week:
+        return is_player_on_injury_list(player_name, team, season, week)
+
+    return False
 
 
 def clear_all_injuries():
@@ -10248,6 +10267,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     st.caption(f"  · **{injured_p.player_name}**: No redistribution applied")
 
                     st.markdown("**Mark Players as OUT:**")
+                    st.caption("🔴 = Persistent injury (managed in Transaction Manager) | ❌ = Session injury (temporary)")
                     all_away_players = [p for p in away_players]
                     if all_away_players:
                         injury_cols = st.columns(min(5, len(all_away_players)))
@@ -10255,17 +10275,31 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             col_idx = idx % len(injury_cols)
                             with injury_cols[col_idx]:
                                 player_name = player_proj.player_name
-                                is_injured = is_player_injured(player_name, away_team)
+                                # Check both session AND persistent injuries
+                                is_injured = is_player_injured(player_name, away_team, proj_season, proj_week)
+                                # Check if it's a persistent injury (from Transaction Manager)
+                                is_persistent = is_player_on_injury_list(player_name, away_team, proj_season, proj_week)
+
+                                # Show different labels for persistent vs session injuries
+                                checkbox_label = player_name[:12]
+                                if is_persistent:
+                                    checkbox_label = f"🔴 {checkbox_label}"  # Red dot for persistent
+                                elif is_injured:
+                                    checkbox_label = f"❌ {checkbox_label}"  # X for session-only
+
+                                # Disable checkbox if it's a persistent injury (managed in Transaction Manager)
                                 if st.checkbox(
-                                    f"{'❌ ' if is_injured else ''}{player_name[:12]}",
+                                    checkbox_label,
                                     value=is_injured,
-                                    key=f"injury_closed_away_{player_name}_{proj_week}"
+                                    key=f"injury_closed_away_{player_name}_{proj_week}",
+                                    disabled=is_persistent,
+                                    help="🔴 = Persistent injury (Transaction Manager) | ❌ = Session injury (this page only)"
                                 ):
-                                    if not is_injured:
+                                    if not is_injured and not is_persistent:
                                         toggle_player_injury(player_name, away_team)
                                         st.rerun()
                                 else:
-                                    if is_injured:
+                                    if is_injured and not is_persistent:
                                         toggle_player_injury(player_name, away_team)
                                         st.rerun()
 
@@ -10391,6 +10425,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                     st.caption(f"  · **{injured_p.player_name}**: No redistribution applied")
 
                     st.markdown("**Mark Players as OUT:**")
+                    st.caption("🔴 = Persistent injury (managed in Transaction Manager) | ❌ = Session injury (temporary)")
                     all_home_players = [p for p in home_players]
                     if all_home_players:
                         injury_cols = st.columns(min(5, len(all_home_players)))
@@ -10398,17 +10433,31 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             col_idx = idx % len(injury_cols)
                             with injury_cols[col_idx]:
                                 player_name = player_proj.player_name
-                                is_injured = is_player_injured(player_name, home_team)
+                                # Check both session AND persistent injuries
+                                is_injured = is_player_injured(player_name, home_team, proj_season, proj_week)
+                                # Check if it's a persistent injury (from Transaction Manager)
+                                is_persistent = is_player_on_injury_list(player_name, home_team, proj_season, proj_week)
+
+                                # Show different labels for persistent vs session injuries
+                                checkbox_label = player_name[:12]
+                                if is_persistent:
+                                    checkbox_label = f"🔴 {checkbox_label}"  # Red dot for persistent
+                                elif is_injured:
+                                    checkbox_label = f"❌ {checkbox_label}"  # X for session-only
+
+                                # Disable checkbox if it's a persistent injury (managed in Transaction Manager)
                                 if st.checkbox(
-                                    f"{'❌ ' if is_injured else ''}{player_name[:12]}",
+                                    checkbox_label,
                                     value=is_injured,
-                                    key=f"injury_closed_home_{player_name}_{proj_week}"
+                                    key=f"injury_closed_home_{player_name}_{proj_week}",
+                                    disabled=is_persistent,
+                                    help="🔴 = Persistent injury (Transaction Manager) | ❌ = Session injury (this page only)"
                                 ):
-                                    if not is_injured:
+                                    if not is_injured and not is_persistent:
                                         toggle_player_injury(player_name, home_team)
                                         st.rerun()
                                 else:
-                                    if is_injured:
+                                    if is_injured and not is_persistent:
                                         toggle_player_injury(player_name, home_team)
                                         st.rerun()
 

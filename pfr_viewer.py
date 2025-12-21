@@ -281,7 +281,7 @@ def redistribute_rushing_with_impact(
         impact_map: Dict mapping player_name -> TeammateImpact object
 
     Returns:
-        None (modifies player_projections in place)
+        bool: True if redistribution succeeded, False if needs proportional fallback
     """
     healthy_rbs = [
         p for p in player_projections
@@ -289,7 +289,7 @@ def redistribute_rushing_with_impact(
     ]
 
     if not healthy_rbs:
-        return
+        return False
 
     injured_carries = injured_rb.projected_carries
     injured_rush_yards = injured_rb.projected_rush_yards
@@ -305,11 +305,10 @@ def redistribute_rushing_with_impact(
             rb_deltas[rb.player_name] = max(0, delta)
             total_delta += rb_deltas[rb.player_name]
 
-    # If no positive deltas found, this will fall back to proportional
-    # (handled by caller)
+    # If no positive deltas found, fall back to proportional
     if total_delta == 0:
-        logging.debug(f"No positive carry deltas found for {injured_rb.player_name}, caller will use proportional")
-        return
+        logging.debug(f"No positive carry deltas found for {injured_rb.player_name}, falling back to proportional")
+        return False
 
     # Historical delta redistribution
     for rb in healthy_rbs:
@@ -326,6 +325,7 @@ def redistribute_rushing_with_impact(
             rb.projected_ypc = rb.projected_rush_yards / rb.projected_carries
 
     logging.info(f"Applied historical delta redistribution for {injured_rb.player_name} rushing (total_delta={total_delta:.1f})")
+    return True
 
 
 def redistribute_receiving_with_impact(
@@ -342,7 +342,7 @@ def redistribute_receiving_with_impact(
         impact_map: Dict mapping player_name -> TeammateImpact object
 
     Returns:
-        None (modifies player_projections in place)
+        bool: True if redistribution succeeded, False if needs proportional fallback
     """
     # Get healthy receivers (WR/TE/RB who catch passes)
     healthy_receivers = [
@@ -353,7 +353,7 @@ def redistribute_receiving_with_impact(
     ]
 
     if not healthy_receivers:
-        return
+        return False
 
     injured_targets = injured_receiver.projected_targets
     injured_receptions = injured_receiver.projected_receptions
@@ -371,8 +371,8 @@ def redistribute_receiving_with_impact(
             total_delta += rec_deltas[rec.player_name]
 
     if total_delta == 0:
-        logging.debug(f"No positive target deltas found for {injured_receiver.player_name}, caller will use proportional")
-        return
+        logging.debug(f"No positive target deltas found for {injured_receiver.player_name}, falling back to proportional")
+        return False
 
     # Historical delta redistribution
     for rec in healthy_receivers:
@@ -394,6 +394,7 @@ def redistribute_receiving_with_impact(
             rec.projected_ypr = rec.projected_recv_yards / rec.projected_receptions
 
     logging.info(f"Applied historical delta redistribution for {injured_receiver.player_name} receiving (total_delta={total_delta:.1f})")
+    return True
 
 
 def apply_historical_deltas(
@@ -420,7 +421,8 @@ def apply_historical_deltas(
     # Build lookup: player_name -> TeammateImpact
     impact_map = {t.teammate_name: t for t in teammate_impacts}
 
-    success = False
+    rush_success = False
+    recv_success = False
 
     # Redistribute rushing stats (for RBs)
     if injured_player.position == 'RB' and injured_player.projected_carries > 0:
@@ -430,8 +432,7 @@ def apply_historical_deltas(
         )
 
         if has_carry_deltas:
-            redistribute_rushing_with_impact(player_projections, injured_player, impact_map)
-            success = True
+            rush_success = redistribute_rushing_with_impact(player_projections, injured_player, impact_map)
 
     # Redistribute receiving stats (for all pass-catchers)
     if injured_player.projected_targets > 0:
@@ -441,8 +442,9 @@ def apply_historical_deltas(
         )
 
         if has_target_deltas:
-            redistribute_receiving_with_impact(player_projections, injured_player, impact_map)
-            success = True
+            recv_success = redistribute_receiving_with_impact(player_projections, injured_player, impact_map)
+
+    success = rush_success or recv_success
 
     if success:
         # Mark redistribution method as historical

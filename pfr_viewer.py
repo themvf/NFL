@@ -950,6 +950,56 @@ def add_persistent_injury(player_name, team, season, injury_type, start_week=Non
     return None, error_msg
 
 
+def cleanup_duplicate_injuries():
+    """Remove duplicate injury records, keeping the most recent entry for each player."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Find duplicates (same player_name, team_abbr, season)
+        cursor.execute("""
+            SELECT player_name, team_abbr, season, COUNT(*) as cnt
+            FROM player_injuries
+            GROUP BY player_name, team_abbr, season
+            HAVING COUNT(*) > 1
+        """)
+        duplicates = cursor.fetchall()
+
+        if duplicates:
+            removed_count = 0
+            for player_name, team_abbr, season, count in duplicates:
+                # Keep the most recent entry, delete older ones
+                cursor.execute("""
+                    DELETE FROM player_injuries
+                    WHERE rowid NOT IN (
+                        SELECT rowid FROM player_injuries
+                        WHERE player_name = ? AND team_abbr = ? AND season = ?
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                    )
+                    AND player_name = ? AND team_abbr = ? AND season = ?
+                """, (player_name, team_abbr, season, player_name, team_abbr, season))
+                removed_count += cursor.rowcount
+
+            conn.commit()
+            conn.close()
+
+            if removed_count > 0:
+                # Upload cleaned database to GCS
+                upload_db_to_gcs()
+                logging.info(f"Cleaned up {removed_count} duplicate injury records")
+                return True, f"Removed {removed_count} duplicate injury records"
+            else:
+                return True, "No duplicates found"
+        else:
+            conn.close()
+            return True, "No duplicates found"
+
+    except Exception as e:
+        logging.error(f"Error cleaning up duplicate injuries: {e}")
+        return False, f"Error: {e}"
+
+
 def get_persistent_injuries(team=None, season=None, injury_type=None):
     """Get persistent injuries with optional filtering."""
     try:
@@ -970,6 +1020,12 @@ def get_persistent_injuries(team=None, season=None, injury_type=None):
         sql += " ORDER BY updated_at DESC"
         df = pd.read_sql_query(sql, conn, params=params if params else None)
         conn.close()
+
+        # Deduplicate by (player_name, team_abbr, season)
+        # Keep the most recent entry (first after ORDER BY updated_at DESC)
+        if not df.empty:
+            df = df.drop_duplicates(subset=['player_name', 'team_abbr', 'season'], keep='first')
+
         return df
     except Exception as e:
         st.error(f"Error retrieving injuries: {e}")
@@ -984,6 +1040,8 @@ def is_player_on_injury_list(player_name, team, season, week):
         cursor.execute("""
             SELECT injury_type, start_week, end_week FROM player_injuries
             WHERE player_name = ? AND team_abbr = ? AND season = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
         """, (player_name, team, season))
         result = cursor.fetchone()
         conn.close()
@@ -19867,6 +19925,18 @@ Description: {inj_description if inj_description else 'None'}
 
         with injury_tab2:
             st.markdown("### Active Injuries")
+
+            # Cleanup button for duplicate injuries
+            col_header, col_cleanup = st.columns([3, 1])
+            with col_cleanup:
+                if st.button("🧹 Clean Duplicates", help="Remove duplicate injury records from database"):
+                    with st.spinner("Cleaning up duplicates..."):
+                        success, message = cleanup_duplicate_injuries()
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
 
             # Filters
             col1, col2, col3 = st.columns(3)

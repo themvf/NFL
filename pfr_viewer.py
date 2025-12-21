@@ -943,6 +943,109 @@ def redistribute_stats(player_stats_list, team, stat_columns, season=None, week=
     return adjusted_stats, summary
 
 
+def redistribute_closed_system_projections(player_projections, qb_projection, team_proj, team, season, week):
+    """
+    Redistribute stats from injured players in closed-system projections.
+    Maintains conservation laws after redistribution.
+
+    Args:
+        player_projections: List of PlayerProjection objects
+        qb_projection: QBProjection object (or None)
+        team_proj: TeamProjection object
+        team: Team abbreviation
+        season: Season number
+        week: Week number
+
+    Returns:
+        Tuple of (adjusted_players, adjusted_qb, has_injuries)
+    """
+    import closed_projection_engine as cpe
+
+    # Check if any players are injured
+    all_injured = get_injured_players_for_team(team, season, week)
+    if not all_injured:
+        return player_projections, qb_projection, False
+
+    # Convert PlayerProjection objects to dictionaries for redistribute_stats
+    player_dicts = []
+    for p in player_projections:
+        player_dicts.append({
+            'Player': p.player_name,
+            'team': team,
+            'Carries': p.projected_carries,
+            'Targets': p.projected_targets,
+            'Receptions': p.projected_receptions,
+            'Rush Yds': p.projected_rush_yards,
+            'Rec Yds': p.projected_recv_yards,
+            'Total Yds': p.projected_total_yards
+        })
+
+    # Define stat columns to redistribute
+    stat_columns = [
+        ('Carries', 'carries'),
+        ('Targets', 'targets'),
+        ('Receptions', 'receptions'),
+        ('Rush Yds', 'rush yards'),
+        ('Rec Yds', 'receiving yards'),
+        ('Total Yds', 'total yards')
+    ]
+
+    # Apply redistribution
+    adjusted_dicts, summary = redistribute_stats(player_dicts, team, stat_columns, season, week)
+
+    if not summary:
+        return player_projections, qb_projection, False
+
+    # Convert back to PlayerProjection objects
+    adjusted_players = []
+    for adj_dict, orig_proj in zip(adjusted_dicts, player_projections):
+        # Create new projection with adjusted stats
+        adjusted_proj = cpe.PlayerProjection(
+            player_name=orig_proj.player_name,
+            team=orig_proj.team,
+            position=orig_proj.position,
+            projected_carries=adj_dict.get('Carries', 0),
+            projected_targets=adj_dict.get('Targets', 0),
+            projected_receptions=adj_dict.get('Receptions', 0),
+            projected_rush_yards=adj_dict.get('Rush Yds', 0),
+            projected_recv_yards=adj_dict.get('Rec Yds', 0),
+            projected_total_yards=adj_dict.get('Total Yds', 0),
+            # Preserve efficiency metrics (recalculate from new volumes)
+            projected_ypc=adj_dict.get('Rush Yds', 0) / adj_dict.get('Carries', 1) if adj_dict.get('Carries', 0) > 0 else 0,
+            projected_ypt=orig_proj.projected_ypt,  # Keep original YPT
+            projected_catch_rate=orig_proj.projected_catch_rate,  # Keep original catch rate
+            projected_ypr=adj_dict.get('Rec Yds', 0) / adj_dict.get('Receptions', 1) if adj_dict.get('Receptions', 0) > 0 else 0,
+            # Preserve range/volatility info
+            projected_carries_p10=orig_proj.projected_carries_p10,
+            projected_carries_p90=orig_proj.projected_carries_p90,
+            projected_rush_yards_p10=orig_proj.projected_rush_yards_p10,
+            projected_rush_yards_p90=orig_proj.projected_rush_yards_p90,
+            projected_targets_p10=orig_proj.projected_targets_p10,
+            projected_targets_p90=orig_proj.projected_targets_p90,
+            projected_receptions_p10=orig_proj.projected_receptions_p10,
+            projected_receptions_p90=orig_proj.projected_receptions_p90,
+            projected_recv_yards_p10=orig_proj.projected_recv_yards_p10,
+            projected_recv_yards_p90=orig_proj.projected_recv_yards_p90,
+            volume_volatility_cv=orig_proj.volume_volatility_cv,
+            efficiency_volatility_cv=orig_proj.efficiency_volatility_cv,
+            weighted_share=orig_proj.weighted_share,
+            dvoa_pct=orig_proj.dvoa_pct
+        )
+
+        # Mark if injured
+        adjusted_proj.injured = adj_dict.get('injured', False)
+        adjusted_players.append(adjusted_proj)
+
+    # Update QB completions to match sum of receptions (conservation law)
+    if qb_projection is not None:
+        total_receptions = sum(p.projected_receptions for p in adjusted_players if not p.injured)
+        qb_projection.projected_completions = round(total_receptions, 1)
+        if qb_projection.projected_pass_att > 0:
+            qb_projection.projected_completion_pct = round(total_receptions / qb_projection.projected_pass_att, 3)
+
+    return adjusted_players, qb_projection, True
+
+
 def calculate_smart_expected_stats(player_name, team, season, week, stat_type, opponent_factor=1.0, strategy='season_avg'):
     """
     Calculate expected player stats using smart aggregation strategies.
@@ -9589,6 +9692,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     high_pace=high_pace
                 )
 
+                # Apply injury redistribution if players are marked as out
+                away_players, away_qb, away_has_injuries = redistribute_closed_system_projections(
+                    away_players, away_qb, away_proj, away_team, season, proj_week
+                )
+                home_players, home_qb, home_has_injuries = redistribute_closed_system_projections(
+                    home_players, home_qb, home_proj, home_team, season, proj_week
+                )
+
                 # Display matchup header
                 st.subheader(f"📊 {away_team} @ {home_team} - Week {proj_week}")
                 if spread_line is not None:
@@ -9664,8 +9775,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 volatility = "High"
 
+                            # Mark injured players
+                            player_display = f"❌ {rb.player_name}" if hasattr(rb, 'injured') and rb.injured else rb.player_name
+
                             rb_data.append({
-                                'Player': rb.player_name,
+                                'Player': player_display,
                                 'Carries': f"{rb.projected_carries:.1f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
                                 'Rush Yds': f"{rb.projected_rush_yards:.1f}",
@@ -9700,8 +9814,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 volatility = "High"
 
+                            # Mark injured players
+                            player_display = f"❌ {rec.player_name}" if hasattr(rec, 'injured') and rec.injured else rec.player_name
+
                             rec_data.append({
-                                'Player': rec.player_name,
+                                'Player': player_display,
                                 'Pos': rec.position,
                                 'Targets': f"{rec.projected_targets:.1f}",
                                 'Rec': f"{rec.projected_receptions:.1f}",
@@ -9719,6 +9836,35 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         total_rec_yds = sum(p.projected_recv_yards for p in away_players if p.position in ['WR', 'TE', 'RB'])
                         st.caption(f"✓ Conservation: {total_rec_targets:.1f} targets ≈ {away_proj.total_targets} (team), "
                                    f"{total_rec_yds:.1f} yds = {away_proj.pass_yards_anchor:.1f} (anchor)")
+
+                    st.divider()
+
+                    # Injury adjustments
+                    st.markdown("**🏥 Injury Adjustments**")
+                    if away_has_injuries:
+                        st.warning(f"⚠️ Injured players' stats have been redistributed to healthy teammates")
+
+                    st.markdown("**Mark Players as OUT:**")
+                    all_away_players = [p for p in away_players]
+                    if all_away_players:
+                        injury_cols = st.columns(min(5, len(all_away_players)))
+                        for idx, player_proj in enumerate(all_away_players):
+                            col_idx = idx % len(injury_cols)
+                            with injury_cols[col_idx]:
+                                player_name = player_proj.player_name
+                                is_injured = is_player_injured(player_name, away_team)
+                                if st.checkbox(
+                                    f"{'❌ ' if is_injured else ''}{player_name[:12]}",
+                                    value=is_injured,
+                                    key=f"injury_closed_away_{player_name}_{proj_week}"
+                                ):
+                                    if not is_injured:
+                                        toggle_player_injury(player_name, away_team)
+                                        st.rerun()
+                                else:
+                                    if is_injured:
+                                        toggle_player_injury(player_name, away_team)
+                                        st.rerun()
 
                 with tab_home:
                     st.subheader(f"{home_team} Player Projections")
@@ -9759,8 +9905,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 volatility = "High"
 
+                            # Mark injured players
+                            player_display = f"❌ {rb.player_name}" if hasattr(rb, 'injured') and rb.injured else rb.player_name
+
                             rb_data.append({
-                                'Player': rb.player_name,
+                                'Player': player_display,
                                 'Carries': f"{rb.projected_carries:.1f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
                                 'Rush Yds': f"{rb.projected_rush_yards:.1f}",
@@ -9795,8 +9944,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 volatility = "High"
 
+                            # Mark injured players
+                            player_display = f"❌ {rec.player_name}" if hasattr(rec, 'injured') and rec.injured else rec.player_name
+
                             rec_data.append({
-                                'Player': rec.player_name,
+                                'Player': player_display,
                                 'Pos': rec.position,
                                 'Targets': f"{rec.projected_targets:.1f}",
                                 'Rec': f"{rec.projected_receptions:.1f}",
@@ -9814,6 +9966,35 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         total_rec_yds = sum(p.projected_recv_yards for p in home_players if p.position in ['WR', 'TE', 'RB'])
                         st.caption(f"✓ Conservation: {total_rec_targets:.1f} targets ≈ {home_proj.total_targets} (team), "
                                    f"{total_rec_yds:.1f} yds = {home_proj.pass_yards_anchor:.1f} (anchor)")
+
+                    st.divider()
+
+                    # Injury adjustments
+                    st.markdown("**🏥 Injury Adjustments**")
+                    if home_has_injuries:
+                        st.warning(f"⚠️ Injured players' stats have been redistributed to healthy teammates")
+
+                    st.markdown("**Mark Players as OUT:**")
+                    all_home_players = [p for p in home_players]
+                    if all_home_players:
+                        injury_cols = st.columns(min(5, len(all_home_players)))
+                        for idx, player_proj in enumerate(all_home_players):
+                            col_idx = idx % len(injury_cols)
+                            with injury_cols[col_idx]:
+                                player_name = player_proj.player_name
+                                is_injured = is_player_injured(player_name, home_team)
+                                if st.checkbox(
+                                    f"{'❌ ' if is_injured else ''}{player_name[:12]}",
+                                    value=is_injured,
+                                    key=f"injury_closed_home_{player_name}_{proj_week}"
+                                ):
+                                    if not is_injured:
+                                        toggle_player_injury(player_name, home_team)
+                                        st.rerun()
+                                else:
+                                    if is_injured:
+                                        toggle_player_injury(player_name, home_team)
+                                        st.rerun()
 
                 st.success("✓ All conservation laws satisfied - player yards sum exactly to team totals")
 

@@ -10283,7 +10283,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                     st.markdown("**Mark Players as OUT:**")
                     st.caption("🔴 = Persistent injury (managed in Transaction Manager) | ❌ = Session injury (temporary)")
-                    all_away_players = [p for p in away_players]
+
+                    # Deduplicate player list (RBs appear in both rushing and receiving lists)
+                    seen_players = set()
+                    all_away_players = []
+                    for p in away_players:
+                        if p.player_name not in seen_players:
+                            all_away_players.append(p)
+                            seen_players.add(p.player_name)
+
                     if all_away_players:
                         injury_cols = st.columns(min(5, len(all_away_players)))
                         for idx, player_proj in enumerate(all_away_players):
@@ -10441,7 +10449,15 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                     st.markdown("**Mark Players as OUT:**")
                     st.caption("🔴 = Persistent injury (managed in Transaction Manager) | ❌ = Session injury (temporary)")
-                    all_home_players = [p for p in home_players]
+
+                    # Deduplicate player list (RBs appear in both rushing and receiving lists)
+                    seen_players = set()
+                    all_home_players = []
+                    for p in home_players:
+                        if p.player_name not in seen_players:
+                            all_home_players.append(p)
+                            seen_players.add(p.player_name)
+
                     if all_home_players:
                         injury_cols = st.columns(min(5, len(all_home_players)))
                         for idx, player_proj in enumerate(all_home_players):

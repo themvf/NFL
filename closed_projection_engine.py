@@ -1422,8 +1422,15 @@ def apply_qb_efficiency(
         projected_ypc = max(MIN_YPC, min(MAX_YPC, projected_ypc))
 
         # Calculate rushing yards
-        qb_proj.projected_rush_yards = round(qb_proj.projected_carries * projected_ypc, 1)
-        qb_proj.projected_ypc = round(projected_ypc, 2)
+        # NOTE: QB rush yards are already allocated proportionally in project_matchup()
+        # DO NOT recalculate here as it breaks conservation law!
+        # qb_proj.projected_rush_yards = round(qb_proj.projected_carries * projected_ypc, 1)  # DISABLED
+
+        # Instead, calculate YPC from already-allocated yards
+        if qb_proj.projected_carries > 0:
+            qb_proj.projected_ypc = round(qb_proj.projected_rush_yards / qb_proj.projected_carries, 2)
+        else:
+            qb_proj.projected_ypc = 0.0
         qb_proj.rush_dvoa_pct = round(qb_rush_dvoa, 1)
 
         # Calculate rushing TDs (historical rate)

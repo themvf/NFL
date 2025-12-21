@@ -10276,9 +10276,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             with injury_cols[col_idx]:
                                 player_name = player_proj.player_name
                                 # Check both session AND persistent injuries
-                                is_injured = is_player_injured(player_name, away_team, proj_season, proj_week)
+                                is_injured = is_player_injured(player_name, away_team, season, proj_week)
                                 # Check if it's a persistent injury (from Transaction Manager)
-                                is_persistent = is_player_on_injury_list(player_name, away_team, proj_season, proj_week)
+                                is_persistent = is_player_on_injury_list(player_name, away_team, season, proj_week)
 
                                 # Show different labels for persistent vs session injuries
                                 checkbox_label = player_name[:12]
@@ -10434,9 +10434,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             with injury_cols[col_idx]:
                                 player_name = player_proj.player_name
                                 # Check both session AND persistent injuries
-                                is_injured = is_player_injured(player_name, home_team, proj_season, proj_week)
+                                is_injured = is_player_injured(player_name, home_team, season, proj_week)
                                 # Check if it's a persistent injury (from Transaction Manager)
-                                is_persistent = is_player_on_injury_list(player_name, home_team, proj_season, proj_week)
+                                is_persistent = is_player_on_injury_list(player_name, home_team, season, proj_week)
 
                                 # Show different labels for persistent vs session injuries
                                 checkbox_label = player_name[:12]

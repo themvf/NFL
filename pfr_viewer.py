@@ -118,6 +118,343 @@ def upload_db_to_gcs():
         return False
 
 
+# ============================================================================
+# Player Impact Database Functions
+# ============================================================================
+
+def get_impact_db_connection() -> Optional[sqlite3.Connection]:
+    """
+    Get connection to nfl_stats.db for Player Impact Analytics data.
+
+    Returns:
+        Connection to nfl_stats.db or None if database doesn't exist
+    """
+    impact_db_path = Path(__file__).parent / "data" / "nfl_stats.db"
+
+    if not impact_db_path.exists():
+        logging.warning(f"Player Impact database not found at {impact_db_path}")
+        return None
+
+    try:
+        return sqlite3.connect(impact_db_path)
+    except Exception as e:
+        logging.error(f"Failed to connect to Player Impact database: {e}")
+        return None
+
+
+def get_player_id_for_impact(
+    player_name: str,
+    team: str,
+    season: int,
+    impact_conn: sqlite3.Connection
+) -> Optional[str]:
+    """
+    Map player name to player_id for Player Impact Analytics queries.
+
+    Uses exact name matching with team and season validation.
+
+    Args:
+        player_name: Player's display name from projections
+        team: Team abbreviation
+        season: Season year
+        impact_conn: Connection to nfl_stats.db
+
+    Returns:
+        player_id or None if no match found
+    """
+    try:
+        query = """
+        SELECT DISTINCT player_id
+        FROM player_week_stats
+        WHERE player_display_name = ?
+          AND recent_team = ?
+          AND season = ?
+        LIMIT 1
+        """
+
+        df = pd.read_sql_query(query, impact_conn, params=(player_name, team, season))
+
+        if len(df) > 0:
+            return df.iloc[0]['player_id']
+
+        # Log miss for debugging
+        logging.debug(f"No Player Impact data found for {player_name} ({team}, {season})")
+        return None
+    except Exception as e:
+        logging.error(f"Error mapping player {player_name} to Player Impact ID: {e}")
+        return None
+
+
+def apply_proportional_redistribution(
+    player_projections: List,
+    injured_player,
+    team_proj
+):
+    """
+    Redistribute injured player's stats proportionally to healthy teammates.
+
+    This is the fallback method when Player Impact historical data isn't available.
+    Uses simple proportional allocation based on current projected shares.
+
+    Args:
+        player_projections: List of PlayerProjection objects (all players)
+        injured_player: PlayerProjection object for the injured player
+        team_proj: TeamProjection object (for logging/validation)
+
+    Returns:
+        None (modifies player_projections in place)
+    """
+    # Get healthy players of same position type
+    if injured_player.position == 'RB':
+        # Redistribute to other RBs
+        healthy_players = [
+            p for p in player_projections
+            if p.position == 'RB' and not p.injured and p.player_name != injured_player.player_name
+        ]
+    else:
+        # Redistribute to other pass-catchers (WR/TE)
+        healthy_players = [
+            p for p in player_projections
+            if p.position in ['WR', 'TE'] and not p.injured and p.player_name != injured_player.player_name
+        ]
+
+    if not healthy_players:
+        logging.warning(f"No healthy players to redistribute {injured_player.player_name}'s stats")
+        return
+
+    # Redistribute rushing stats (RBs only)
+    if injured_player.projected_carries > 0 and injured_player.position == 'RB':
+        healthy_carries = sum(p.projected_carries for p in healthy_players)
+
+        if healthy_carries > 0:
+            for p in healthy_players:
+                proportion = p.projected_carries / healthy_carries
+                carry_boost = injured_player.projected_carries * proportion
+                rush_yard_boost = injured_player.projected_rush_yards * proportion
+
+                p.projected_carries += carry_boost
+                p.projected_rush_yards += rush_yard_boost
+
+                # Recalculate YPC (keep original efficiency)
+                if p.projected_carries > 0:
+                    p.projected_ypc = p.projected_rush_yards / p.projected_carries
+
+    # Redistribute receiving stats
+    if injured_player.projected_targets > 0:
+        healthy_targets = sum(p.projected_targets for p in healthy_players)
+
+        if healthy_targets > 0:
+            for p in healthy_players:
+                proportion = p.projected_targets / healthy_targets
+                target_boost = injured_player.projected_targets * proportion
+                reception_boost = injured_player.projected_receptions * proportion
+                recv_yard_boost = injured_player.projected_recv_yards * proportion
+
+                p.projected_targets += target_boost
+                p.projected_receptions += reception_boost
+                p.projected_recv_yards += recv_yard_boost
+
+                # Recalculate efficiency metrics (keep original rates)
+                if p.projected_targets > 0:
+                    p.projected_catch_rate = p.projected_receptions / p.projected_targets
+
+                if p.projected_receptions > 0:
+                    p.projected_ypr = p.projected_recv_yards / p.projected_receptions
+
+    # Mark redistribution method
+    injured_player.redistribution_method = 'proportional'
+
+    logging.info(f"Applied proportional redistribution for {injured_player.player_name} to {len(healthy_players)} healthy players")
+
+
+def redistribute_rushing_with_impact(
+    player_projections: List,
+    injured_rb,
+    impact_map: dict
+):
+    """
+    Redistribute rushing carries using Player Impact historical deltas.
+
+    Args:
+        player_projections: List of all PlayerProjection objects
+        injured_rb: Injured RB's PlayerProjection object
+        impact_map: Dict mapping player_name -> TeammateImpact object
+
+    Returns:
+        None (modifies player_projections in place)
+    """
+    healthy_rbs = [
+        p for p in player_projections
+        if p.position == 'RB' and not p.injured and p.player_name != injured_rb.player_name
+    ]
+
+    if not healthy_rbs:
+        return
+
+    injured_carries = injured_rb.projected_carries
+    injured_rush_yards = injured_rb.projected_rush_yards
+
+    # Get historical delta for each healthy RB
+    total_delta = 0
+    rb_deltas = {}
+
+    for rb in healthy_rbs:
+        if rb.player_name in impact_map:
+            delta = impact_map[rb.player_name].carries_delta
+            # Only use positive deltas (players who gained carries)
+            rb_deltas[rb.player_name] = max(0, delta)
+            total_delta += rb_deltas[rb.player_name]
+
+    # If no positive deltas found, this will fall back to proportional
+    # (handled by caller)
+    if total_delta == 0:
+        logging.debug(f"No positive carry deltas found for {injured_rb.player_name}, caller will use proportional")
+        return
+
+    # Historical delta redistribution
+    for rb in healthy_rbs:
+        delta_share = rb_deltas.get(rb.player_name, 0) / total_delta
+
+        carry_boost = injured_carries * delta_share
+        rush_yard_boost = injured_rush_yards * delta_share
+
+        rb.projected_carries += carry_boost
+        rb.projected_rush_yards += rush_yard_boost
+
+        # Recalculate YPC (maintain efficiency)
+        if rb.projected_carries > 0:
+            rb.projected_ypc = rb.projected_rush_yards / rb.projected_carries
+
+    logging.info(f"Applied historical delta redistribution for {injured_rb.player_name} rushing (total_delta={total_delta:.1f})")
+
+
+def redistribute_receiving_with_impact(
+    player_projections: List,
+    injured_receiver,
+    impact_map: dict
+):
+    """
+    Redistribute targets/receptions using Player Impact historical deltas.
+
+    Args:
+        player_projections: List of all PlayerProjection objects
+        injured_receiver: Injured receiver's PlayerProjection object
+        impact_map: Dict mapping player_name -> TeammateImpact object
+
+    Returns:
+        None (modifies player_projections in place)
+    """
+    # Get healthy receivers (WR/TE/RB who catch passes)
+    healthy_receivers = [
+        p for p in player_projections
+        if not p.injured
+        and p.player_name != injured_receiver.player_name
+        and p.projected_targets > 0  # Only players with target projections
+    ]
+
+    if not healthy_receivers:
+        return
+
+    injured_targets = injured_receiver.projected_targets
+    injured_receptions = injured_receiver.projected_receptions
+    injured_recv_yards = injured_receiver.projected_recv_yards
+
+    # Get historical delta for each healthy receiver
+    total_delta = 0
+    rec_deltas = {}
+
+    for rec in healthy_receivers:
+        if rec.player_name in impact_map:
+            delta = impact_map[rec.player_name].targets_delta
+            # Only use positive deltas (players who gained targets)
+            rec_deltas[rec.player_name] = max(0, delta)
+            total_delta += rec_deltas[rec.player_name]
+
+    if total_delta == 0:
+        logging.debug(f"No positive target deltas found for {injured_receiver.player_name}, caller will use proportional")
+        return
+
+    # Historical delta redistribution
+    for rec in healthy_receivers:
+        delta_share = rec_deltas.get(rec.player_name, 0) / total_delta
+
+        target_boost = injured_targets * delta_share
+        reception_boost = injured_receptions * delta_share
+        recv_yard_boost = injured_recv_yards * delta_share
+
+        rec.projected_targets += target_boost
+        rec.projected_receptions += reception_boost
+        rec.projected_recv_yards += recv_yard_boost
+
+        # Recalculate efficiency metrics (maintain rates)
+        if rec.projected_targets > 0:
+            rec.projected_catch_rate = rec.projected_receptions / rec.projected_targets
+
+        if rec.projected_receptions > 0:
+            rec.projected_ypr = rec.projected_recv_yards / rec.projected_receptions
+
+    logging.info(f"Applied historical delta redistribution for {injured_receiver.player_name} receiving (total_delta={total_delta:.1f})")
+
+
+def apply_historical_deltas(
+    player_projections: List,
+    injured_player,
+    teammate_impacts: List,
+    team_proj
+):
+    """
+    Redistribute based on Player Impact historical delta patterns.
+
+    This is the primary redistribution method. Uses real historical data
+    showing how teammates' stats changed when key players were absent.
+
+    Args:
+        player_projections: List of PlayerProjection objects (all players)
+        injured_player: PlayerProjection object for the injured player
+        teammate_impacts: List of TeammateImpact objects from Player Impact Analytics
+        team_proj: TeamProjection object
+
+    Returns:
+        bool: True if historical deltas were successfully applied, False if need to fall back
+    """
+    # Build lookup: player_name -> TeammateImpact
+    impact_map = {t.teammate_name: t for t in teammate_impacts}
+
+    success = False
+
+    # Redistribute rushing stats (for RBs)
+    if injured_player.position == 'RB' and injured_player.projected_carries > 0:
+        # Check if we have any carry deltas
+        has_carry_deltas = any(
+            t.carries_delta > 0 for t in teammate_impacts if hasattr(t, 'carries_delta')
+        )
+
+        if has_carry_deltas:
+            redistribute_rushing_with_impact(player_projections, injured_player, impact_map)
+            success = True
+
+    # Redistribute receiving stats (for all pass-catchers)
+    if injured_player.projected_targets > 0:
+        # Check if we have any target deltas
+        has_target_deltas = any(
+            t.targets_delta > 0 for t in teammate_impacts if hasattr(t, 'targets_delta')
+        )
+
+        if has_target_deltas:
+            redistribute_receiving_with_impact(player_projections, injured_player, impact_map)
+            success = True
+
+    if success:
+        # Mark redistribution method as historical
+        injured_player.redistribution_method = 'historical'
+        logging.info(f"Successfully applied historical deltas for {injured_player.player_name}")
+        return True
+    else:
+        # No valid deltas found - caller should fall back to proportional
+        logging.info(f"No valid historical deltas for {injured_player.player_name}, falling back to proportional")
+        return False
+
+
 # Verify database exists or download from GCS
 if not DB_PATH.exists():
     st.info("📥 Downloading database from cloud storage...")
@@ -945,7 +1282,8 @@ def redistribute_stats(player_stats_list, team, stat_columns, season=None, week=
 
 def redistribute_closed_system_projections(player_projections, qb_projection, team_proj, team, season, week):
     """
-    Redistribute stats from injured players in closed-system projections.
+    Redistribute stats from injured players using Player Impact Analytics when available.
+    Falls back to proportional redistribution if no historical data exists.
     Maintains conservation laws after redistribution.
 
     Args:
@@ -959,91 +1297,85 @@ def redistribute_closed_system_projections(player_projections, qb_projection, te
     Returns:
         Tuple of (adjusted_players, adjusted_qb, has_injuries)
     """
-    import closed_projection_engine as cpe
-
     # Check if any players are injured
     all_injured = get_injured_players_for_team(team, season, week)
     if not all_injured:
         return player_projections, qb_projection, False
 
-    # Convert PlayerProjection objects to dictionaries for redistribute_stats
-    player_dicts = []
+    # Mark injured players
     for p in player_projections:
-        player_dicts.append({
-            'Player': p.player_name,
-            'team': team,
-            'Carries': p.projected_carries,
-            'Targets': p.projected_targets,
-            'Receptions': p.projected_receptions,
-            'Rush Yds': p.projected_rush_yards,
-            'Rec Yds': p.projected_recv_yards,
-            'Total Yds': p.projected_total_yards
-        })
+        if p.player_name in all_injured:
+            p.injured = True
 
-    # Define stat columns to redistribute
-    stat_columns = [
-        ('Carries', 'carries'),
-        ('Targets', 'targets'),
-        ('Receptions', 'receptions'),
-        ('Rush Yds', 'rush yards'),
-        ('Rec Yds', 'receiving yards'),
-        ('Total Yds', 'total yards')
-    ]
+    # Try to connect to Player Impact database
+    impact_conn = get_impact_db_connection()
 
-    # Apply redistribution
-    adjusted_dicts, summary = redistribute_stats(player_dicts, team, stat_columns, season, week)
+    # Process each injured player
+    for injured_player in [p for p in player_projections if p.injured]:
+        redistribution_applied = False
 
-    if not summary:
-        return player_projections, qb_projection, False
+        if impact_conn:
+            # Try Player Impact redistribution
+            try:
+                player_id = get_player_id_for_impact(
+                    injured_player.player_name,
+                    team,
+                    season,
+                    impact_conn
+                )
 
-    # Convert back to PlayerProjection objects
-    adjusted_players = []
-    for adj_dict, orig_proj in zip(adjusted_dicts, player_projections):
-        # Create new projection with adjusted stats
-        adjusted_proj = cpe.PlayerProjection(
-            player_name=orig_proj.player_name,
-            team=orig_proj.team,
-            position=orig_proj.position,
-            projected_carries=adj_dict.get('Carries', 0),
-            projected_targets=adj_dict.get('Targets', 0),
-            projected_receptions=adj_dict.get('Receptions', 0),
-            projected_rush_yards=adj_dict.get('Rush Yds', 0),
-            projected_recv_yards=adj_dict.get('Rec Yds', 0),
-            projected_total_yards=adj_dict.get('Total Yds', 0),
-            # Preserve efficiency metrics (recalculate from new volumes)
-            projected_ypc=adj_dict.get('Rush Yds', 0) / adj_dict.get('Carries', 1) if adj_dict.get('Carries', 0) > 0 else 0,
-            projected_ypt=orig_proj.projected_ypt,  # Keep original YPT
-            projected_catch_rate=orig_proj.projected_catch_rate,  # Keep original catch rate
-            projected_ypr=adj_dict.get('Rec Yds', 0) / adj_dict.get('Receptions', 1) if adj_dict.get('Receptions', 0) > 0 else 0,
-            # Preserve range/volatility info
-            projected_carries_p10=orig_proj.projected_carries_p10,
-            projected_carries_p90=orig_proj.projected_carries_p90,
-            projected_rush_yards_p10=orig_proj.projected_rush_yards_p10,
-            projected_rush_yards_p90=orig_proj.projected_rush_yards_p90,
-            projected_targets_p10=orig_proj.projected_targets_p10,
-            projected_targets_p90=orig_proj.projected_targets_p90,
-            projected_receptions_p10=orig_proj.projected_receptions_p10,
-            projected_receptions_p90=orig_proj.projected_receptions_p90,
-            projected_recv_yards_p10=orig_proj.projected_recv_yards_p10,
-            projected_recv_yards_p90=orig_proj.projected_recv_yards_p90,
-            volume_volatility_cv=orig_proj.volume_volatility_cv,
-            efficiency_volatility_cv=orig_proj.efficiency_volatility_cv,
-            weighted_share=orig_proj.weighted_share,
-            dvoa_pct=orig_proj.dvoa_pct
-        )
+                if player_id:
+                    # Get historical absence data
+                    teammate_impacts = pia.calculate_teammate_redistribution(
+                        impact_conn,
+                        player_id,
+                        season=season,
+                        season_type='REG',
+                        min_games=1  # Accept even 1 game of historical data
+                    )
 
-        # Mark if injured
-        adjusted_proj.injured = adj_dict.get('injured', False)
-        adjusted_players.append(adjusted_proj)
+                    if teammate_impacts:
+                        # Try historical delta redistribution
+                        success = apply_historical_deltas(
+                            player_projections,
+                            injured_player,
+                            teammate_impacts,
+                            team_proj
+                        )
+
+                        if success:
+                            redistribution_applied = True
+                            logging.info(f"Used Player Impact historical deltas for {injured_player.player_name}")
+
+            except Exception as e:
+                logging.error(f"Error applying Player Impact for {injured_player.player_name}: {e}")
+
+        # Fallback to proportional if Player Impact didn't work
+        if not redistribution_applied:
+            apply_proportional_redistribution(
+                player_projections,
+                injured_player,
+                team_proj
+            )
+            logging.info(f"Used proportional redistribution for {injured_player.player_name}")
 
     # Update QB completions to match sum of receptions (conservation law)
     if qb_projection is not None:
-        total_receptions = sum(p.projected_receptions for p in adjusted_players if not p.injured)
+        total_receptions = sum(
+            p.projected_receptions for p in player_projections if not p.injured
+        )
         qb_projection.projected_completions = round(total_receptions, 1)
-        if qb_projection.projected_pass_att > 0:
-            qb_projection.projected_completion_pct = round(total_receptions / qb_projection.projected_pass_att, 3)
 
-    return adjusted_players, qb_projection, True
+        if qb_projection.projected_pass_att > 0:
+            qb_projection.projected_completion_pct = round(
+                total_receptions / qb_projection.projected_pass_att, 3
+            )
+
+    # Close Player Impact connection if opened
+    if impact_conn:
+        impact_conn.close()
+
+    return player_projections, qb_projection, True
 
 
 def calculate_smart_expected_stats(player_name, team, season, week, stat_type, opponent_factor=1.0, strategy='season_avg'):
@@ -9844,6 +10176,19 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     if away_has_injuries:
                         st.warning(f"⚠️ Injured players' stats have been redistributed to healthy teammates")
 
+                        # Show redistribution method for each injured player
+                        injured_away = [p for p in away_players if p.injured]
+                        if injured_away:
+                            st.markdown("**Redistribution Methods:**")
+                            for injured_p in injured_away:
+                                method = injured_p.redistribution_method
+                                if method == 'historical':
+                                    st.success(f"  ✓ **{injured_p.player_name}**: Historical absence data (most accurate)")
+                                elif method == 'proportional':
+                                    st.info(f"  → **{injured_p.player_name}**: Proportional (no historical data)")
+                                else:
+                                    st.caption(f"  · **{injured_p.player_name}**: No redistribution applied")
+
                     st.markdown("**Mark Players as OUT:**")
                     all_away_players = [p for p in away_players]
                     if all_away_players:
@@ -9973,6 +10318,19 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     st.markdown("**🏥 Injury Adjustments**")
                     if home_has_injuries:
                         st.warning(f"⚠️ Injured players' stats have been redistributed to healthy teammates")
+
+                        # Show redistribution method for each injured player
+                        injured_home = [p for p in home_players if p.injured]
+                        if injured_home:
+                            st.markdown("**Redistribution Methods:**")
+                            for injured_p in injured_home:
+                                method = injured_p.redistribution_method
+                                if method == 'historical':
+                                    st.success(f"  ✓ **{injured_p.player_name}**: Historical absence data (most accurate)")
+                                elif method == 'proportional':
+                                    st.info(f"  → **{injured_p.player_name}**: Proportional (no historical data)")
+                                else:
+                                    st.caption(f"  · **{injured_p.player_name}**: No redistribution applied")
 
                     st.markdown("**Mark Players as OUT:**")
                     all_home_players = [p for p in home_players]

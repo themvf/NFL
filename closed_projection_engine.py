@@ -110,6 +110,10 @@ class PlayerProjection:
     volume_volatility_cv: float = 0.0  # coefficient of variation for volume
     efficiency_volatility_cv: float = 0.0  # coefficient of variation for efficiency
 
+    # Injury tracking
+    injured: bool = False  # Whether player is marked as OUT
+    redistribution_method: str = 'none'  # 'historical', 'proportional', 'none'
+
 
 @dataclass
 class QBProjection:

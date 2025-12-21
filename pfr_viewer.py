@@ -10072,11 +10072,18 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 help="Neutral: 60/40 offense/defense blend. Optimistic: 70/30. Conservative: 40/60."
             )
         with col_week_input:
+            # Use selected matchup week if available, otherwise use global week
+            default_proj_week = week if week else 18
+
+            # Check if selected_matchup_week exists and is not "Manual Selection"
+            if 'quick_matchup_week' in st.session_state and st.session_state.quick_matchup_week != "Manual Selection":
+                default_proj_week = st.session_state.quick_matchup_week
+
             proj_week = st.number_input(
                 "Projection Week",
                 min_value=1,
                 max_value=18,
-                value=week if week else 18,
+                value=default_proj_week,
                 help="Week to project for (uses data up to but not including this week)"
             )
 

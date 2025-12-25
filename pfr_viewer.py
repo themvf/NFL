@@ -1365,6 +1365,145 @@ def redistribute_stats(player_stats_list, team, stat_columns, season=None, week=
     return adjusted_stats, summary
 
 
+def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att, team_proj):
+    """
+    Get projection for backup QB when starter is injured.
+
+    Args:
+        team: Team abbreviation
+        season: Season number
+        week: Week number
+        injured_qb_name: Name of the injured starting QB
+        team_pass_att: Team's projected pass attempts
+        team_proj: TeamProjection object
+
+    Returns:
+        QBProjection for backup QB, or None if no backup found
+    """
+    import closed_projection_engine as cpe
+
+    conn = sqlite3.connect(DB_PATH)
+
+    # Find the max week with actual data
+    max_week_query = """
+        SELECT MAX(week) as max_week
+        FROM player_stats
+        WHERE team = ? AND season = ? AND season_type = 'REG' AND position = 'QB'
+    """
+    max_week_df = pd.read_sql_query(max_week_query, conn, params=(team, season))
+    actual_max_week = int(max_week_df['max_week'].iloc[0]) if len(max_week_df) > 0 and pd.notna(max_week_df['max_week'].iloc[0]) else week - 1
+
+    # Use last 8 weeks to find backup
+    lookback = min(8, actual_max_week)
+    start_week = int(max(1, actual_max_week - lookback + 1))
+    end_week = int(actual_max_week + 1)
+
+    # Get ALL QBs, excluding the injured one
+    backup_qb_query = """
+        SELECT player_display_name,
+               SUM(attempts) as total_pass_att,
+               SUM(completions) as total_completions,
+               SUM(passing_tds) as total_pass_tds,
+               SUM(passing_interceptions) as total_ints,
+               SUM(carries) as total_carries,
+               SUM(rushing_yards) as total_rush_yards,
+               SUM(rushing_tds) as total_rush_tds,
+               COUNT(*) as games_played
+        FROM player_stats
+        WHERE team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+          AND season_type = 'REG'
+          AND position = 'QB'
+          AND player_display_name != ?
+        GROUP BY player_display_name
+        ORDER BY total_pass_att DESC
+        LIMIT 1
+    """
+
+    backup_df = pd.read_sql_query(
+        backup_qb_query,
+        conn,
+        params=(team, season, start_week, end_week, injured_qb_name)
+    )
+    conn.close()
+
+    if len(backup_df) == 0:
+        # No backup found - return None
+        logging.warning(f"No backup QB found for {team} to replace injured {injured_qb_name}")
+        return None
+
+    backup_row = backup_df.iloc[0]
+    backup_name = backup_row['player_display_name']
+
+    # Calculate historical rates for backup
+    total_pass_att = backup_row['total_pass_att']
+    total_completions = backup_row['total_completions']
+    total_pass_tds = backup_row['total_pass_tds']
+    total_ints = backup_row['total_ints']
+    total_carries = backup_row['total_carries']
+    games_played = backup_row['games_played']
+
+    # Completion rate (backup QBs typically 5-10% worse)
+    backup_completion_rate = (total_completions / total_pass_att if total_pass_att > 0 else 0.60) * 0.95
+    backup_completion_rate = max(0.50, min(0.75, backup_completion_rate))  # Clamp between 50-75%
+
+    # TD rate (slightly worse)
+    backup_td_rate = (total_pass_tds / total_pass_att if total_pass_att > 0 else 0.035) * 0.90
+
+    # INT rate (slightly worse - more mistakes)
+    backup_int_rate = (total_ints / total_pass_att if total_pass_att > 0 else 0.025) * 1.15
+
+    # Mobile QB detection
+    is_mobile_qb = (total_carries / games_played) > 2.0 if games_played > 0 else False
+
+    # Create backup QB projection
+    backup_qb_proj = cpe.QBProjection(
+        player_name=backup_name,
+        team=team,
+        is_backup=True,
+        replaced_qb=injured_qb_name
+    )
+
+    # Passing allocation (backup QBs may attempt fewer passes - conservative play-calling)
+    adjusted_pass_att = int(team_pass_att * 0.95)  # 5% reduction in pass volume
+    backup_qb_proj.projected_pass_att = adjusted_pass_att
+    backup_qb_proj.projected_completions = round(adjusted_pass_att * backup_completion_rate, 1)
+    backup_qb_proj.projected_completion_pct = round(backup_completion_rate * 100, 1)
+    backup_qb_proj.projected_pass_tds = round(adjusted_pass_att * backup_td_rate, 1)
+    backup_qb_proj.projected_interceptions = round(adjusted_pass_att * backup_int_rate, 1)
+
+    # Calculate passing yards (backup QBs typically ~10% less efficient)
+    # Use team's pass yards anchor but reduce for backup QB inefficiency
+    backup_pass_yards = team_proj.pass_yards_anchor * 0.90
+    backup_qb_proj.projected_pass_yards = round(backup_pass_yards, 1)
+    backup_qb_proj.projected_ypa = round(backup_pass_yards / adjusted_pass_att, 2) if adjusted_pass_att > 0 else 0.0
+
+    # Rushing allocation
+    if is_mobile_qb:
+        avg_carries_per_game = total_carries / games_played
+        backup_qb_proj.projected_carries = round(avg_carries_per_game, 1)
+
+        # Calculate rushing yards based on historical YPC
+        avg_rush_yards_per_game = backup_row['total_rush_yards'] / games_played
+        backup_qb_proj.projected_rush_yards = round(avg_rush_yards_per_game, 1)
+        backup_qb_proj.projected_ypc = round(backup_qb_proj.projected_rush_yards / backup_qb_proj.projected_carries, 2) if backup_qb_proj.projected_carries > 0 else 0.0
+
+        # Rushing TDs
+        avg_rush_tds_per_game = backup_row['total_rush_tds'] / games_played
+        backup_qb_proj.projected_rush_tds = round(avg_rush_tds_per_game, 1)
+    else:
+        backup_qb_proj.projected_carries = 0.0
+        backup_qb_proj.projected_rush_yards = 0.0
+        backup_qb_proj.projected_rush_tds = 0.0
+        backup_qb_proj.projected_ypc = 0.0
+
+    logging.info(f"Projecting backup QB {backup_name} for injured {injured_qb_name} on {team}")
+
+    return backup_qb_proj
+
+
 def redistribute_closed_system_projections(player_projections, qb_projection, team_proj, team, season, week):
     """
     Redistribute stats from injured players using Player Impact Analytics when available.
@@ -1391,6 +1530,23 @@ def redistribute_closed_system_projections(player_projections, qb_projection, te
     for p in player_projections:
         if p.player_name in all_injured:
             p.injured = True
+
+    # Check if QB is injured and replace with backup if needed
+    if qb_projection is not None and qb_projection.player_name in all_injured:
+        logging.warning(f"Starting QB {qb_projection.player_name} is injured - projecting backup QB")
+        backup_qb = get_backup_qb_projection(
+            team=team,
+            season=season,
+            week=week,
+            injured_qb_name=qb_projection.player_name,
+            team_pass_att=team_proj.pass_attempts,
+            team_proj=team_proj
+        )
+        if backup_qb is not None:
+            qb_projection = backup_qb
+            logging.info(f"Replaced injured QB with backup: {backup_qb.player_name}")
+        else:
+            logging.error(f"No backup QB found for injured {qb_projection.player_name} - keeping original projection")
 
     # Try to connect to Player Impact database
     impact_conn = get_impact_db_connection()
@@ -10171,7 +10327,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Quarterback**")
                         qb_col1, qb_col2 = st.columns(2)
                         with qb_col1:
-                            st.write(f"**{away_qb.player_name}**")
+                            # Show backup indicator if applicable
+                            if hasattr(away_qb, 'is_backup') and away_qb.is_backup:
+                                st.write(f"**🔄 {away_qb.player_name}** (Backup - {away_qb.replaced_qb} injured)")
+                            else:
+                                st.write(f"**{away_qb.player_name}**")
                             st.write(f"**Passing:** {away_qb.projected_pass_att} att, "
                                      f"{away_qb.projected_completions:.1f} comp ({away_qb.projected_completion_pct:.1f}%), "
                                      f"{away_qb.projected_pass_yards:.1f} yds")
@@ -10337,7 +10497,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         st.markdown("**Quarterback**")
                         qb_col1, qb_col2 = st.columns(2)
                         with qb_col1:
-                            st.write(f"**{home_qb.player_name}**")
+                            # Show backup indicator if applicable
+                            if hasattr(home_qb, 'is_backup') and home_qb.is_backup:
+                                st.write(f"**🔄 {home_qb.player_name}** (Backup - {home_qb.replaced_qb} injured)")
+                            else:
+                                st.write(f"**{home_qb.player_name}**")
                             st.write(f"**Passing:** {home_qb.projected_pass_att} att, "
                                      f"{home_qb.projected_completions:.1f} comp ({home_qb.projected_completion_pct:.1f}%), "
                                      f"{home_qb.projected_pass_yards:.1f} yds")

@@ -121,6 +121,10 @@ class QBProjection:
     player_name: str
     team: str
 
+    # Injury and backup tracking
+    is_backup: bool = False  # True if this is a backup QB due to starter injury
+    replaced_qb: str = ""    # Name of injured starter if this is a backup
+
     # Passing (median)
     projected_pass_att: int = 0
     projected_completions: float = 0.0

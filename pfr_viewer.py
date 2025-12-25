@@ -20437,10 +20437,11 @@ Description: {inj_description if inj_description else 'None'}
 
                     # Show current injuries that will be snapshotted
                     st.divider()
-                    st.markdown("**Current Injuries (to be saved):**")
+                    st.markdown("**📋 Preview: Injuries in Database**")
+                    st.caption("These injuries are already saved in the database and will be included in the snapshot")
                     current_injuries = snapshot_manager.get_all_injuries()
                     if current_injuries:
-                        st.caption(f"{len(current_injuries)} total injuries")
+                        st.caption(f"💾 {len(current_injuries)} total injuries ready to snapshot")
 
                         # Group by team
                         injury_by_team = {}

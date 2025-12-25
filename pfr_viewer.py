@@ -1365,20 +1365,73 @@ def redistribute_stats(player_stats_list, team, stat_columns, season=None, week=
     return adjusted_stats, summary
 
 
-def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att, team_proj):
+def create_replacement_level_qb(team, team_pass_att, team_proj, replaced_qbs):
+    """
+    Create a generic "replacement level" QB projection when all QBs with stats are injured.
+    Uses league-average QB statistics.
+
+    Args:
+        team: Team abbreviation
+        team_pass_att: Team's projected pass attempts
+        team_proj: TeamProjection object
+        replaced_qbs: List of injured QB names
+
+    Returns:
+        QBProjection with generic replacement-level stats
+    """
+    import closed_projection_engine as cpe
+
+    # Replacement level QB stats (league average backup/3rd string)
+    replacement_completion_rate = 0.60  # 60% completion
+    replacement_td_rate = 0.030  # 3% TD rate
+    replacement_int_rate = 0.030  # 3% INT rate
+
+    # Create generic replacement QB
+    replacement_qb = cpe.QBProjection(
+        player_name=f"{team} Emergency QB",
+        team=team,
+        is_backup=True,
+        replaced_qb=", ".join(replaced_qbs)  # Show all injured QBs
+    )
+
+    # Conservative passing projection
+    adjusted_pass_att = int(team_pass_att * 0.90)  # 10% reduction - very conservative
+    replacement_qb.projected_pass_att = adjusted_pass_att
+    replacement_qb.projected_completions = round(adjusted_pass_att * replacement_completion_rate, 1)
+    replacement_qb.projected_completion_pct = round(replacement_completion_rate * 100, 1)
+    replacement_qb.projected_pass_tds = round(adjusted_pass_att * replacement_td_rate, 1)
+    replacement_qb.projected_interceptions = round(adjusted_pass_att * replacement_int_rate, 1)
+
+    # Passing yards (significantly reduced - 80% of team anchor)
+    replacement_pass_yards = team_proj.pass_yards_anchor * 0.80
+    replacement_qb.projected_pass_yards = round(replacement_pass_yards, 1)
+    replacement_qb.projected_ypa = round(replacement_pass_yards / adjusted_pass_att, 2) if adjusted_pass_att > 0 else 0.0
+
+    # No rushing for emergency QB (assume pocket passer)
+    replacement_qb.projected_carries = 0.0
+    replacement_qb.projected_rush_yards = 0.0
+    replacement_qb.projected_rush_tds = 0.0
+    replacement_qb.projected_ypc = 0.0
+
+    logging.warning(f"Using replacement-level QB for {team} - all QBs injured: {', '.join(replaced_qbs)}")
+    return replacement_qb
+
+
+def get_backup_qb_projection(team, season, week, excluded_qb_names, team_pass_att, team_proj):
     """
     Get projection for backup QB when starter is injured.
+    Excludes multiple QBs (for cases where backup is also injured).
 
     Args:
         team: Team abbreviation
         season: Season number
         week: Week number
-        injured_qb_name: Name of the injured starting QB
+        excluded_qb_names: List of QB names to exclude (all injured QBs)
         team_pass_att: Team's projected pass attempts
         team_proj: TeamProjection object
 
     Returns:
-        QBProjection for backup QB, or None if no backup found
+        QBProjection for backup QB, or replacement-level QB if none found
     """
     import closed_projection_engine as cpe
 
@@ -1398,8 +1451,10 @@ def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att,
     start_week = int(max(1, actual_max_week - lookback + 1))
     end_week = int(actual_max_week + 1)
 
-    # Get ALL QBs, excluding the injured one
-    backup_qb_query = """
+    # Get ALL QBs, excluding the injured ones
+    # Build placeholders for the NOT IN clause
+    placeholders = ','.join(['?' for _ in excluded_qb_names])
+    backup_qb_query = f"""
         SELECT player_display_name,
                SUM(attempts) as total_pass_att,
                SUM(completions) as total_completions,
@@ -1416,23 +1471,20 @@ def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att,
           AND week < ?
           AND season_type = 'REG'
           AND position = 'QB'
-          AND player_display_name != ?
+          AND player_display_name NOT IN ({placeholders})
         GROUP BY player_display_name
         ORDER BY total_pass_att DESC
         LIMIT 1
     """
 
-    backup_df = pd.read_sql_query(
-        backup_qb_query,
-        conn,
-        params=(team, season, start_week, end_week, injured_qb_name)
-    )
+    params = [team, season, start_week, end_week] + excluded_qb_names
+    backup_df = pd.read_sql_query(backup_qb_query, conn, params=params)
     conn.close()
 
     if len(backup_df) == 0:
-        # No backup found - return None
-        logging.warning(f"No backup QB found for {team} to replace injured {injured_qb_name}")
-        return None
+        # No backup found with stats - use replacement level QB
+        logging.warning(f"No backup QB with stats found for {team} (excluded: {', '.join(excluded_qb_names)})")
+        return create_replacement_level_qb(team, team_pass_att, team_proj, excluded_qb_names)
 
     backup_row = backup_df.iloc[0]
     backup_name = backup_row['player_display_name']
@@ -1459,11 +1511,12 @@ def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att,
     is_mobile_qb = (total_carries / games_played) > 2.0 if games_played > 0 else False
 
     # Create backup QB projection
+    # Show all excluded/injured QBs in the replaced_qb field
     backup_qb_proj = cpe.QBProjection(
         player_name=backup_name,
         team=team,
         is_backup=True,
-        replaced_qb=injured_qb_name
+        replaced_qb=", ".join(excluded_qb_names)
     )
 
     # Passing allocation (backup QBs may attempt fewer passes - conservative play-calling)
@@ -1499,7 +1552,7 @@ def get_backup_qb_projection(team, season, week, injured_qb_name, team_pass_att,
         backup_qb_proj.projected_rush_tds = 0.0
         backup_qb_proj.projected_ypc = 0.0
 
-    logging.info(f"Projecting backup QB {backup_name} for injured {injured_qb_name} on {team}")
+    logging.info(f"Projecting backup QB {backup_name} for injured QB(s): {', '.join(excluded_qb_names)} on {team}")
 
     return backup_qb_proj
 
@@ -1532,21 +1585,39 @@ def redistribute_closed_system_projections(player_projections, qb_projection, te
             p.injured = True
 
     # Check if QB is injured and replace with backup if needed
-    if qb_projection is not None and qb_projection.player_name in all_injured:
-        logging.warning(f"Starting QB {qb_projection.player_name} is injured - projecting backup QB")
-        backup_qb = get_backup_qb_projection(
-            team=team,
-            season=season,
-            week=week,
-            injured_qb_name=qb_projection.player_name,
-            team_pass_att=team_proj.pass_attempts,
-            team_proj=team_proj
-        )
-        if backup_qb is not None:
+    # Loop to handle cases where multiple QBs are injured (starter, backup, 3rd string, etc.)
+    if qb_projection is not None:
+        excluded_qbs = []
+        max_depth = 5  # Prevent infinite loop, max 5 QBs deep
+        depth = 0
+
+        # Keep checking if current QB is injured
+        while qb_projection.player_name in all_injured and depth < max_depth:
+            excluded_qbs.append(qb_projection.player_name)
+            logging.warning(f"QB {qb_projection.player_name} is injured (depth {depth+1}) - finding next available QB")
+
+            # Get next available QB
+            backup_qb = get_backup_qb_projection(
+                team=team,
+                season=season,
+                week=week,
+                excluded_qb_names=excluded_qbs,
+                team_pass_att=team_proj.pass_attempts,
+                team_proj=team_proj
+            )
+
             qb_projection = backup_qb
-            logging.info(f"Replaced injured QB with backup: {backup_qb.player_name}")
-        else:
-            logging.error(f"No backup QB found for injured {qb_projection.player_name} - keeping original projection")
+            depth += 1
+
+            # If we got a replacement-level QB (emergency QB), stop the loop
+            if backup_qb.player_name.endswith("Emergency QB"):
+                logging.info(f"Using replacement-level QB after {depth} injured QBs: {', '.join(excluded_qbs)}")
+                break
+
+            logging.info(f"Replaced with: {backup_qb.player_name}")
+
+        if depth > 0 and not qb_projection.player_name.endswith("Emergency QB"):
+            logging.info(f"Final QB projection: {qb_projection.player_name} (after {depth} injured QBs)")
 
     # Try to connect to Player Impact database
     impact_conn = get_impact_db_connection()
@@ -10329,7 +10400,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         with qb_col1:
                             # Show backup indicator if applicable
                             if hasattr(away_qb, 'is_backup') and away_qb.is_backup:
-                                st.write(f"**🔄 {away_qb.player_name}** (Backup - {away_qb.replaced_qb} injured)")
+                                if away_qb.player_name.endswith("Emergency QB"):
+                                    st.warning(f"⚠️ **{away_qb.player_name}** - All QBs injured: {away_qb.replaced_qb}")
+                                    st.caption("Using replacement-level statistics (no QB with game data available)")
+                                else:
+                                    st.write(f"**🔄 {away_qb.player_name}** (Backup - {away_qb.replaced_qb} injured)")
                             else:
                                 st.write(f"**{away_qb.player_name}**")
                             st.write(f"**Passing:** {away_qb.projected_pass_att} att, "
@@ -10499,7 +10574,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         with qb_col1:
                             # Show backup indicator if applicable
                             if hasattr(home_qb, 'is_backup') and home_qb.is_backup:
-                                st.write(f"**🔄 {home_qb.player_name}** (Backup - {home_qb.replaced_qb} injured)")
+                                if home_qb.player_name.endswith("Emergency QB"):
+                                    st.warning(f"⚠️ **{home_qb.player_name}** - All QBs injured: {home_qb.replaced_qb}")
+                                    st.caption("Using replacement-level statistics (no QB with game data available)")
+                                else:
+                                    st.write(f"**🔄 {home_qb.player_name}** (Backup - {home_qb.replaced_qb} injured)")
                             else:
                                 st.write(f"**{home_qb.player_name}**")
                             st.write(f"**Passing:** {home_qb.projected_pass_att} att, "

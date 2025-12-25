@@ -24,6 +24,7 @@ import yardage_dvoa as ydvoa
 import rb_projections as rbp
 import wr_projections as wrp
 import closed_projection_engine as cpe
+import injury_snapshot_manager as ism
 
 # Configure logging
 logging.basicConfig(
@@ -20110,8 +20111,8 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
     with tab4:
         st.subheader("🏥 Injury Management")
 
-        # Sub-tabs for Add and View injuries
-        injury_tab1, injury_tab2 = st.tabs(["Add/Update Injury", "Active Injuries"])
+        # Sub-tabs for Add, View, and Snapshots
+        injury_tab1, injury_tab2, injury_tab3 = st.tabs(["Add/Update Injury", "Active Injuries", "📸 Snapshots"])
 
         with injury_tab1:
             st.markdown("### Add or Update Player Injury")
@@ -20363,6 +20364,221 @@ Description: {inj_description if inj_description else 'None'}
                                     st.rerun()
             else:
                 st.info("No injuries found with the selected filters.")
+
+        with injury_tab3:
+            st.markdown("### 📸 Weekly Injury Snapshots")
+            st.caption("Save and restore injury state for each week. Useful for tracking historical injury data and creating backups.")
+
+            # Initialize snapshot manager
+            if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+                try:
+                    snapshot_manager = ism.InjurySnapshotManager(
+                        db_path=str(DB_PATH),
+                        bucket_name=GCS_BUCKET_NAME,
+                        service_account_dict=dict(st.secrets["gcs_service_account"])
+                    )
+                except Exception as e:
+                    st.error(f"❌ Could not initialize snapshot manager: {e}")
+                    snapshot_manager = None
+            else:
+                st.warning("⚠️ GCS not configured. Snapshot feature requires Google Cloud Storage.")
+                snapshot_manager = None
+
+            if snapshot_manager:
+                # Create tabs for different snapshot actions
+                snap_create_tab, snap_view_tab, snap_compare_tab = st.tabs([
+                    "💾 Create Snapshot",
+                    "📂 View & Restore",
+                    "🔍 Compare Weeks"
+                ])
+
+                with snap_create_tab:
+                    st.markdown("### Create New Snapshot")
+
+                    snap_col1, snap_col2 = st.columns(2)
+
+                    with snap_col1:
+                        snap_season = st.number_input(
+                            "Season",
+                            min_value=2020,
+                            max_value=2030,
+                            value=season if season else 2025,
+                            key="snapshot_season"
+                        )
+
+                    with snap_col2:
+                        snap_week = st.number_input(
+                            "Week",
+                            min_value=1,
+                            max_value=18,
+                            value=week if week else 1,
+                            key="snapshot_week"
+                        )
+
+                    snap_description = st.text_input(
+                        "Description (Optional)",
+                        placeholder="E.g., 'Pre-week 17 snapshot', 'After Monday updates'",
+                        key="snapshot_description"
+                    )
+
+                    if st.button("📸 Create Snapshot", type="primary"):
+                        with st.spinner("Creating snapshot..."):
+                            success, message = snapshot_manager.create_snapshot(
+                                season=snap_season,
+                                week=snap_week,
+                                description=snap_description
+                            )
+
+                            if success:
+                                st.success(f"✅ {message}")
+                                st.balloons()
+                            else:
+                                st.error(f"❌ {message}")
+
+                    # Show current injuries that will be snapshotted
+                    st.divider()
+                    st.markdown("**Current Injuries (to be saved):**")
+                    current_injuries = snapshot_manager.get_all_injuries()
+                    if current_injuries:
+                        st.caption(f"{len(current_injuries)} total injuries")
+
+                        # Group by team
+                        injury_by_team = {}
+                        for inj in current_injuries:
+                            team = inj['team_abbr']
+                            if team not in injury_by_team:
+                                injury_by_team[team] = []
+                            injury_by_team[team].append(inj)
+
+                        for team in sorted(injury_by_team.keys()):
+                            with st.expander(f"{team} ({len(injury_by_team[team])} injuries)"):
+                                for inj in injury_by_team[team]:
+                                    st.markdown(f"- **{inj['player_name']}**: {inj['injury_type']} (Weeks {inj['start_week']}-{inj['end_week']})")
+                    else:
+                        st.info("No injuries in database")
+
+                with snap_view_tab:
+                    st.markdown("### View & Restore Snapshots")
+
+                    view_season = st.selectbox(
+                        "Select Season",
+                        [2025, 2024, 2023, 2022],
+                        key="view_snapshot_season"
+                    )
+
+                    # List available snapshots
+                    snapshots = snapshot_manager.list_snapshots(view_season)
+
+                    if snapshots:
+                        st.caption(f"Found {len(snapshots)} snapshots for {view_season} season")
+
+                        for snap in snapshots:
+                            with st.expander(f"📅 Week {snap['week']} - {snap['created'].strftime('%Y-%m-%d %H:%M')}"):
+                                col_info, col_action = st.columns([3, 1])
+
+                                with col_info:
+                                    st.markdown(f"**Week:** {snap['week']}")
+                                    st.markdown(f"**Created:** {snap['created'].strftime('%Y-%m-%d %H:%M:%S')}")
+                                    st.markdown(f"**Size:** {snap['size_bytes'] / 1024:.1f} KB")
+
+                                    # Load and show details
+                                    if st.button("📄 Show Details", key=f"details_{snap['week']}"):
+                                        snapshot_data = snapshot_manager.load_snapshot(view_season, snap['week'])
+                                        if snapshot_data:
+                                            st.json({
+                                                "total_injuries": snapshot_data['metadata']['total_injuries'],
+                                                "teams_affected": snapshot_data['metadata']['teams_affected'],
+                                                "injury_types": snapshot_data['metadata']['injury_types']
+                                            })
+
+                                with col_action:
+                                    if st.button("↩️ Restore", key=f"restore_{snap['week']}", type="secondary"):
+                                        st.warning("⚠️ This will replace all current injuries for this season!")
+                                        if st.button("✅ Confirm Restore", key=f"confirm_restore_{snap['week']}", type="primary"):
+                                            with st.spinner("Restoring snapshot..."):
+                                                success, message = snapshot_manager.restore_snapshot(view_season, snap['week'])
+
+                                                if success:
+                                                    st.success(f"✅ {message}")
+                                                    # Also upload to GCS to sync
+                                                    upload_db_to_gcs()
+                                                    st.rerun()
+                                                else:
+                                                    st.error(f"❌ {message}")
+                    else:
+                        st.info(f"No snapshots found for {view_season} season")
+                        st.caption("Create your first snapshot in the 'Create Snapshot' tab")
+
+                with snap_compare_tab:
+                    st.markdown("### Compare Snapshots")
+                    st.caption("See what changed between two weeks")
+
+                    comp_season = st.selectbox(
+                        "Season",
+                        [2025, 2024, 2023],
+                        key="compare_season"
+                    )
+
+                    comp_col1, comp_col2 = st.columns(2)
+
+                    with comp_col1:
+                        comp_week1 = st.number_input(
+                            "Week 1 (Earlier)",
+                            min_value=1,
+                            max_value=18,
+                            value=1,
+                            key="compare_week1"
+                        )
+
+                    with comp_col2:
+                        comp_week2 = st.number_input(
+                            "Week 2 (Later)",
+                            min_value=1,
+                            max_value=18,
+                            value=2,
+                            key="compare_week2"
+                        )
+
+                    if st.button("🔍 Compare", type="primary"):
+                        with st.spinner("Comparing snapshots..."):
+                            comparison = snapshot_manager.compare_snapshots(
+                                comp_season,
+                                comp_week1,
+                                comp_week2
+                            )
+
+                            if "error" in comparison:
+                                st.error(f"❌ {comparison['error']}")
+                            else:
+                                st.success(f"✅ Comparison complete")
+
+                                # Show additions
+                                if comparison['additions']:
+                                    st.markdown(f"### ➕ New Injuries ({len(comparison['additions'])})")
+                                    st.caption(f"Players added to injury list between Week {comp_week1} and Week {comp_week2}")
+                                    for inj in comparison['additions']:
+                                        st.markdown(f"- **{inj['player_name']}** ({inj['team_abbr']}): {inj['injury_type']}")
+
+                                # Show removals
+                                if comparison['removals']:
+                                    st.markdown(f"### ➖ Recovered ({len(comparison['removals'])})")
+                                    st.caption(f"Players removed from injury list")
+                                    for inj in comparison['removals']:
+                                        st.markdown(f"- **{inj['player_name']}** ({inj['team_abbr']}): {inj['injury_type']}")
+
+                                # Show modifications
+                                if comparison['modifications']:
+                                    st.markdown(f"### 🔄 Status Changes ({len(comparison['modifications'])})")
+                                    for mod in comparison['modifications']:
+                                        before = mod['before']
+                                        after = mod['after']
+                                        st.markdown(f"**{mod['player']}**")
+                                        st.markdown(f"  - Type: {before['injury_type']} → {after['injury_type']}")
+                                        if before.get('end_week') != after.get('end_week'):
+                                            st.markdown(f"  - End Week: {before.get('end_week')} → {after.get('end_week')}")
+
+                                if not comparison['additions'] and not comparison['removals'] and not comparison['modifications']:
+                                    st.info("No changes detected between these snapshots")
 
     with tab5:
         st.subheader("📅 Upcoming Games Schedule")

@@ -239,6 +239,28 @@ class InjurySnapshotManager:
 
             injuries = snapshot.get('injuries', [])
 
+            # Deduplicate injuries by (player_name, team_abbr, season)
+            # Keep the most recent entry (last in list after sorting by updated_at)
+            # This handles snapshots created before UNIQUE constraint was added
+            injuries_dict = {}
+            for injury in injuries:
+                key = (injury['player_name'], injury['team_abbr'], injury['season'])
+                # Keep this injury if we haven't seen this key, or if it's more recent
+                if key not in injuries_dict:
+                    injuries_dict[key] = injury
+                else:
+                    # Compare timestamps and keep the more recent one
+                    existing_updated = injuries_dict[key].get('updated_at', '')
+                    new_updated = injury.get('updated_at', '')
+                    if new_updated > existing_updated:
+                        injuries_dict[key] = injury
+
+            unique_injuries = list(injuries_dict.values())
+            duplicates_removed = len(injuries) - len(unique_injuries)
+
+            if duplicates_removed > 0:
+                logging.info(f"Removed {duplicates_removed} duplicate injuries from snapshot (kept most recent)")
+
             # Connect to database
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -247,9 +269,9 @@ class InjurySnapshotManager:
             cursor.execute("DELETE FROM player_injuries WHERE season = ?", (season,))
             logging.info(f"Cleared existing injuries for season {season}")
 
-            # Insert snapshot injuries
+            # Insert unique snapshot injuries
             inserted = 0
-            for injury in injuries:
+            for injury in unique_injuries:
                 cursor.execute("""
                     INSERT INTO player_injuries (
                         player_name, team_abbr, season, injury_type,
@@ -272,7 +294,10 @@ class InjurySnapshotManager:
             conn.commit()
             conn.close()
 
-            success_msg = f"Restored {inserted} injuries from Season {season}, Week {week} snapshot"
+            if duplicates_removed > 0:
+                success_msg = f"Restored {inserted} unique injuries from Season {season}, Week {week} snapshot ({duplicates_removed} duplicates removed)"
+            else:
+                success_msg = f"Restored {inserted} injuries from Season {season}, Week {week} snapshot"
             logging.info(success_msg)
             return True, success_msg
 

@@ -20704,8 +20704,17 @@ Description: {inj_description if inj_description else 'None'}
 
                                                 if success:
                                                     st.success(f"✅ {message}")
-                                                    # Also upload to GCS to sync
-                                                    upload_db_to_gcs()
+                                                    # Upload to GCS to sync - WAIT for completion!
+                                                    with st.spinner("Syncing to cloud storage..."):
+                                                        upload_success = upload_db_to_gcs()
+                                                        if upload_success:
+                                                            st.info("📤 Database synced to cloud")
+                                                        else:
+                                                            st.warning("⚠️ Cloud sync failed - changes may be lost on restart")
+
+                                                    # Show success message for 2 seconds before reloading
+                                                    import time
+                                                    time.sleep(2)
                                                     st.rerun()
                                                 else:
                                                     st.error(f"❌ {message}")

@@ -258,24 +258,41 @@ class ProjectionSnapshotManager:
             for team_abbr, players in player_projections.items():
                 opponent = away_team if team_abbr == home_team else home_team
 
+                # Deduplicate players by (player_name, position) - keep first occurrence
+                seen_players = set()
+                unique_players = []
+                duplicates_found = []
+
                 for player in players:
                     if not getattr(player, 'injured', False):  # Don't save injured players
-                        try:
-                            cursor.execute("""
-                                INSERT INTO projection_accuracy (
-                                    player_name, team_abbr, opponent_abbr, season, week,
-                                    position, projected_yds, snapshot_id, in_range
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                player.player_name, team_abbr, opponent, season, week,
-                                player.position, player.projected_total_yards,
-                                snapshot_id, None  # Will be calculated when actuals are loaded
-                            ))
-                        except sqlite3.IntegrityError as e:
-                            error_msg = f"UNIQUE constraint for {player.position} {player.player_name} ({team_abbr}, S{season} W{week}): {e}"
-                            logging.error(error_msg)
-                            raise Exception(error_msg)
+                        player_key = (player.player_name, player.position)
+                        if player_key not in seen_players:
+                            seen_players.add(player_key)
+                            unique_players.append(player)
+                        else:
+                            duplicates_found.append(f"{player.position} {player.player_name}")
+
+                if duplicates_found:
+                    logging.warning(f"Found {len(duplicates_found)} duplicate players in {team_abbr} projections: {', '.join(duplicates_found[:5])}")
+
+                # Insert deduplicated players
+                for player in unique_players:
+                    try:
+                        cursor.execute("""
+                            INSERT INTO projection_accuracy (
+                                player_name, team_abbr, opponent_abbr, season, week,
+                                position, projected_yds, snapshot_id, in_range
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            player.player_name, team_abbr, opponent, season, week,
+                            player.position, player.projected_total_yards,
+                            snapshot_id, None  # Will be calculated when actuals are loaded
+                        ))
+                    except sqlite3.IntegrityError as e:
+                        error_msg = f"UNIQUE constraint for {player.position} {player.player_name} ({team_abbr}, S{season} W{week}): {e}"
+                        logging.error(error_msg)
+                        raise Exception(error_msg)
 
             conn.commit()
             conn.close()

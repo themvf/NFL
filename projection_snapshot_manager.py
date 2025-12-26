@@ -242,12 +242,20 @@ class ProjectionSnapshotManager:
                         cursor.execute("""
                             INSERT INTO projection_accuracy (
                                 player_name, team_abbr, opponent_abbr, season, week,
-                                position, projected_yds, snapshot_id
+                                position, projected_yds, snapshot_id,
+                                projected_pass_att, projected_completions, projected_pass_yds,
+                                projected_pass_tds, projected_interceptions,
+                                projected_rush_att, projected_rush_yds, projected_rush_tds
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             qb_proj.player_name, team_abbr, opponent, season, week,
-                            "QB", total_yards, snapshot_id
+                            "QB", total_yards, snapshot_id,
+                            qb_proj.projected_pass_att, qb_proj.projected_completions,
+                            qb_proj.projected_pass_yards, qb_proj.projected_pass_tds,
+                            qb_proj.projected_interceptions,
+                            qb_proj.projected_rush_att, qb_proj.projected_rush_yards,
+                            qb_proj.projected_rush_tds
                         ))
                     except sqlite3.IntegrityError as e:
                         error_msg = f"UNIQUE constraint for QB {qb_proj.player_name} ({team_abbr}, S{season} W{week}): {e}"
@@ -281,13 +289,22 @@ class ProjectionSnapshotManager:
                         cursor.execute("""
                             INSERT INTO projection_accuracy (
                                 player_name, team_abbr, opponent_abbr, season, week,
-                                position, projected_yds, snapshot_id, in_range
+                                position, projected_yds, snapshot_id, in_range,
+                                projected_rush_att, projected_rush_yds, projected_rush_tds,
+                                projected_targets, projected_receptions, projected_rec_yds, projected_rec_tds
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             player.player_name, team_abbr, opponent, season, week,
                             player.position, player.projected_total_yards,
-                            snapshot_id, None  # Will be calculated when actuals are loaded
+                            snapshot_id, None,  # Will be calculated when actuals are loaded
+                            player.projected_carries if hasattr(player, 'projected_carries') else None,
+                            player.projected_rush_yards if hasattr(player, 'projected_rush_yards') else None,
+                            player.projected_rush_tds if hasattr(player, 'projected_rush_tds') else None,
+                            player.projected_targets,
+                            player.projected_receptions,
+                            player.projected_recv_yards,
+                            player.projected_recv_tds if hasattr(player, 'projected_recv_tds') else None
                         ))
                     except sqlite3.IntegrityError as e:
                         error_msg = f"UNIQUE constraint for {player.position} {player.player_name} ({team_abbr}, S{season} W{week}): {e}"
@@ -438,13 +455,19 @@ class ProjectionSnapshotManager:
                     actual = actual_stats['total_yards']
                     error = actual - projected
 
-                    # Update database
+                    # Update database with all component stats
                     cursor.execute("""
                         UPDATE projection_accuracy
-                        SET actual_yds = ?, variance = ?, game_played = ?
+                        SET actual_yds = ?, variance = ?, game_played = ?,
+                            actual_pass_att = ?, actual_completions = ?, actual_pass_yds = ?,
+                            actual_pass_tds = ?, actual_interceptions = ?,
+                            actual_rush_att = ?, actual_rush_yds = ?, actual_rush_tds = ?
                         WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                     """, (
                         actual, error, actual_stats['game_played'],
+                        actual_stats.get('pass_att'), actual_stats.get('completions'), actual_stats.get('pass_yds'),
+                        actual_stats.get('pass_tds'), actual_stats.get('interceptions'),
+                        actual_stats.get('rush_att'), actual_stats.get('rush_yds'), actual_stats.get('rush_tds'),
                         snapshot_id, qb['player_name'], qb['team']
                     ))
                     players_updated += 1
@@ -473,10 +496,14 @@ class ProjectionSnapshotManager:
 
                         cursor.execute("""
                             UPDATE projection_accuracy
-                            SET actual_yds = ?, variance = ?, in_range = ?, game_played = ?
+                            SET actual_yds = ?, variance = ?, in_range = ?, game_played = ?,
+                                actual_rush_att = ?, actual_rush_yds = ?, actual_rush_tds = ?,
+                                actual_targets = ?, actual_receptions = ?, actual_rec_yds = ?, actual_rec_tds = ?
                             WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                         """, (
                             actual, error, in_range, actual_stats['game_played'],
+                            actual_stats.get('rush_att'), actual_stats.get('rush_yds'), actual_stats.get('rush_tds'),
+                            actual_stats.get('targets'), actual_stats.get('receptions'), actual_stats.get('rec_yds'), actual_stats.get('rec_tds'),
                             snapshot_id, player['player_name'], player['team']
                         ))
                         players_updated += 1
@@ -537,51 +564,76 @@ class ProjectionSnapshotManager:
         try:
             conn = sqlite3.connect(self.db_path)
 
-            # Position-specific queries
-            if position == 'QB':
-                query = """
-                    SELECT
-                        COALESCE(passing_yards, 0) + COALESCE(rushing_yards, 0) as total_yards,
-                        COALESCE(attempts, 0) + COALESCE(carries, 0) as touches
-                    FROM player_stats
-                    WHERE player_display_name = ? AND season = ? AND week = ?
-                    LIMIT 1
-                """
-            elif position == 'RB':
-                query = """
-                    SELECT
-                        COALESCE(rushing_yards, 0) + COALESCE(receiving_yards, 0) as total_yards,
-                        COALESCE(carries, 0) + COALESCE(targets, 0) as touches
-                    FROM player_stats
-                    WHERE player_display_name = ? AND season = ? AND week = ?
-                    LIMIT 1
-                """
-            else:  # WR, TE
-                query = """
-                    SELECT
-                        COALESCE(receiving_yards, 0) as total_yards,
-                        COALESCE(targets, 0) as touches
-                    FROM player_stats
-                    WHERE player_display_name = ? AND season = ? AND week = ?
-                    LIMIT 1
-                """
+            # Fetch all stats regardless of position
+            query = """
+                SELECT
+                    -- Totals
+                    COALESCE(passing_yards, 0) + COALESCE(rushing_yards, 0) + COALESCE(receiving_yards, 0) as total_yards,
+
+                    -- Passing stats
+                    attempts as pass_att,
+                    completions,
+                    passing_yards as pass_yds,
+                    passing_tds as pass_tds,
+                    interceptions,
+
+                    -- Rushing stats
+                    carries as rush_att,
+                    rushing_yards as rush_yds,
+                    rushing_tds as rush_tds,
+
+                    -- Receiving stats
+                    targets,
+                    receptions,
+                    receiving_yards as rec_yds,
+                    receiving_tds as rec_tds
+
+                FROM player_stats
+                WHERE player_display_name = ? AND season = ? AND week = ?
+                LIMIT 1
+            """
 
             result = pd.read_sql_query(query, conn, params=(player_name, season, week))
             conn.close()
 
             if result.empty:
                 # Player not found - DNP or missing data
-                return {"total_yards": 0, "game_played": False}
+                return None
 
-            total_yards = result['total_yards'].iloc[0]
-            touches = result['touches'].iloc[0] if 'touches' in result.columns else 0
+            row = result.iloc[0]
+
+            # Position-specific total yards calculation
+            if position == 'QB':
+                total_yards = (row['pass_yds'] or 0) + (row['rush_yds'] or 0)
+                touches = (row['pass_att'] or 0) + (row['rush_att'] or 0)
+            elif position == 'RB':
+                total_yards = (row['rush_yds'] or 0) + (row['rec_yds'] or 0)
+                touches = (row['rush_att'] or 0) + (row['targets'] or 0)
+            else:  # WR, TE
+                total_yards = row['rec_yds'] or 0
+                touches = row['targets'] or 0
 
             # Determine if player actually played
             game_played = touches > 0 or total_yards > 0
 
             return {
                 "total_yards": total_yards,
-                "game_played": game_played
+                "game_played": game_played,
+                # Passing stats
+                "pass_att": row['pass_att'],
+                "completions": row['completions'],
+                "pass_yds": row['pass_yds'],
+                "pass_tds": row['pass_tds'],
+                "interceptions": row['interceptions'],
+                # Rushing stats
+                "rush_att": row['rush_att'],
+                "rush_yds": row['rush_yds'],
+                "rush_tds": row['rush_tds'],
+                # Receiving stats
+                "targets": row['targets'],
+                "receptions": row['receptions'],
+                "rec_yds": row['rec_yds'],
+                "rec_tds": row['rec_tds']
             }
 
         except Exception as e:

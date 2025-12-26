@@ -694,8 +694,38 @@ def init_projection_accuracy_table():
                 season INTEGER NOT NULL,
                 week INTEGER NOT NULL,
                 position TEXT NOT NULL,
+
+                -- Projected stats (component level)
                 projected_yds REAL NOT NULL,
+                projected_pass_att INTEGER,
+                projected_completions REAL,
+                projected_pass_yds REAL,
+                projected_pass_tds REAL,
+                projected_interceptions REAL,
+                projected_rush_att INTEGER,
+                projected_rush_yds REAL,
+                projected_rush_tds REAL,
+                projected_targets REAL,
+                projected_receptions REAL,
+                projected_rec_yds REAL,
+                projected_rec_tds REAL,
+
+                -- Actual stats (component level)
                 actual_yds REAL,
+                actual_pass_att INTEGER,
+                actual_completions INTEGER,
+                actual_pass_yds REAL,
+                actual_pass_tds INTEGER,
+                actual_interceptions INTEGER,
+                actual_rush_att INTEGER,
+                actual_rush_yds REAL,
+                actual_rush_tds INTEGER,
+                actual_targets INTEGER,
+                actual_receptions INTEGER,
+                actual_rec_yds REAL,
+                actual_rec_tds INTEGER,
+
+                -- Legacy/metadata columns
                 multiplier REAL,
                 matchup_rating TEXT,
                 avg_yds_game REAL,

@@ -96,7 +96,14 @@ class InjurySnapshotManager:
 
         try:
             # Get all current injuries
-            injuries = self.get_all_injuries()
+            all_injuries = self.get_all_injuries()
+
+            # Filter injuries to only include the specified season
+            injuries = [inj for inj in all_injuries if inj.get('season') == season]
+
+            if not injuries:
+                logging.warning(f"No injuries found for season {season} when creating snapshot")
+                # Continue anyway - empty snapshot is valid
 
             # Create snapshot data
             snapshot = {

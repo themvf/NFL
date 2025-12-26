@@ -20819,6 +20819,104 @@ Description: {inj_description if inj_description else 'None'}
             st.markdown("### 🎯 Projection Accuracy Dashboard")
             st.caption("Track and analyze the accuracy of closed-system projections to improve model performance")
 
+            # Database Diagnostics Section
+            st.markdown("#### 🔍 Database Diagnostics")
+
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                # Check table schema
+                cursor.execute("PRAGMA table_info(projection_accuracy)")
+                columns = [row[1] for row in cursor.fetchall()]
+
+                # Count total records
+                cursor.execute("SELECT COUNT(*) FROM projection_accuracy")
+                total_records = cursor.fetchone()[0]
+
+                # Count records by season/week
+                cursor.execute("""
+                    SELECT season, week, COUNT(*) as count
+                    FROM projection_accuracy
+                    GROUP BY season, week
+                    ORDER BY season DESC, week DESC
+                """)
+                records_by_week = cursor.fetchall()
+
+                conn.close()
+
+                diag_col1, diag_col2 = st.columns([2, 1])
+
+                with diag_col1:
+                    st.info(f"📊 **Total projection records:** {total_records}")
+
+                    if total_records > 0:
+                        with st.expander("📅 Records by Season/Week"):
+                            for season, week, count in records_by_week:
+                                st.text(f"Season {season}, Week {week}: {count} projections")
+
+                    # Show column status
+                    required_columns = ['snapshot_id', 'in_range', 'game_played', 'projected_p10', 'projected_p90']
+                    missing_columns = [col for col in required_columns if col not in columns]
+
+                    if missing_columns:
+                        st.warning(f"⚠️ Missing columns: {', '.join(missing_columns)}")
+                    else:
+                        st.success("✅ All required columns present")
+
+                with diag_col2:
+                    # Clear records button
+                    if total_records > 0:
+                        # Session state for confirmation
+                        if 'clear_proj_confirm' not in st.session_state:
+                            st.session_state.clear_proj_confirm = False
+
+                        if st.session_state.clear_proj_confirm:
+                            st.warning(f"⚠️ Delete {total_records} records?")
+
+                            col_yes, col_no = st.columns(2)
+                            with col_yes:
+                                if st.button("✅ Yes", key="clear_proj_yes", type="primary"):
+                                    try:
+                                        conn = sqlite3.connect(DB_PATH)
+                                        cursor = conn.cursor()
+                                        cursor.execute("DELETE FROM projection_accuracy")
+                                        deleted = cursor.rowcount
+                                        conn.commit()
+                                        conn.close()
+
+                                        st.success(f"✅ Deleted {deleted} records")
+                                        st.session_state.clear_proj_confirm = False
+
+                                        # Sync to GCS
+                                        with st.spinner("Syncing to cloud..."):
+                                            upload_success = upload_db_to_gcs()
+                                            if upload_success:
+                                                st.info("📤 Database synced")
+
+                                        import time
+                                        time.sleep(2)
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Error clearing records: {e}")
+
+                            with col_no:
+                                if st.button("❌ No", key="clear_proj_no"):
+                                    st.session_state.clear_proj_confirm = False
+                                    st.rerun()
+                        else:
+                            if st.button("🗑️ Clear All Records", key="clear_proj_records", type="secondary"):
+                                st.session_state.clear_proj_confirm = True
+                                st.rerun()
+
+            except Exception as e:
+                st.error(f"❌ Diagnostic error: {e}")
+                import traceback
+                with st.expander("🔍 Error Details"):
+                    st.code(traceback.format_exc())
+
+            st.divider()
+
             # Initialize projection snapshot manager
             proj_snapshot_mgr = None
             if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:

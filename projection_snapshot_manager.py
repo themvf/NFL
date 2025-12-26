@@ -179,15 +179,33 @@ class ProjectionSnapshotManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            # Delete any existing projections for this matchup (allow re-saving updated projections)
-            # This handles the case where user saves the same matchup multiple times
+            # First, check for existing conflicting records
+            cursor.execute("""
+                SELECT player_name, team_abbr, opponent_abbr, position
+                FROM projection_accuracy
+                WHERE season = ? AND week = ?
+                AND (team_abbr = ? OR team_abbr = ?)
+            """, (season, week, home_team, away_team))
+            existing_records = cursor.fetchall()
+
+            if existing_records:
+                logging.info(f"Found {len(existing_records)} existing projection records for Week {week} {away_team}/{home_team}")
+                for rec in existing_records[:5]:  # Log first 5
+                    logging.info(f"  Existing: {rec[0]} ({rec[1]} vs {rec[2]}) - {rec[3]}")
+
+            # Delete ALL projections for these teams in this week (not just specific matchup)
+            # This is needed because UNIQUE constraint doesn't include opponent_abbr
             cursor.execute("""
                 DELETE FROM projection_accuracy
                 WHERE season = ? AND week = ?
-                AND ((team_abbr = ? AND opponent_abbr = ?) OR (team_abbr = ? AND opponent_abbr = ?))
-            """, (season, week, home_team, away_team, away_team, home_team))
+                AND (team_abbr = ? OR team_abbr = ?)
+            """, (season, week, home_team, away_team))
 
-            logging.info(f"Deleted {cursor.rowcount} existing projections for {away_team} vs {home_team} Week {week}")
+            deleted_count = cursor.rowcount
+            logging.info(f"Deleted {deleted_count} existing projections for {away_team}/{home_team} Week {week}")
+
+            # COMMIT the DELETE before INSERT to ensure it's not rolled back on error
+            conn.commit()
 
             cursor.execute("""
                 INSERT INTO projection_snapshots (
@@ -220,16 +238,21 @@ class ProjectionSnapshotManager:
                     opponent = away_team if team_abbr == home_team else home_team
                     total_yards = qb_proj.projected_pass_yards + qb_proj.projected_rush_yards
 
-                    cursor.execute("""
-                        INSERT INTO projection_accuracy (
-                            player_name, team_abbr, opponent_abbr, season, week,
-                            position, projected_yds, snapshot_id
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        qb_proj.player_name, team_abbr, opponent, season, week,
-                        "QB", total_yards, snapshot_id
-                    ))
+                    try:
+                        cursor.execute("""
+                            INSERT INTO projection_accuracy (
+                                player_name, team_abbr, opponent_abbr, season, week,
+                                position, projected_yds, snapshot_id
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            qb_proj.player_name, team_abbr, opponent, season, week,
+                            "QB", total_yards, snapshot_id
+                        ))
+                    except sqlite3.IntegrityError as e:
+                        error_msg = f"UNIQUE constraint for QB {qb_proj.player_name} ({team_abbr}, S{season} W{week}): {e}"
+                        logging.error(error_msg)
+                        raise Exception(error_msg)
 
             # Player projections (RB, WR, TE)
             for team_abbr, players in player_projections.items():
@@ -237,17 +260,22 @@ class ProjectionSnapshotManager:
 
                 for player in players:
                     if not getattr(player, 'injured', False):  # Don't save injured players
-                        cursor.execute("""
-                            INSERT INTO projection_accuracy (
-                                player_name, team_abbr, opponent_abbr, season, week,
-                                position, projected_yds, snapshot_id, in_range
-                            )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            player.player_name, team_abbr, opponent, season, week,
-                            player.position, player.projected_total_yards,
-                            snapshot_id, None  # Will be calculated when actuals are loaded
-                        ))
+                        try:
+                            cursor.execute("""
+                                INSERT INTO projection_accuracy (
+                                    player_name, team_abbr, opponent_abbr, season, week,
+                                    position, projected_yds, snapshot_id, in_range
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                player.player_name, team_abbr, opponent, season, week,
+                                player.position, player.projected_total_yards,
+                                snapshot_id, None  # Will be calculated when actuals are loaded
+                            ))
+                        except sqlite3.IntegrityError as e:
+                            error_msg = f"UNIQUE constraint for {player.position} {player.player_name} ({team_abbr}, S{season} W{week}): {e}"
+                            logging.error(error_msg)
+                            raise Exception(error_msg)
 
             conn.commit()
             conn.close()

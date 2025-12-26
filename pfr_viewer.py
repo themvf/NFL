@@ -20696,28 +20696,50 @@ Description: {inj_description if inj_description else 'None'}
                                             })
 
                                 with col_action:
-                                    if st.button("↩️ Restore", key=f"restore_{snap['week']}", type="secondary"):
+                                    # Initialize session state for restore confirmation
+                                    restore_key = f"restore_confirm_{snap['week']}"
+                                    if restore_key not in st.session_state:
+                                        st.session_state[restore_key] = False
+
+                                    # Check if we're in confirmation mode
+                                    if st.session_state[restore_key]:
                                         st.warning("⚠️ This will replace all current injuries for this season!")
-                                        if st.button("✅ Confirm Restore", key=f"confirm_restore_{snap['week']}", type="primary"):
-                                            with st.spinner("Restoring snapshot..."):
-                                                success, message = snapshot_manager.restore_snapshot(view_season, snap['week'])
 
-                                                if success:
-                                                    st.success(f"✅ {message}")
-                                                    # Upload to GCS to sync - WAIT for completion!
-                                                    with st.spinner("Syncing to cloud storage..."):
-                                                        upload_success = upload_db_to_gcs()
-                                                        if upload_success:
-                                                            st.info("📤 Database synced to cloud")
-                                                        else:
-                                                            st.warning("⚠️ Cloud sync failed - changes may be lost on restart")
+                                        col_confirm, col_cancel = st.columns(2)
+                                        with col_confirm:
+                                            if st.button("✅ Confirm", key=f"confirm_{snap['week']}", type="primary"):
+                                                with st.spinner("Restoring snapshot..."):
+                                                    success, message = snapshot_manager.restore_snapshot(view_season, snap['week'])
 
-                                                    # Show success message for 2 seconds before reloading
-                                                    import time
-                                                    time.sleep(2)
-                                                    st.rerun()
-                                                else:
-                                                    st.error(f"❌ {message}")
+                                                    if success:
+                                                        st.success(f"✅ {message}")
+                                                        # Upload to GCS to sync - WAIT for completion!
+                                                        with st.spinner("Syncing to cloud storage..."):
+                                                            upload_success = upload_db_to_gcs()
+                                                            if upload_success:
+                                                                st.info("📤 Database synced to cloud")
+                                                            else:
+                                                                st.warning("⚠️ Cloud sync failed - changes may be lost on restart")
+
+                                                        # Reset confirmation state
+                                                        st.session_state[restore_key] = False
+
+                                                        # Show success message for 2 seconds before reloading
+                                                        import time
+                                                        time.sleep(2)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(f"❌ {message}")
+                                                        st.session_state[restore_key] = False
+
+                                        with col_cancel:
+                                            if st.button("❌ Cancel", key=f"cancel_{snap['week']}"):
+                                                st.session_state[restore_key] = False
+                                                st.rerun()
+                                    else:
+                                        if st.button("↩️ Restore", key=f"restore_{snap['week']}", type="secondary"):
+                                            st.session_state[restore_key] = True
+                                            st.rerun()
                     else:
                         st.info(f"No snapshots found for {view_season} season")
                         st.caption("Create your first snapshot in the 'Create Snapshot' tab")

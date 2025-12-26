@@ -25909,6 +25909,7 @@ def main():
         init_injuries_table()
         init_transactions_table()
         init_upcoming_games_table()
+        init_projection_accuracy_table()  # Must run before projection_snapshots to add columns
         init_projection_snapshots_table()
     except Exception as e:
         st.error(f"Database initialization error: {e}")

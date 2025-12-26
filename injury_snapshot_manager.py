@@ -278,34 +278,75 @@ class InjurySnapshotManager:
 
             # Insert unique snapshot injuries
             inserted = 0
+            failed = 0
+            errors = []
+
             for injury in unique_injuries:
-                cursor.execute("""
-                    INSERT INTO player_injuries (
-                        player_name, team_abbr, season, injury_type,
-                        start_week, end_week, injury_description,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    injury['player_name'],
-                    injury['team_abbr'],
-                    injury['season'],
-                    injury['injury_type'],
-                    injury['start_week'],
-                    injury['end_week'],
-                    injury.get('injury_description', ''),
-                    injury.get('created_at', datetime.now().isoformat()),
-                    datetime.now().isoformat()  # Update the updated_at timestamp
-                ))
-                inserted += 1
+                try:
+                    # Clean up NaN and null values
+                    player_name = injury.get('player_name')
+                    team_abbr = injury.get('team_abbr')
+                    season = injury.get('season')
+                    injury_type = injury.get('injury_type')
+                    start_week = injury.get('start_week')
+                    end_week = injury.get('end_week')
+                    injury_description = injury.get('injury_description') or ''
+                    created_at = injury.get('created_at') or datetime.now().isoformat()
+
+                    # Validate required fields
+                    if not all([player_name, team_abbr, season, injury_type]):
+                        failed += 1
+                        errors.append(f"Missing required fields: {injury.get('player_name', 'UNKNOWN')}")
+                        continue
+
+                    cursor.execute("""
+                        INSERT INTO player_injuries (
+                            player_name, team_abbr, season, injury_type,
+                            start_week, end_week, injury_description,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        player_name,
+                        team_abbr,
+                        season,
+                        injury_type,
+                        start_week,
+                        end_week,
+                        injury_description,
+                        created_at,
+                        datetime.now().isoformat()  # Update the updated_at timestamp
+                    ))
+                    inserted += 1
+
+                except Exception as e:
+                    failed += 1
+                    error_msg = f"{injury.get('player_name', 'UNKNOWN')} ({injury.get('team_abbr', '?')}): {str(e)}"
+                    errors.append(error_msg)
+                    logging.error(f"Failed to insert injury: {error_msg}")
+                    continue
 
             conn.commit()
             conn.close()
 
-            if duplicates_removed > 0:
+            # Build success message with details
+            if failed > 0:
+                success_msg = f"Restored {inserted} injuries from Season {season}, Week {week} snapshot"
+                success_msg += f" ({failed} failed)"
+                if duplicates_removed > 0:
+                    success_msg += f", {duplicates_removed} duplicates removed"
+                success_msg += f"\nErrors: {'; '.join(errors[:5])}"  # Show first 5 errors
+                if len(errors) > 5:
+                    success_msg += f"... and {len(errors)-5} more"
+            elif duplicates_removed > 0:
                 success_msg = f"Restored {inserted} unique injuries from Season {season}, Week {week} snapshot ({duplicates_removed} duplicates removed)"
             else:
                 success_msg = f"Restored {inserted} injuries from Season {season}, Week {week} snapshot"
+
             logging.info(success_msg)
+
+            if inserted == 0 and failed > 0:
+                return False, f"Failed to restore any injuries. {success_msg}"
+
             return True, success_msg
 
         except Exception as e:

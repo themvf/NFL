@@ -9916,6 +9916,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Game Detail",
             "Notes Manager",
             "Projection Analytics",
+            "Projections vs. Actuals",
             "Player Impact",
             "Database Manager",
             "Transaction Manager",
@@ -19680,10 +19681,10 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
             display_df.columns = ['Player', 'Team', 'Opp', 'Pos', 'Week',
                                   'Projected', 'Actual', 'Diff', 'Error', '% Error', 'Matchup']
 
-            # Round numeric columns
+            # Convert to numeric and round (handle NaN/None values)
             for col in ['Projected', 'Actual', 'Diff', 'Error']:
-                display_df[col] = display_df[col].round(1)
-            display_df['% Error'] = display_df['% Error'].round(1)
+                display_df[col] = pd.to_numeric(display_df[col], errors='coerce').round(1)
+            display_df['% Error'] = pd.to_numeric(display_df['% Error'], errors='coerce').round(1)
 
             # Color-code by error
             def color_error(row):
@@ -19709,6 +19710,314 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
             )
         else:
             st.info("No data available for the selected filters")
+
+
+# ============================================================================
+# Section: Projections vs. Actuals (Snapshot-Based)
+# ============================================================================
+
+def render_projections_vs_actuals():
+    """Display projection snapshot accuracy tracking and analysis."""
+    st.header("🎯 Projections vs. Actuals")
+    st.markdown("Track accuracy of closed-system matchup projections using snapshot comparison")
+
+    # Initialize tables
+    init_projection_accuracy_table()
+    init_projection_snapshots_table()
+
+    # Database Diagnostics Section
+    st.markdown("### 🔍 Database Diagnostics")
+
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Check table schema
+        cursor.execute("PRAGMA table_info(projection_accuracy)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        # Count total records
+        cursor.execute("SELECT COUNT(*) FROM projection_accuracy")
+        total_records = cursor.fetchone()[0]
+
+        # Count records by season/week
+        cursor.execute("""
+            SELECT season, week, COUNT(*) as count
+            FROM projection_accuracy
+            GROUP BY season, week
+            ORDER BY season DESC, week DESC
+        """)
+        records_by_week = cursor.fetchall()
+
+        conn.close()
+
+        diag_col1, diag_col2 = st.columns([2, 1])
+
+        with diag_col1:
+            st.info(f"📊 **Total projection records:** {total_records}")
+
+            if total_records > 0:
+                with st.expander("📅 Records by Season/Week"):
+                    for season, week, count in records_by_week:
+                        st.text(f"Season {season}, Week {week}: {count} projections")
+
+            # Show column status
+            required_columns = ['snapshot_id', 'in_range', 'game_played', 'projected_p10', 'projected_p90']
+            missing_columns = [col for col in required_columns if col not in columns]
+
+            if missing_columns:
+                st.warning(f"⚠️ Missing columns: {', '.join(missing_columns)}")
+            else:
+                st.success("✅ All required columns present")
+
+        with diag_col2:
+            # Clear records button
+            if total_records > 0:
+                # Session state for confirmation
+                if 'clear_proj_confirm' not in st.session_state:
+                    st.session_state.clear_proj_confirm = False
+
+                if st.session_state.clear_proj_confirm:
+                    st.warning(f"⚠️ Delete {total_records} records?")
+
+                    col_yes, col_no = st.columns(2)
+                    with col_yes:
+                        if st.button("✅ Yes", key="clear_proj_yes", type="primary"):
+                            try:
+                                conn = sqlite3.connect(DB_PATH)
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM projection_accuracy")
+                                deleted = cursor.rowcount
+                                conn.commit()
+                                conn.close()
+
+                                st.success(f"✅ Deleted {deleted} records")
+                                st.session_state.clear_proj_confirm = False
+
+                                # Sync to GCS
+                                with st.spinner("Syncing to cloud..."):
+                                    upload_success = upload_db_to_gcs()
+                                    if upload_success:
+                                        st.info("📤 Database synced")
+
+                                import time
+                                time.sleep(2)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error clearing records: {e}")
+
+                    with col_no:
+                        if st.button("❌ No", key="clear_proj_no"):
+                            st.session_state.clear_proj_confirm = False
+                            st.rerun()
+                else:
+                    if st.button("🗑️ Clear All Records", key="clear_proj_records", type="secondary"):
+                        st.session_state.clear_proj_confirm = True
+                        st.rerun()
+
+    except Exception as e:
+        st.error(f"❌ Diagnostic error: {e}")
+        import traceback
+        with st.expander("🔍 Error Details"):
+            st.code(traceback.format_exc())
+
+    st.divider()
+
+    # Initialize projection snapshot manager
+    proj_snapshot_mgr = None
+    if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+        try:
+            import projection_snapshot_manager as psm
+            proj_snapshot_mgr = psm.ProjectionSnapshotManager(
+                db_path=str(DB_PATH),
+                bucket_name=GCS_BUCKET_NAME,
+                service_account_dict=dict(st.secrets["gcs_service_account"])
+            )
+        except ImportError:
+            st.error("❌ Projection snapshot manager not found. Check installation.")
+        except Exception as e:
+            st.error(f"❌ Could not initialize projection snapshot manager: {e}")
+    else:
+        st.warning("⚠️ GCS not configured. Projection accuracy requires Google Cloud Storage.")
+
+    if proj_snapshot_mgr:
+        # Filters
+        st.markdown("### 📊 Accuracy Metrics")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            filter_season = st.selectbox(
+                "Season",
+                [2025, 2024, 2023],
+                index=0,
+                key="proj_acc_season"
+            )
+
+        with col2:
+            week_options = ["All Weeks"] + list(range(1, 19))
+            filter_week = st.selectbox(
+                "Week",
+                week_options,
+                index=0,
+                key="proj_acc_week"
+            )
+
+        with col3:
+            filter_position = st.selectbox(
+                "Position",
+                ["All", "QB", "RB", "WR", "TE"],
+                index=0,
+                key="proj_acc_position"
+            )
+
+        # Calculate metrics
+        try:
+            metrics = proj_snapshot_mgr.calculate_accuracy_metrics(
+                season=filter_season,
+                week=None if filter_week == "All Weeks" else filter_week,
+                position=None if filter_position == "All" else filter_position
+            )
+
+            if metrics and metrics.get('total_projections', 0) > 0:
+                # Display key metrics
+                st.divider()
+                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+                with metric_col1:
+                    st.metric(
+                        "MAE (Mean Abs Error)",
+                        f"{metrics['mae']:.1f} yds",
+                        help="Average absolute difference between projected and actual yards"
+                    )
+
+                with metric_col2:
+                    st.metric(
+                        "RMSE",
+                        f"{metrics['rmse']:.1f} yds",
+                        help="Root Mean Square Error - emphasizes larger errors"
+                    )
+
+                with metric_col3:
+                    st.metric(
+                        "Hit Rate ±20 yds",
+                        f"{metrics.get('hit_rate_20', 0):.1f}%",
+                        help="Percentage of projections within 20 yards of actual"
+                    )
+
+                with metric_col4:
+                    bias_delta = f"{metrics['bias']:+.1f}" if metrics['bias'] != 0 else "0.0"
+                    bias_help = "Positive = Over-projecting, Negative = Under-projecting"
+                    st.metric(
+                        "Bias",
+                        f"{bias_delta} yds",
+                        help=bias_help
+                    )
+
+                st.caption(f"Based on {metrics['total_projections']} completed projections")
+
+                # Additional hit rates
+                st.divider()
+                st.markdown("#### 🎯 Hit Rate Analysis")
+                hit_col1, hit_col2, hit_col3 = st.columns(3)
+
+                with hit_col1:
+                    st.metric("±10 yards", f"{metrics.get('hit_rate_10', 0):.1f}%")
+                with hit_col2:
+                    st.metric("±30 yards", f"{metrics.get('hit_rate_30', 0):.1f}%")
+                with hit_col3:
+                    range_acc = metrics.get('range_accuracy', 0)
+                    st.metric(
+                        "P10-P90 Range",
+                        f"{range_acc:.1f}%",
+                        help="% of actuals within projected P10-P90 volatility range"
+                    )
+
+            else:
+                st.info("📭 No completed projections found. Save projections in Team Comparison View 2 and update actuals to see metrics.")
+
+        except Exception as e:
+            st.error(f"❌ Error calculating metrics: {e}")
+            import traceback
+            with st.expander("🔍 Debug Info"):
+                st.code(traceback.format_exc())
+
+        # Saved projections list
+        st.divider()
+        st.markdown("### 📋 Saved Projection Snapshots")
+
+        try:
+            list_season = st.selectbox(
+                "Filter by Season",
+                [2025, 2024, 2023],
+                index=0,
+                key="proj_list_season"
+            )
+
+            snapshots = proj_snapshot_mgr.list_snapshots(season=list_season)
+
+            if not snapshots.empty:
+                # Sort by created_at descending
+                snapshots = snapshots.sort_values('created_at', ascending=False)
+
+                st.caption(f"Found {len(snapshots)} projection snapshot(s)")
+
+                for idx, snap in snapshots.iterrows():
+                    status_emoji = "✅" if snap['status'] == 'completed' else "⏳"
+                    matchup = f"{snap['away_team']} @ {snap['home_team']}"
+
+                    with st.expander(f"{status_emoji} Week {snap['week']}: {matchup} ({snap['status']})"):
+                        info_col, action_col = st.columns([3, 1])
+
+                        with info_col:
+                            st.markdown(f"**Snapshot ID:** `{snap['snapshot_id'][:50]}...`")
+                            created_time = pd.to_datetime(snap['created_at']).strftime('%Y-%m-%d %H:%M')
+                            st.markdown(f"**Created:** {created_time}")
+                            st.markdown(f"**Status:** {snap['status']}")
+
+                        with action_col:
+                            if snap['status'] == 'pending':
+                                if st.button("🔄 Update Actuals", key=f"update_{snap['snapshot_id'][:30]}"):
+                                    with st.spinner("Fetching actual stats from database..."):
+                                        try:
+                                            success, count = proj_snapshot_mgr.update_actuals(snap['snapshot_id'])
+                                            if success:
+                                                st.success(f"✅ Updated {count} players")
+                                                st.rerun()
+                                            else:
+                                                st.error(f"❌ Update failed: {count}")
+                                        except Exception as e:
+                                            st.error(f"❌ Error: {str(e)[:100]}")
+
+                        # Show snapshot summary if completed
+                        if snap['status'] == 'completed':
+                            if st.button("📊 View Details", key=f"view_{snap['snapshot_id'][:30]}"):
+                                try:
+                                    summary = proj_snapshot_mgr.get_snapshot_summary(snap['snapshot_id'])
+                                    if summary:
+                                        st.markdown("**Accuracy by Position:**")
+                                        acc_by_pos = summary.get('accuracy_by_position', {})
+                                        if acc_by_pos:
+                                            acc_df = pd.DataFrame([
+                                                {
+                                                    'Position': pos,
+                                                    'Count': stats['count'],
+                                                    'MAE': f"{stats['mae']:.1f}",
+                                                    'Bias': f"{stats['bias']:+.1f}",
+                                                    'Hit Rate ±20': f"{stats.get('hit_rate_20', 0):.1f}%"
+                                                }
+                                                for pos, stats in acc_by_pos.items()
+                                            ])
+                                            st.dataframe(acc_df, use_container_width=True, hide_index=True)
+                                        else:
+                                            st.caption("No accuracy data available")
+                                except Exception as e:
+                                    st.error(f"Error loading details: {e}")
+
+            else:
+                st.info("📭 No projection snapshots saved yet. Go to **Team Comparison → View 2** to create your first snapshot!")
+
+        except Exception as e:
+            st.error(f"❌ Error loading snapshots: {e}")
 
 
 # ============================================================================
@@ -26084,6 +26393,9 @@ def main():
 
     elif view == "Projection Analytics":
         render_projection_analytics(season, week)
+
+    elif view == "Projections vs. Actuals":
+        render_projections_vs_actuals()
 
     elif view == "Player Impact":
         st.header("🚑 Player Impact Analysis")

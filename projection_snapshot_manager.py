@@ -179,6 +179,16 @@ class ProjectionSnapshotManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
+            # Delete any existing projections for this matchup (allow re-saving updated projections)
+            # This handles the case where user saves the same matchup multiple times
+            cursor.execute("""
+                DELETE FROM projection_accuracy
+                WHERE season = ? AND week = ?
+                AND ((team_abbr = ? AND opponent_abbr = ?) OR (team_abbr = ? AND opponent_abbr = ?))
+            """, (season, week, home_team, away_team, away_team, home_team))
+
+            logging.info(f"Deleted {cursor.rowcount} existing projections for {away_team} vs {home_team} Week {week}")
+
             cursor.execute("""
                 INSERT INTO projection_snapshots (
                     snapshot_id, season, week, home_team, away_team,

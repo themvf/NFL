@@ -19981,37 +19981,71 @@ def render_projections_vs_actuals():
                                         try:
                                             success, count = proj_snapshot_mgr.update_actuals(snap['snapshot_id'])
                                             if success:
-                                                st.success(f"✅ Updated {count} players")
-                                                st.rerun()
+                                                if count > 0:
+                                                    st.success(f"✅ Updated {count} players - snapshot marked as completed")
+                                                    st.rerun()
+                                                else:
+                                                    st.warning(f"⚠️ No player stats found in database yet. Make sure you've fetched Week {snap['week']} game data!")
                                             else:
-                                                st.error(f"❌ Update failed: {count}")
+                                                st.error(f"❌ Update failed")
                                         except Exception as e:
                                             st.error(f"❌ Error: {str(e)[:100]}")
 
                         # Show snapshot summary if completed
                         if snap['status'] == 'completed':
-                            if st.button("📊 View Details", key=f"view_{snap['snapshot_id'][:30]}"):
-                                try:
-                                    summary = proj_snapshot_mgr.get_snapshot_summary(snap['snapshot_id'])
-                                    if summary:
-                                        st.markdown("**Accuracy by Position:**")
-                                        acc_by_pos = summary.get('accuracy_by_position', {})
-                                        if acc_by_pos:
-                                            acc_df = pd.DataFrame([
-                                                {
-                                                    'Position': pos,
-                                                    'Count': stats['count'],
-                                                    'MAE': f"{stats['mae']:.1f}",
-                                                    'Bias': f"{stats['bias']:+.1f}",
-                                                    'Hit Rate ±20': f"{stats.get('hit_rate_20', 0):.1f}%"
-                                                }
-                                                for pos, stats in acc_by_pos.items()
-                                            ])
-                                            st.dataframe(acc_df, use_container_width=True, hide_index=True)
-                                        else:
-                                            st.caption("No accuracy data available")
-                                except Exception as e:
-                                    st.error(f"Error loading details: {e}")
+                            # Check if there's actually any data
+                            try:
+                                conn = sqlite3.connect(DB_PATH)
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                    SELECT COUNT(*) FROM projection_accuracy
+                                    WHERE snapshot_id = ? AND actual_yds IS NOT NULL
+                                """, (snap['snapshot_id'],))
+                                actual_count = cursor.fetchone()[0]
+                                conn.close()
+
+                                if actual_count == 0:
+                                    st.warning("⚠️ Marked as completed but no actual stats found")
+                                    if st.button("🔄 Reset to Pending", key=f"reset_{snap['snapshot_id'][:30]}"):
+                                        try:
+                                            conn = sqlite3.connect(DB_PATH)
+                                            cursor = conn.cursor()
+                                            cursor.execute("""
+                                                UPDATE projection_snapshots
+                                                SET status = 'pending', game_completed = FALSE
+                                                WHERE snapshot_id = ?
+                                            """, (snap['snapshot_id'],))
+                                            conn.commit()
+                                            conn.close()
+                                            st.success("✅ Reset to pending - click 'Update Actuals' to try again")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Error resetting: {e}")
+                                else:
+                                    if st.button("📊 View Details", key=f"view_{snap['snapshot_id'][:30]}"):
+                                        try:
+                                            summary = proj_snapshot_mgr.get_snapshot_summary(snap['snapshot_id'])
+                                            if summary:
+                                                st.markdown("**Accuracy by Position:**")
+                                                acc_by_pos = summary.get('accuracy_by_position', {})
+                                                if acc_by_pos:
+                                                    acc_df = pd.DataFrame([
+                                                        {
+                                                            'Position': pos,
+                                                            'Count': stats['count'],
+                                                            'MAE': f"{stats['mae']:.1f}",
+                                                            'Bias': f"{stats['bias']:+.1f}",
+                                                            'Hit Rate ±20': f"{stats.get('hit_rate_20', 0):.1f}%"
+                                                        }
+                                                        for pos, stats in acc_by_pos.items()
+                                                    ])
+                                                    st.dataframe(acc_df, use_container_width=True, hide_index=True)
+                                                else:
+                                                    st.caption("No accuracy data available")
+                                        except Exception as e:
+                                            st.error(f"Error loading details: {e}")
+                            except Exception as e:
+                                st.error(f"Error checking data: {e}")
 
             else:
                 st.info("📭 No projection snapshots saved yet. Go to **Team Comparison → View 2** to create your first snapshot!")

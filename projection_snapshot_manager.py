@@ -418,9 +418,12 @@ class ProjectionSnapshotManager:
             cursor = conn.cursor()
 
             players_updated = 0
+            players_checked = 0
+            players_not_found = []
 
             # Update QB actuals
             for qb in snapshot['player_projections']['QB']:
+                players_checked += 1
                 actual_stats = self._get_actual_stats(
                     qb['player_name'],
                     qb['team'],
@@ -445,10 +448,13 @@ class ProjectionSnapshotManager:
                         snapshot_id, qb['player_name'], qb['team']
                     ))
                     players_updated += 1
+                else:
+                    players_not_found.append(f"QB {qb['player_name']} ({qb['team']})")
 
             # Update player actuals (RB, WR, TE)
             for position in ['RB', 'WR', 'TE']:
                 for player in snapshot['player_projections'][position]:
+                    players_checked += 1
                     actual_stats = self._get_actual_stats(
                         player['player_name'],
                         player['team'],
@@ -474,18 +480,33 @@ class ProjectionSnapshotManager:
                             snapshot_id, player['player_name'], player['team']
                         ))
                         players_updated += 1
+                    else:
+                        players_not_found.append(f"{position} {player['player_name']} ({player['team']})")
 
-            # Mark snapshot as completed
-            cursor.execute("""
-                UPDATE projection_snapshots
-                SET status = 'completed', game_completed = TRUE
-                WHERE snapshot_id = ?
-            """, (snapshot_id,))
+            # Log diagnostic info
+            logging.info(f"Update actuals summary for {snapshot_id}:")
+            logging.info(f"  Checked: {players_checked} players")
+            logging.info(f"  Found: {players_updated} players")
+            logging.info(f"  Not found: {len(players_not_found)} players")
+            if players_not_found and len(players_not_found) <= 10:
+                logging.info(f"  Missing players: {', '.join(players_not_found)}")
+
+            # Only mark snapshot as completed if we actually updated some players
+            if players_updated > 0:
+                cursor.execute("""
+                    UPDATE projection_snapshots
+                    SET status = 'completed', game_completed = TRUE
+                    WHERE snapshot_id = ?
+                """, (snapshot_id,))
+                status_msg = f"Updated {players_updated} players - marked as completed"
+            else:
+                # Keep as pending if no stats were found
+                status_msg = f"No player stats found in database yet - keeping as pending"
 
             conn.commit()
             conn.close()
 
-            logging.info(f"Updated actuals for {players_updated} players in snapshot {snapshot_id}")
+            logging.info(f"{status_msg} for snapshot {snapshot_id}")
             return True, players_updated
 
         except Exception as e:

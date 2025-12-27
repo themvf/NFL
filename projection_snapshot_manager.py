@@ -376,6 +376,82 @@ class ProjectionSnapshotManager:
             logging.error(f"Error listing snapshots: {e}")
             return pd.DataFrame()
 
+    def delete_snapshots_by_week(self, season: int, week: int) -> Tuple[bool, int]:
+        """
+        Delete all projection snapshots for a given season/week.
+
+        Removes snapshots from both database and GCS to allow fresh snapshots
+        to be created (e.g., after injury updates).
+
+        Args:
+            season: Season year
+            week: Week number
+
+        Returns:
+            Tuple of (success, count_deleted)
+        """
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+
+            # Get all snapshots for this week (to get GCS paths)
+            cursor.execute("""
+                SELECT snapshot_id, gcs_path
+                FROM projection_snapshots
+                WHERE season = ? AND week = ?
+            """, (season, week))
+            snapshots = cursor.fetchall()
+
+            if not snapshots:
+                conn.close()
+                return True, 0
+
+            # Delete from GCS
+            deleted_gcs = 0
+            if self.gcs_client:
+                for snapshot_id, gcs_path in snapshots:
+                    try:
+                        blob = self.bucket.blob(gcs_path)
+                        if blob.exists():
+                            blob.delete()
+                            deleted_gcs += 1
+                            logging.info(f"Deleted GCS snapshot: {gcs_path}")
+                    except Exception as e:
+                        logging.warning(f"Failed to delete GCS blob {gcs_path}: {e}")
+
+            # Delete from projection_accuracy table
+            cursor.execute("""
+                DELETE FROM projection_accuracy
+                WHERE season = ? AND week = ?
+            """, (season, week))
+
+            # Delete from team_projection_accuracy table
+            cursor.execute("""
+                DELETE FROM team_projection_accuracy
+                WHERE snapshot_id IN (
+                    SELECT snapshot_id FROM projection_snapshots
+                    WHERE season = ? AND week = ?
+                )
+            """, (season, week))
+
+            # Delete from projection_snapshots table
+            cursor.execute("""
+                DELETE FROM projection_snapshots
+                WHERE season = ? AND week = ?
+            """, (season, week))
+
+            conn.commit()
+            conn.close()
+
+            count_deleted = len(snapshots)
+            logging.info(f"Deleted {count_deleted} snapshots for Season {season}, Week {week} ({deleted_gcs} from GCS)")
+            return True, count_deleted
+
+        except Exception as e:
+            error_msg = f"Error deleting snapshots for S{season} W{week}: {e}"
+            logging.error(error_msg)
+            return False, 0
+
     def load_snapshot(self, snapshot_id: str) -> Optional[dict]:
         """
         Load a projection snapshot from GCS.

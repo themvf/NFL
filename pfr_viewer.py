@@ -19811,6 +19811,188 @@ def render_projections_vs_actuals():
     init_projection_snapshots_table()
 
     # ============================================================================
+    # Section: Batch Snapshot Creation
+    # ============================================================================
+
+    st.markdown("## 💾 Batch Snapshot Creation")
+    st.caption("Save projection snapshots for all matchups in a week with one click")
+
+    col_batch_season, col_batch_week, col_batch_strategy, col_batch_action = st.columns([1, 1, 1, 2])
+
+    with col_batch_season:
+        batch_season = st.selectbox(
+            "Season",
+            [2025, 2024, 2023],
+            index=0,
+            key="batch_season"
+        )
+
+    with col_batch_week:
+        batch_week = st.selectbox(
+            "Week",
+            list(range(1, 19)),
+            index=17,  # Default to Week 18
+            key="batch_week"
+        )
+
+    with col_batch_strategy:
+        batch_strategy = st.selectbox(
+            "Strategy",
+            ["neutral", "aggressive", "conservative"],
+            index=0,
+            key="batch_strategy",
+            help="Projection strategy: neutral (balanced), aggressive (higher ceilings), conservative (higher floors)"
+        )
+
+    with col_batch_action:
+        st.markdown("")  # Spacing
+        if st.button(f"📸 Save All Week {batch_week} Snapshots", type="primary", use_container_width=True,
+                    help="Generate and save projection snapshots for all matchups this week (overwrites existing)"):
+            with st.spinner(f"Generating snapshots for Week {batch_week}..."):
+                try:
+                    # Initialize projection snapshot manager
+                    if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+                        import importlib
+                        import projection_snapshot_manager as psm
+                        importlib.reload(psm)
+                        proj_snapshot_mgr = psm.ProjectionSnapshotManager(
+                            db_path=str(DB_PATH),
+                            bucket_name=GCS_BUCKET_NAME,
+                            service_account_dict=dict(st.secrets["gcs_service_account"])
+                        )
+
+                        # Delete existing snapshots for this week (to allow overwrites)
+                        success, count_deleted = proj_snapshot_mgr.delete_snapshots_by_week(batch_season, batch_week)
+                        if count_deleted > 0:
+                            st.info(f"🗑️ Deleted {count_deleted} existing snapshots for Week {batch_week}")
+
+                        # Get schedule for this week
+                        conn = sqlite3.connect(DB_PATH)
+                        schedule_query = """
+                            SELECT DISTINCT home_team, away_team
+                            FROM schedules
+                            WHERE season = ? AND week = ?
+                        """
+                        schedule_df = pd.read_sql_query(schedule_query, conn, params=(batch_season, batch_week))
+                        conn.close()
+
+                        if schedule_df.empty:
+                            st.warning(f"⚠️ No games found for Season {batch_season}, Week {batch_week}")
+                        else:
+                            # Progress tracking
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            total_games = len(schedule_df)
+                            snapshots_created = 0
+                            errors = []
+
+                            # Process each matchup
+                            for idx, row in schedule_df.iterrows():
+                                home_team = row['home_team']
+                                away_team = row['away_team']
+
+                                status_text.text(f"Processing {idx + 1}/{total_games}: {away_team} @ {home_team}...")
+
+                                try:
+                                    # Generate projections for this matchup
+                                    away_proj, away_players, away_qb, home_proj, home_players, home_qb = cpe.project_matchup(
+                                        away_team=away_team,
+                                        home_team=home_team,
+                                        season=batch_season,
+                                        week=batch_week,
+                                        vegas_total=None,  # Use default
+                                        spread_line=None,  # Use default
+                                        strategy=batch_strategy,
+                                        high_pace=False  # Use default
+                                    )
+
+                                    # Apply injury redistribution
+                                    away_players, away_qb, away_has_injuries = redistribute_closed_system_projections(
+                                        away_players, away_qb, away_proj, away_team, batch_season, batch_week
+                                    )
+                                    home_players, home_qb, home_has_injuries = redistribute_closed_system_projections(
+                                        home_players, home_qb, home_proj, home_team, batch_season, batch_week
+                                    )
+
+                                    # Collect injury context
+                                    injury_context = {
+                                        away_team: [p.player_name for p in away_players if hasattr(p, 'injured') and p.injured],
+                                        home_team: [p.player_name for p in home_players if hasattr(p, 'injured') and p.injured]
+                                    }
+
+                                    # Create snapshot
+                                    success, message = proj_snapshot_mgr.create_snapshot(
+                                        season=batch_season,
+                                        week=batch_week,
+                                        home_team=home_team,
+                                        away_team=away_team,
+                                        settings={
+                                            'strategy': batch_strategy,
+                                            'high_pace': False,
+                                            'vegas_total': None,
+                                            'spread_line': None
+                                        },
+                                        team_projections={
+                                            away_team: away_proj,
+                                            home_team: home_proj
+                                        },
+                                        player_projections={
+                                            away_team: away_players,
+                                            home_team: home_players
+                                        },
+                                        qb_projections={
+                                            away_team: away_qb,
+                                            home_team: home_qb
+                                        },
+                                        injury_context=injury_context
+                                    )
+
+                                    if success:
+                                        snapshots_created += 1
+                                    else:
+                                        errors.append(f"{away_team}@{home_team}: {message[:50]}")
+
+                                except Exception as e:
+                                    errors.append(f"{away_team}@{home_team}: {str(e)[:50]}")
+
+                                # Update progress
+                                progress_bar.progress((idx + 1) / total_games)
+
+                            # Show results
+                            progress_bar.empty()
+                            status_text.empty()
+
+                            if snapshots_created == total_games:
+                                st.success(f"✅ Created {snapshots_created} snapshots for Week {batch_week}!")
+                                st.balloons()
+                            elif snapshots_created > 0:
+                                st.warning(f"⚠️ Created {snapshots_created}/{total_games} snapshots. {len(errors)} failed.")
+                                if errors:
+                                    with st.expander("View Errors"):
+                                        for err in errors:
+                                            st.text(err)
+                            else:
+                                st.error(f"❌ Failed to create snapshots. Check errors below.")
+                                for err in errors:
+                                    st.text(err)
+
+                            # Wait a moment before rerunning
+                            import time
+                            time.sleep(1)
+                            st.rerun()
+
+                    else:
+                        st.error("❌ GCS not configured")
+
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+                    import traceback
+                    with st.expander("🔍 Debug Info"):
+                        st.code(traceback.format_exc())
+
+    st.divider()
+
+    # ============================================================================
     # Section: Projection Accuracy Tracker
     # ============================================================================
 

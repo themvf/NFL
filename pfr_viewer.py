@@ -10860,8 +10860,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 with col_info:
                     # Check if snapshot already exists for this matchup
                     try:
-                        # Import projection snapshot manager
+                        # Import projection snapshot manager (force reload to avoid caching)
+                        import importlib
                         import projection_snapshot_manager as psm
+                        importlib.reload(psm)
 
                         # Get GCS credentials
                         gcs_bucket = st.secrets.get("gcs_bucket_name") if "gcs_bucket_name" in st.secrets else None
@@ -19795,7 +19797,9 @@ def render_projections_vs_actuals():
                     try:
                         # Initialize projection snapshot manager
                         if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+                            import importlib
                             import projection_snapshot_manager as psm
+                            importlib.reload(psm)
                             proj_snapshot_mgr = psm.ProjectionSnapshotManager(
                                 db_path=str(DB_PATH),
                                 bucket_name=GCS_BUCKET_NAME,
@@ -20059,7 +20063,9 @@ def render_projections_vs_actuals():
         proj_snapshot_mgr = None
         if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
             try:
+                import importlib
                 import projection_snapshot_manager as psm
+                importlib.reload(psm)
                 proj_snapshot_mgr = psm.ProjectionSnapshotManager(
                     db_path=str(DB_PATH),
                     bucket_name=GCS_BUCKET_NAME,
@@ -21301,7 +21307,9 @@ Description: {inj_description if inj_description else 'None'}
             proj_snapshot_mgr = None
             if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
                 try:
+                    import importlib
                     import projection_snapshot_manager as psm
+                    importlib.reload(psm)
                     proj_snapshot_mgr = psm.ProjectionSnapshotManager(
                         db_path=str(DB_PATH),
                         bucket_name=GCS_BUCKET_NAME,

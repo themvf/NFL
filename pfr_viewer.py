@@ -758,6 +758,7 @@ def init_projection_accuracy_table():
         cursor.execute("PRAGMA table_info(projection_accuracy)")
         columns = [row[1] for row in cursor.fetchall()]
 
+        # Metadata columns
         if 'snapshot_id' not in columns:
             cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN snapshot_id TEXT")
         if 'in_range' not in columns:
@@ -768,6 +769,58 @@ def init_projection_accuracy_table():
             cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_p10 REAL")
         if 'projected_p90' not in columns:
             cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_p90 REAL")
+
+        # Projected component stats
+        if 'projected_pass_att' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_pass_att INTEGER")
+        if 'projected_completions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_completions REAL")
+        if 'projected_pass_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_pass_yds REAL")
+        if 'projected_pass_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_pass_tds REAL")
+        if 'projected_interceptions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_interceptions REAL")
+        if 'projected_rush_att' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_rush_att INTEGER")
+        if 'projected_rush_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_rush_yds REAL")
+        if 'projected_rush_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_rush_tds REAL")
+        if 'projected_targets' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_targets REAL")
+        if 'projected_receptions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_receptions REAL")
+        if 'projected_rec_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_rec_yds REAL")
+        if 'projected_rec_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN projected_rec_tds REAL")
+
+        # Actual component stats
+        if 'actual_pass_att' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_pass_att INTEGER")
+        if 'actual_completions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_completions INTEGER")
+        if 'actual_pass_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_pass_yds REAL")
+        if 'actual_pass_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_pass_tds INTEGER")
+        if 'actual_interceptions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_interceptions INTEGER")
+        if 'actual_rush_att' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_rush_att INTEGER")
+        if 'actual_rush_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_rush_yds REAL")
+        if 'actual_rush_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_rush_tds INTEGER")
+        if 'actual_targets' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_targets INTEGER")
+        if 'actual_receptions' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_receptions INTEGER")
+        if 'actual_rec_yds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_rec_yds REAL")
+        if 'actual_rec_tds' not in columns:
+            cursor.execute("ALTER TABLE projection_accuracy ADD COLUMN actual_rec_tds INTEGER")
 
         conn.commit()
         conn.close()

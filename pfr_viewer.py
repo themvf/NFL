@@ -20511,86 +20511,172 @@ def render_projections_vs_actuals():
         # Get detailed projection data
         conn2 = sqlite3.connect(DB_PATH)
 
+        # Enhanced query with all component stats
         if show_only_actuals:
             table_query = """
                 SELECT
-                    player_name,
-                    team_abbr,
-                    opponent_abbr,
-                    position,
-                    projected_yds,
-                    actual_yds,
-                    variance,
-                    ABS(variance) as abs_error,
-                    game_played,
-                    snapshot_id
+                    player_name, team_abbr, opponent_abbr, position,
+
+                    -- Total yards (for reference)
+                    projected_yds, actual_yds, variance,
+
+                    -- QB/Player passing
+                    projected_pass_att, actual_pass_att,
+                    projected_completions, actual_completions,
+                    projected_pass_yds, actual_pass_yds,
+                    projected_pass_tds, actual_pass_tds,
+                    projected_interceptions, actual_interceptions,
+
+                    -- Rushing
+                    projected_rush_att, actual_rush_att,
+                    projected_rush_yds, actual_rush_yds,
+                    projected_rush_tds, actual_rush_tds,
+
+                    -- Receiving
+                    projected_targets, actual_targets,
+                    projected_receptions, actual_receptions,
+                    projected_rec_yds, actual_rec_yds,
+                    projected_rec_tds, actual_rec_tds,
+
+                    game_played, snapshot_id
                 FROM projection_accuracy
                 WHERE season = ? AND week = ?
                 AND actual_yds IS NOT NULL
-                ORDER BY ABS(variance) DESC
+                ORDER BY position, ABS(variance) DESC
             """
         else:
             table_query = """
                 SELECT
-                    player_name,
-                    team_abbr,
-                    opponent_abbr,
-                    position,
-                    projected_yds,
-                    actual_yds,
-                    variance,
-                    ABS(variance) as abs_error,
-                    game_played,
-                    snapshot_id
+                    player_name, team_abbr, opponent_abbr, position,
+
+                    -- Total yards (for reference)
+                    projected_yds, actual_yds, variance,
+
+                    -- QB/Player passing
+                    projected_pass_att, actual_pass_att,
+                    projected_completions, actual_completions,
+                    projected_pass_yds, actual_pass_yds,
+                    projected_pass_tds, actual_pass_tds,
+                    projected_interceptions, actual_interceptions,
+
+                    -- Rushing
+                    projected_rush_att, actual_rush_att,
+                    projected_rush_yds, actual_rush_yds,
+                    projected_rush_tds, actual_rush_tds,
+
+                    -- Receiving
+                    projected_targets, actual_targets,
+                    projected_receptions, actual_receptions,
+                    projected_rec_yds, actual_rec_yds,
+                    projected_rec_tds, actual_rec_tds,
+
+                    game_played, snapshot_id
                 FROM projection_accuracy
                 WHERE season = ? AND week = ?
                 ORDER BY
                     CASE WHEN actual_yds IS NULL THEN 1 ELSE 0 END,
-                    ABS(variance) DESC
+                    position, ABS(variance) DESC
             """
 
         table_df = pd.read_sql_query(table_query, conn2, params=(track_season, track_week))
         conn2.close()
 
         if not table_df.empty:
-            # Format the display
-            display_df = table_df.copy()
+            # Display position-specific tables with relevant component stats
+            for position in ['QB', 'RB', 'WR', 'TE']:
+                pos_df = table_df[table_df['position'] == position].copy()
 
-            # Add status column
-            display_df['Status'] = display_df.apply(
-                lambda row: '✅ Complete' if pd.notna(row['actual_yds']) else '⏳ Pending',
-                axis=1
-            )
+                if not pos_df.empty:
+                    st.markdown(f"### {position}s")
 
-            # Rename columns
-            display_df = display_df.rename(columns={
-                'player_name': 'Player',
-                'team_abbr': 'Team',
-                'opponent_abbr': 'Opponent',
-                'position': 'Pos',
-                'projected_yds': 'Proj Yds',
-                'actual_yds': 'Actual Yds',
-                'variance': 'Error',
-                'abs_error': 'Abs Error'
-            })
+                    # Add status column
+                    pos_df['Status'] = pos_df.apply(
+                        lambda row: '✅' if pd.notna(row['actual_yds']) else '⏳',
+                        axis=1
+                    )
 
-            # Select and reorder columns
-            display_df = display_df[[
-                'Player', 'Team', 'Opponent', 'Pos', 'Status',
-                'Proj Yds', 'Actual Yds', 'Error', 'Abs Error'
-            ]]
+                    # Position-specific column selection and renaming
+                    if position == 'QB':
+                        # QB: Show passing + rushing stats
+                        display_cols = {
+                            'player_name': 'Player',
+                            'team_abbr': 'Team',
+                            'Status': 'Status',
+                            'projected_pass_att': 'Proj Att',
+                            'actual_pass_att': 'Act Att',
+                            'projected_completions': 'Proj Cmp',
+                            'actual_completions': 'Act Cmp',
+                            'projected_pass_yds': 'Proj Pass Yds',
+                            'actual_pass_yds': 'Act Pass Yds',
+                            'projected_pass_tds': 'Proj Pass TD',
+                            'actual_pass_tds': 'Act Pass TD',
+                            'projected_rush_att': 'Proj Rush',
+                            'actual_rush_att': 'Act Rush',
+                            'projected_rush_yds': 'Proj Rush Yds',
+                            'actual_rush_yds': 'Act Rush Yds',
+                            'projected_yds': 'Proj Total',
+                            'actual_yds': 'Act Total',
+                            'variance': 'Error'
+                        }
 
-            # Round numeric columns
-            for col in ['Proj Yds', 'Actual Yds', 'Error', 'Abs Error']:
-                display_df[col] = pd.to_numeric(display_df[col], errors='coerce').round(1)
+                    elif position == 'RB':
+                        # RB: Show rushing + receiving stats
+                        display_cols = {
+                            'player_name': 'Player',
+                            'team_abbr': 'Team',
+                            'Status': 'Status',
+                            'projected_rush_att': 'Proj Carr',
+                            'actual_rush_att': 'Act Carr',
+                            'projected_rush_yds': 'Proj Rush Yds',
+                            'actual_rush_yds': 'Act Rush Yds',
+                            'projected_targets': 'Proj Tgt',
+                            'actual_targets': 'Act Tgt',
+                            'projected_receptions': 'Proj Rec',
+                            'actual_receptions': 'Act Rec',
+                            'projected_rec_yds': 'Proj Rec Yds',
+                            'actual_rec_yds': 'Act Rec Yds',
+                            'projected_yds': 'Proj Total',
+                            'actual_yds': 'Act Total',
+                            'variance': 'Error'
+                        }
 
-            # Display table
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True,
-                height=600
-            )
+                    else:  # WR, TE
+                        # WR/TE: Show receiving stats
+                        display_cols = {
+                            'player_name': 'Player',
+                            'team_abbr': 'Team',
+                            'Status': 'Status',
+                            'projected_targets': 'Proj Tgt',
+                            'actual_targets': 'Act Tgt',
+                            'projected_receptions': 'Proj Rec',
+                            'actual_receptions': 'Act Rec',
+                            'projected_rec_yds': 'Proj Rec Yds',
+                            'actual_rec_yds': 'Act Rec Yds',
+                            'projected_rec_tds': 'Proj TD',
+                            'actual_rec_tds': 'Act TD',
+                            'projected_yds': 'Proj Total',
+                            'actual_yds': 'Act Total',
+                            'variance': 'Error'
+                        }
+
+                    # Select relevant columns and rename
+                    available_cols = [col for col in display_cols.keys() if col in pos_df.columns or col == 'Status']
+                    display_df = pos_df[available_cols].rename(columns=display_cols)
+
+                    # Round numeric columns
+                    for col in display_df.columns:
+                        if col not in ['Player', 'Team', 'Status']:
+                            display_df[col] = pd.to_numeric(display_df[col], errors='coerce').round(1)
+
+                    # Display table
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(400, len(display_df) * 35 + 38)  # Dynamic height
+                    )
+
+                    st.caption(f"Showing {len(display_df)} {position} projections")
 
             # Export button
             csv = display_df.to_csv(index=False)

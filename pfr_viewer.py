@@ -20264,6 +20264,27 @@ def render_projections_vs_actuals():
                                     f"{rushing['rush_tds']['bias']:+.2f} bias"
                                 )
 
+                            st.markdown("### ⚡ Efficiency Metrics")
+                            if 'efficiency' in qb_metrics and qb_metrics['efficiency']:
+                                cols = st.columns(2)
+                                efficiency = qb_metrics['efficiency']
+
+                                if 'completion_pct' in efficiency:
+                                    cols[0].metric(
+                                        "Completion %",
+                                        f"MAE: {efficiency['completion_pct']['mae']:.1f}%",
+                                        f"{efficiency['completion_pct']['bias']:+.1f}% bias",
+                                        help="Accuracy of completion percentage projections"
+                                    )
+
+                                if 'yards_per_attempt' in efficiency:
+                                    cols[1].metric(
+                                        "Yards/Attempt",
+                                        f"MAE: {efficiency['yards_per_attempt']['mae']:.2f}",
+                                        f"{efficiency['yards_per_attempt']['bias']:+.2f} bias",
+                                        help="Accuracy of yards per attempt projections"
+                                    )
+
                             st.caption(f"📊 Based on {qb_metrics['count']} QB projections")
                         else:
                             st.info("No QB data available for selected week")
@@ -20320,6 +20341,35 @@ def render_projections_vs_actuals():
                                     f"{receiving['rec_tds']['bias']:+.2f} bias"
                                 )
 
+                            st.markdown("### ⚡ Efficiency Metrics")
+                            if 'efficiency' in rb_metrics and rb_metrics['efficiency']:
+                                cols = st.columns(3)
+                                efficiency = rb_metrics['efficiency']
+
+                                if 'yards_per_carry' in efficiency:
+                                    cols[0].metric(
+                                        "Yards/Carry",
+                                        f"MAE: {efficiency['yards_per_carry']['mae']:.2f}",
+                                        f"{efficiency['yards_per_carry']['bias']:+.2f} bias",
+                                        help="Accuracy of yards per carry projections"
+                                    )
+
+                                if 'catch_rate' in efficiency:
+                                    cols[1].metric(
+                                        "Catch Rate %",
+                                        f"MAE: {efficiency['catch_rate']['mae']:.1f}%",
+                                        f"{efficiency['catch_rate']['bias']:+.1f}% bias",
+                                        help="Accuracy of catch rate (receptions/targets) projections"
+                                    )
+
+                                if 'yards_per_reception' in efficiency:
+                                    cols[2].metric(
+                                        "Yards/Reception",
+                                        f"MAE: {efficiency['yards_per_reception']['mae']:.2f}",
+                                        f"{efficiency['yards_per_reception']['bias']:+.2f} bias",
+                                        help="Accuracy of yards per reception projections"
+                                    )
+
                             st.caption(f"📊 Based on {rb_metrics['count']} RB projections")
                         else:
                             st.info("No RB data available for selected week")
@@ -20355,6 +20405,27 @@ def render_projections_vs_actuals():
                                     f"{receiving['rec_tds']['bias']:+.2f} bias"
                                 )
 
+                            st.markdown("### ⚡ Efficiency Metrics")
+                            if 'efficiency' in wr_metrics and wr_metrics['efficiency']:
+                                cols = st.columns(2)
+                                efficiency = wr_metrics['efficiency']
+
+                                if 'catch_rate' in efficiency:
+                                    cols[0].metric(
+                                        "Catch Rate %",
+                                        f"MAE: {efficiency['catch_rate']['mae']:.1f}%",
+                                        f"{efficiency['catch_rate']['bias']:+.1f}% bias",
+                                        help="Accuracy of catch rate (receptions/targets) projections"
+                                    )
+
+                                if 'yards_per_reception' in efficiency:
+                                    cols[1].metric(
+                                        "Yards/Reception",
+                                        f"MAE: {efficiency['yards_per_reception']['mae']:.2f}",
+                                        f"{efficiency['yards_per_reception']['bias']:+.2f} bias",
+                                        help="Accuracy of yards per reception projections"
+                                    )
+
                             st.caption(f"📊 Based on {wr_metrics['count']} WR projections")
                         else:
                             st.info("No WR data available for selected week")
@@ -20389,6 +20460,27 @@ def render_projections_vs_actuals():
                                     f"MAE: {receiving['rec_tds']['mae']:.2f}",
                                     f"{receiving['rec_tds']['bias']:+.2f} bias"
                                 )
+
+                            st.markdown("### ⚡ Efficiency Metrics")
+                            if 'efficiency' in te_metrics and te_metrics['efficiency']:
+                                cols = st.columns(2)
+                                efficiency = te_metrics['efficiency']
+
+                                if 'catch_rate' in efficiency:
+                                    cols[0].metric(
+                                        "Catch Rate %",
+                                        f"MAE: {efficiency['catch_rate']['mae']:.1f}%",
+                                        f"{efficiency['catch_rate']['bias']:+.1f}% bias",
+                                        help="Accuracy of catch rate (receptions/targets) projections"
+                                    )
+
+                                if 'yards_per_reception' in efficiency:
+                                    cols[1].metric(
+                                        "Yards/Reception",
+                                        f"MAE: {efficiency['yards_per_reception']['mae']:.2f}",
+                                        f"{efficiency['yards_per_reception']['bias']:+.2f} bias",
+                                        help="Accuracy of yards per reception projections"
+                                    )
 
                             st.caption(f"📊 Based on {te_metrics['count']} TE projections")
                         else:

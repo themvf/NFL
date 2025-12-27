@@ -989,6 +989,228 @@ class ProjectionSnapshotManager:
                     'count': int(row['count'])
                 }
 
+            # ==================================================================
+            # EFFICIENCY METRICS (Derived from component stats)
+            # ==================================================================
+
+            # --- QB EFFICIENCY ---
+            if 'QB' in overall_metrics['by_position']:
+                qb_eff_where = where_clause + " AND position = 'QB' AND projected_pass_att > 0 AND actual_pass_att > 0"
+                qb_eff_params = params.copy()
+
+                qb_eff_query = f"""
+                    SELECT
+                        -- Projected efficiency
+                        AVG(CAST(projected_completions AS REAL) / NULLIF(projected_pass_att, 0) * 100) as proj_comp_pct,
+                        AVG(projected_pass_yds / NULLIF(projected_pass_att, 0)) as proj_ypa,
+
+                        -- Actual efficiency
+                        AVG(CAST(actual_completions AS REAL) / NULLIF(actual_pass_att, 0) * 100) as actual_comp_pct,
+                        AVG(actual_pass_yds / NULLIF(actual_pass_att, 0)) as actual_ypa,
+
+                        -- Individual differences for MAE/bias
+                        AVG(ABS((CAST(actual_completions AS REAL) / NULLIF(actual_pass_att, 0) * 100) -
+                                (CAST(projected_completions AS REAL) / NULLIF(projected_pass_att, 0) * 100))) as comp_pct_mae,
+                        AVG((CAST(actual_completions AS REAL) / NULLIF(actual_pass_att, 0) * 100) -
+                            (CAST(projected_completions AS REAL) / NULLIF(projected_pass_att, 0) * 100)) as comp_pct_bias,
+
+                        AVG(ABS((actual_pass_yds / NULLIF(actual_pass_att, 0)) -
+                                (projected_pass_yds / NULLIF(projected_pass_att, 0)))) as ypa_mae,
+                        AVG((actual_pass_yds / NULLIF(actual_pass_att, 0)) -
+                            (projected_pass_yds / NULLIF(projected_pass_att, 0))) as ypa_bias
+
+                    FROM projection_accuracy
+                    WHERE {qb_eff_where}
+                """
+
+                qb_eff_result = pd.read_sql_query(qb_eff_query, conn, params=qb_eff_params if qb_eff_params else None)
+
+                if not qb_eff_result.empty and qb_eff_result.iloc[0]['proj_comp_pct'] is not None:
+                    row = qb_eff_result.iloc[0]
+                    overall_metrics['by_position']['QB']['efficiency'] = {
+                        'completion_pct': {
+                            'mae': float(row['comp_pct_mae'] or 0),
+                            'bias': float(row['comp_pct_bias'] or 0)
+                        },
+                        'yards_per_attempt': {
+                            'mae': float(row['ypa_mae'] or 0),
+                            'bias': float(row['ypa_bias'] or 0)
+                        }
+                    }
+
+            # --- RB EFFICIENCY ---
+            if 'RB' in overall_metrics['by_position']:
+                # Yards per carry
+                rb_ypc_where = where_clause + " AND position = 'RB' AND projected_rush_att > 0 AND actual_rush_att > 0"
+                rb_ypc_params = params.copy()
+
+                rb_ypc_query = f"""
+                    SELECT
+                        AVG(ABS((actual_rush_yds / NULLIF(actual_rush_att, 0)) -
+                                (projected_rush_yds / NULLIF(projected_rush_att, 0)))) as ypc_mae,
+                        AVG((actual_rush_yds / NULLIF(actual_rush_att, 0)) -
+                            (projected_rush_yds / NULLIF(projected_rush_att, 0))) as ypc_bias
+                    FROM projection_accuracy
+                    WHERE {rb_ypc_where}
+                """
+
+                rb_ypc_result = pd.read_sql_query(rb_ypc_query, conn, params=rb_ypc_params if rb_ypc_params else None)
+
+                # Catch rate
+                rb_catch_where = where_clause + " AND position = 'RB' AND projected_targets > 0 AND actual_targets > 0"
+                rb_catch_params = params.copy()
+
+                rb_catch_query = f"""
+                    SELECT
+                        AVG(ABS((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                                (projected_receptions / NULLIF(projected_targets, 0) * 100))) as catch_rate_mae,
+                        AVG((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                            (projected_receptions / NULLIF(projected_targets, 0) * 100)) as catch_rate_bias
+                    FROM projection_accuracy
+                    WHERE {rb_catch_where}
+                """
+
+                rb_catch_result = pd.read_sql_query(rb_catch_query, conn, params=rb_catch_params if rb_catch_params else None)
+
+                # Yards per reception
+                rb_ypr_where = where_clause + " AND position = 'RB' AND projected_receptions > 0 AND actual_receptions > 0"
+                rb_ypr_params = params.copy()
+
+                rb_ypr_query = f"""
+                    SELECT
+                        AVG(ABS((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                                (projected_rec_yds / NULLIF(projected_receptions, 0)))) as ypr_mae,
+                        AVG((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                            (projected_rec_yds / NULLIF(projected_receptions, 0))) as ypr_bias
+                    FROM projection_accuracy
+                    WHERE {rb_ypr_where}
+                """
+
+                rb_ypr_result = pd.read_sql_query(rb_ypr_query, conn, params=rb_ypr_params if rb_ypr_params else None)
+
+                overall_metrics['by_position']['RB']['efficiency'] = {}
+
+                if not rb_ypc_result.empty and rb_ypc_result.iloc[0]['ypc_mae'] is not None:
+                    row = rb_ypc_result.iloc[0]
+                    overall_metrics['by_position']['RB']['efficiency']['yards_per_carry'] = {
+                        'mae': float(row['ypc_mae'] or 0),
+                        'bias': float(row['ypc_bias'] or 0)
+                    }
+
+                if not rb_catch_result.empty and rb_catch_result.iloc[0]['catch_rate_mae'] is not None:
+                    row = rb_catch_result.iloc[0]
+                    overall_metrics['by_position']['RB']['efficiency']['catch_rate'] = {
+                        'mae': float(row['catch_rate_mae'] or 0),
+                        'bias': float(row['catch_rate_bias'] or 0)
+                    }
+
+                if not rb_ypr_result.empty and rb_ypr_result.iloc[0]['ypr_mae'] is not None:
+                    row = rb_ypr_result.iloc[0]
+                    overall_metrics['by_position']['RB']['efficiency']['yards_per_reception'] = {
+                        'mae': float(row['ypr_mae'] or 0),
+                        'bias': float(row['ypr_bias'] or 0)
+                    }
+
+            # --- WR EFFICIENCY ---
+            if 'WR' in overall_metrics['by_position']:
+                # Catch rate
+                wr_catch_where = where_clause + " AND position = 'WR' AND projected_targets > 0 AND actual_targets > 0"
+                wr_catch_params = params.copy()
+
+                wr_catch_query = f"""
+                    SELECT
+                        AVG(ABS((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                                (projected_receptions / NULLIF(projected_targets, 0) * 100))) as catch_rate_mae,
+                        AVG((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                            (projected_receptions / NULLIF(projected_targets, 0) * 100)) as catch_rate_bias
+                    FROM projection_accuracy
+                    WHERE {wr_catch_where}
+                """
+
+                wr_catch_result = pd.read_sql_query(wr_catch_query, conn, params=wr_catch_params if wr_catch_params else None)
+
+                # Yards per reception
+                wr_ypr_where = where_clause + " AND position = 'WR' AND projected_receptions > 0 AND actual_receptions > 0"
+                wr_ypr_params = params.copy()
+
+                wr_ypr_query = f"""
+                    SELECT
+                        AVG(ABS((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                                (projected_rec_yds / NULLIF(projected_receptions, 0)))) as ypr_mae,
+                        AVG((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                            (projected_rec_yds / NULLIF(projected_receptions, 0))) as ypr_bias
+                    FROM projection_accuracy
+                    WHERE {wr_ypr_where}
+                """
+
+                wr_ypr_result = pd.read_sql_query(wr_ypr_query, conn, params=wr_ypr_params if wr_ypr_params else None)
+
+                overall_metrics['by_position']['WR']['efficiency'] = {}
+
+                if not wr_catch_result.empty and wr_catch_result.iloc[0]['catch_rate_mae'] is not None:
+                    row = wr_catch_result.iloc[0]
+                    overall_metrics['by_position']['WR']['efficiency']['catch_rate'] = {
+                        'mae': float(row['catch_rate_mae'] or 0),
+                        'bias': float(row['catch_rate_bias'] or 0)
+                    }
+
+                if not wr_ypr_result.empty and wr_ypr_result.iloc[0]['ypr_mae'] is not None:
+                    row = wr_ypr_result.iloc[0]
+                    overall_metrics['by_position']['WR']['efficiency']['yards_per_reception'] = {
+                        'mae': float(row['ypr_mae'] or 0),
+                        'bias': float(row['ypr_bias'] or 0)
+                    }
+
+            # --- TE EFFICIENCY ---
+            if 'TE' in overall_metrics['by_position']:
+                # Catch rate
+                te_catch_where = where_clause + " AND position = 'TE' AND projected_targets > 0 AND actual_targets > 0"
+                te_catch_params = params.copy()
+
+                te_catch_query = f"""
+                    SELECT
+                        AVG(ABS((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                                (projected_receptions / NULLIF(projected_targets, 0) * 100))) as catch_rate_mae,
+                        AVG((CAST(actual_receptions AS REAL) / NULLIF(actual_targets, 0) * 100) -
+                            (projected_receptions / NULLIF(projected_targets, 0) * 100)) as catch_rate_bias
+                    FROM projection_accuracy
+                    WHERE {te_catch_where}
+                """
+
+                te_catch_result = pd.read_sql_query(te_catch_query, conn, params=te_catch_params if te_catch_params else None)
+
+                # Yards per reception
+                te_ypr_where = where_clause + " AND position = 'TE' AND projected_receptions > 0 AND actual_receptions > 0"
+                te_ypr_params = params.copy()
+
+                te_ypr_query = f"""
+                    SELECT
+                        AVG(ABS((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                                (projected_rec_yds / NULLIF(projected_receptions, 0)))) as ypr_mae,
+                        AVG((actual_rec_yds / NULLIF(actual_receptions, 0)) -
+                            (projected_rec_yds / NULLIF(projected_receptions, 0))) as ypr_bias
+                    FROM projection_accuracy
+                    WHERE {te_ypr_where}
+                """
+
+                te_ypr_result = pd.read_sql_query(te_ypr_query, conn, params=te_ypr_params if te_ypr_params else None)
+
+                overall_metrics['by_position']['TE']['efficiency'] = {}
+
+                if not te_catch_result.empty and te_catch_result.iloc[0]['catch_rate_mae'] is not None:
+                    row = te_catch_result.iloc[0]
+                    overall_metrics['by_position']['TE']['efficiency']['catch_rate'] = {
+                        'mae': float(row['catch_rate_mae'] or 0),
+                        'bias': float(row['catch_rate_bias'] or 0)
+                    }
+
+                if not te_ypr_result.empty and te_ypr_result.iloc[0]['ypr_mae'] is not None:
+                    row = te_ypr_result.iloc[0]
+                    overall_metrics['by_position']['TE']['efficiency']['yards_per_reception'] = {
+                        'mae': float(row['ypr_mae'] or 0),
+                        'bias': float(row['ypr_bias'] or 0)
+                    }
+
             conn.close()
             return overall_metrics
 

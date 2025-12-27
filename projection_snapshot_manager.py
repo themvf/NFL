@@ -207,6 +207,62 @@ class ProjectionSnapshotManager:
             # COMMIT the DELETE before INSERT to ensure it's not rolled back on error
             conn.commit()
 
+            # ============================================================
+            # DELETE OLD SNAPSHOTS FOR THIS MATCHUP
+            # ============================================================
+            # Find existing snapshots for this matchup (either team order)
+            cursor.execute("""
+                SELECT snapshot_id, gcs_path
+                FROM projection_snapshots
+                WHERE season = ? AND week = ?
+                AND ((home_team = ? AND away_team = ?) OR (home_team = ? AND away_team = ?))
+            """, (season, week, home_team, away_team, away_team, home_team))
+
+            old_snapshots = cursor.fetchall()
+
+            if old_snapshots:
+                logging.info(f"Found {len(old_snapshots)} old snapshot(s) for Week {week} {away_team} vs {home_team}")
+
+                # Delete old GCS files
+                for old_snapshot_id, old_gcs_path in old_snapshots:
+                    try:
+                        old_blob = self.bucket.blob(old_gcs_path)
+                        if old_blob.exists():
+                            old_blob.delete()
+                            logging.info(f"  Deleted old GCS file: {old_gcs_path}")
+                        else:
+                            logging.warning(f"  Old GCS file not found: {old_gcs_path}")
+                    except Exception as gcs_err:
+                        logging.error(f"  Failed to delete old GCS file {old_gcs_path}: {gcs_err}")
+
+                # Delete old team_projection_accuracy records
+                cursor.execute("""
+                    DELETE FROM team_projection_accuracy
+                    WHERE snapshot_id IN (
+                        SELECT snapshot_id FROM projection_snapshots
+                        WHERE season = ? AND week = ?
+                        AND ((home_team = ? AND away_team = ?) OR (home_team = ? AND away_team = ?))
+                    )
+                """, (season, week, home_team, away_team, away_team, home_team))
+
+                deleted_team_count = cursor.rowcount
+                logging.info(f"  Deleted {deleted_team_count} old team projection records")
+
+                # Delete old projection_snapshots metadata
+                cursor.execute("""
+                    DELETE FROM projection_snapshots
+                    WHERE season = ? AND week = ?
+                    AND ((home_team = ? AND away_team = ?) OR (home_team = ? AND away_team = ?))
+                """, (season, week, home_team, away_team, away_team, home_team))
+
+                deleted_snapshot_count = cursor.rowcount
+                logging.info(f"  Deleted {deleted_snapshot_count} old snapshot metadata records")
+
+                conn.commit()
+
+            # ============================================================
+            # INSERT NEW SNAPSHOT
+            # ============================================================
             cursor.execute("""
                 INSERT INTO projection_snapshots (
                     snapshot_id, season, week, home_team, away_team,

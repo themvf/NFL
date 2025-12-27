@@ -239,6 +239,16 @@ class ProjectionSnapshotManager:
                     total_yards = qb_proj.projected_pass_yards + qb_proj.projected_rush_yards
 
                     try:
+                        # Extract QB rushing attempts (using 'projected_carries' attribute)
+                        try:
+                            rush_attempts = int(qb_proj.projected_carries)
+                        except AttributeError as attr_err:
+                            # Diagnostic: Show available attributes if error occurs
+                            available_attrs = [attr for attr in dir(qb_proj) if not attr.startswith('_')]
+                            error_msg = f"QB object missing 'projected_carries'. Available attributes: {available_attrs}"
+                            logging.error(error_msg)
+                            raise Exception(error_msg)
+
                         cursor.execute("""
                             INSERT INTO projection_accuracy (
                                 player_name, team_abbr, opponent_abbr, season, week,
@@ -254,7 +264,7 @@ class ProjectionSnapshotManager:
                             qb_proj.projected_pass_att, qb_proj.projected_completions,
                             qb_proj.projected_pass_yards, qb_proj.projected_pass_tds,
                             qb_proj.projected_interceptions,
-                            int(qb_proj.projected_carries), qb_proj.projected_rush_yards,
+                            rush_attempts, qb_proj.projected_rush_yards,
                             qb_proj.projected_rush_tds
                         ))
                     except sqlite3.IntegrityError as e:

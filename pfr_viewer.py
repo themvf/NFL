@@ -10573,12 +10573,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 st.write(f"**{away_qb.player_name}**")
                             st.write(f"**Passing:** {away_qb.projected_pass_att} att, "
-                                     f"{away_qb.projected_completions:.1f} comp ({away_qb.projected_completion_pct:.1f}%), "
-                                     f"{away_qb.projected_pass_yards:.1f} yds")
-                            st.write(f"**Pass TDs:** {away_qb.projected_pass_tds:.1f} | **INTs:** {away_qb.projected_interceptions:.1f} | **YPA:** {away_qb.projected_ypa:.2f}")
+                                     f"{away_qb.projected_completions:.0f} comp ({away_qb.projected_completion_pct:.1f}%), "
+                                     f"{away_qb.projected_pass_yards:.0f} yds")
+                            st.write(f"**Pass TDs:** {away_qb.projected_pass_tds:.0f} | **INTs:** {away_qb.projected_interceptions:.0f} | **YPA:** {away_qb.projected_ypa:.2f}")
                         with qb_col2:
                             if away_qb.projected_carries > 0:
-                                st.write(f"**Rushing:** {away_qb.projected_carries:.1f} carries, {away_qb.projected_rush_yards:.1f} yds ({away_qb.projected_ypc:.2f} YPC)")
+                                st.write(f"**Rushing:** {away_qb.projected_carries:.0f} carries, {away_qb.projected_rush_yards:.0f} yds ({away_qb.projected_ypc:.2f} YPC)")
                                 st.caption("Mobile QB")
                             else:
                                 st.caption("Pocket Passer")
@@ -10604,14 +10604,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             rb_data.append({
                                 'Player': player_display,
-                                'Carries': f"{rb.projected_carries:.1f}",
+                                'Carries': f"{rb.projected_carries:.0f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
-                                'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Rush Yds': f"{rb.projected_rush_yards:.0f}",
                                 'Range (P10-P90)': f"{rb.projected_rush_yards_p10:.0f}-{rb.projected_rush_yards_p90:.0f}",
-                                'Targets': f"{rb.projected_targets:.1f}",
-                                'Rec': f"{rb.projected_receptions:.1f}",
-                                'Rec Yds': f"{rb.projected_recv_yards:.1f}",
-                                'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'Targets': f"{rb.projected_targets:.0f}",
+                                'Rec': f"{rb.projected_receptions:.0f}",
+                                'Rec Yds': f"{rb.projected_recv_yards:.0f}",
+                                'Total Yds': f"{rb.projected_total_yards:.0f}",
                                 'Vol': volatility,
                                 'DVOA': f"{rb.dvoa_pct:+.1f}%"
                             })
@@ -10644,11 +10644,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             rec_data.append({
                                 'Player': player_display,
                                 'Pos': rec.position,
-                                'Targets': f"{rec.projected_targets:.1f}",
-                                'Rec': f"{rec.projected_receptions:.1f}",
+                                'Targets': f"{rec.projected_targets:.0f}",
+                                'Rec': f"{rec.projected_receptions:.0f}",
                                 'YPT': f"{rec.projected_ypt:.2f}",
                                 'YPR': f"{rec.projected_ypr:.2f}",
-                                'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'Rec Yds': f"{rec.projected_recv_yards:.0f}",
                                 'Range (P10-P90)': f"{rec.projected_recv_yards_p10:.0f}-{rec.projected_recv_yards_p90:.0f}",
                                 'Vol': volatility,
                                 'DVOA': f"{rec.dvoa_pct:+.1f}%"
@@ -10658,8 +10658,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                         # Conservation check
                         total_rec_targets = sum(p.projected_targets for p in away_players if p.position in ['WR', 'TE', 'RB'])
                         total_rec_yds = sum(p.projected_recv_yards for p in away_players if p.position in ['WR', 'TE', 'RB'])
-                        st.caption(f"✓ Conservation: {total_rec_targets:.1f} targets ≈ {away_proj.total_targets} (team), "
-                                   f"{total_rec_yds:.1f} yds = {away_proj.pass_yards_anchor:.1f} (anchor)")
+                        st.caption(f"✓ Conservation: {total_rec_targets:.0f} targets ≈ {away_proj.total_targets} (team), "
+                                   f"{total_rec_yds:.0f} yds = {away_proj.pass_yards_anchor:.0f} (anchor)")
 
                     st.divider()
 
@@ -10747,12 +10747,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             else:
                                 st.write(f"**{home_qb.player_name}**")
                             st.write(f"**Passing:** {home_qb.projected_pass_att} att, "
-                                     f"{home_qb.projected_completions:.1f} comp ({home_qb.projected_completion_pct:.1f}%), "
-                                     f"{home_qb.projected_pass_yards:.1f} yds")
-                            st.write(f"**Pass TDs:** {home_qb.projected_pass_tds:.1f} | **INTs:** {home_qb.projected_interceptions:.1f} | **YPA:** {home_qb.projected_ypa:.2f}")
+                                     f"{home_qb.projected_completions:.0f} comp ({home_qb.projected_completion_pct:.1f}%), "
+                                     f"{home_qb.projected_pass_yards:.0f} yds")
+                            st.write(f"**Pass TDs:** {home_qb.projected_pass_tds:.0f} | **INTs:** {home_qb.projected_interceptions:.0f} | **YPA:** {home_qb.projected_ypa:.2f}")
                         with qb_col2:
                             if home_qb.projected_carries > 0:
-                                st.write(f"**Rushing:** {home_qb.projected_carries:.1f} carries, {home_qb.projected_rush_yards:.1f} yds ({home_qb.projected_ypc:.2f} YPC)")
+                                st.write(f"**Rushing:** {home_qb.projected_carries:.0f} carries, {home_qb.projected_rush_yards:.0f} yds ({home_qb.projected_ypc:.2f} YPC)")
                                 st.caption("Mobile QB")
                             else:
                                 st.caption("Pocket Passer")
@@ -10778,14 +10778,14 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
                             rb_data.append({
                                 'Player': player_display,
-                                'Carries': f"{rb.projected_carries:.1f}",
+                                'Carries': f"{rb.projected_carries:.0f}",
                                 'YPC': f"{rb.projected_ypc:.2f}",
-                                'Rush Yds': f"{rb.projected_rush_yards:.1f}",
+                                'Rush Yds': f"{rb.projected_rush_yards:.0f}",
                                 'Range (P10-P90)': f"{rb.projected_rush_yards_p10:.0f}-{rb.projected_rush_yards_p90:.0f}",
-                                'Targets': f"{rb.projected_targets:.1f}",
-                                'Rec': f"{rb.projected_receptions:.1f}",
-                                'Rec Yds': f"{rb.projected_recv_yards:.1f}",
-                                'Total Yds': f"{rb.projected_total_yards:.1f}",
+                                'Targets': f"{rb.projected_targets:.0f}",
+                                'Rec': f"{rb.projected_receptions:.0f}",
+                                'Rec Yds': f"{rb.projected_recv_yards:.0f}",
+                                'Total Yds': f"{rb.projected_total_yards:.0f}",
                                 'Vol': volatility,
                                 'DVOA': f"{rb.dvoa_pct:+.1f}%"
                             })
@@ -10818,11 +10818,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                             rec_data.append({
                                 'Player': player_display,
                                 'Pos': rec.position,
-                                'Targets': f"{rec.projected_targets:.1f}",
-                                'Rec': f"{rec.projected_receptions:.1f}",
+                                'Targets': f"{rec.projected_targets:.0f}",
+                                'Rec': f"{rec.projected_receptions:.0f}",
                                 'YPT': f"{rec.projected_ypt:.2f}",
                                 'YPR': f"{rec.projected_ypr:.2f}",
-                                'Rec Yds': f"{rec.projected_recv_yards:.1f}",
+                                'Rec Yds': f"{rec.projected_recv_yards:.0f}",
                                 'Range (P10-P90)': f"{rec.projected_recv_yards_p10:.0f}-{rec.projected_recv_yards_p90:.0f}",
                                 'Vol': volatility,
                                 'DVOA': f"{rec.dvoa_pct:+.1f}%"
@@ -14096,12 +14096,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"### {team1} RBs (Away)")
                 if away_projs:
                     for proj in away_projs[:3]:  # Top 3 RBs
-                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.1f} total yards", expanded=True):
+                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.0f} total yards", expanded=True):
                             # Summary metrics
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
-                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
-                            m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.0f}")
+                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.0f}")
+                            m3.metric("Total Yards", f"{proj.projected_total_yards:.0f}")
 
                             # Adjustment Controls
                             st.markdown("---")
@@ -14179,12 +14179,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                               'Projected Team Rush', 'Rush Share', 'Projected Carries',
                                               'League Avg YPC', 'RB Rush DVOA', 'DEF Rush DVOA',
                                               'Projected YPC', '**RUSH YARDS**'],
-                                'Value': [f"{proj.baseline_carries:.1f}", f"{proj.team_rush_base:.1f}",
-                                         f"{proj.spread_adjustment:+.1f}",
-                                         f"{proj.projected_team_rush:.1f}", f"{proj.rush_share:.1%}",
-                                         f"{proj.projected_carries:.1f}", f"{proj.league_avg_ypc:.2f}",
+                                'Value': [f"{proj.baseline_carries:.0f}", f"{proj.team_rush_base:.0f}",
+                                         f"{proj.spread_adjustment:+.0f}",
+                                         f"{proj.projected_team_rush:.0f}", f"{proj.rush_share:.1%}",
+                                         f"{proj.projected_carries:.0f}", f"{proj.league_avg_ypc:.2f}",
                                          f"{proj.rb_rush_dvoa:+.1f}%", f"{proj.def_rush_dvoa:+.1f}%",
-                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.1f}**"]
+                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.0f}**"]
                             }
                             st.dataframe(pd.DataFrame(rush_data), hide_index=True, use_container_width=True)
 
@@ -14194,11 +14194,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                               'Projected Targets', 'Catch Rate', 'League Avg Y/Tgt',
                                               'RB Recv DVOA', 'DEF Pass DVOA', 'Projected Y/Tgt',
                                               '**RECV YARDS**'],
-                                'Value': [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
-                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.1f}",
+                                'Value': [f"{proj.baseline_targets:.0f}", f"{proj.team_target_base:.0f}",
+                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.0f}",
                                          f"{proj.catch_rate:.1%}", f"{proj.league_avg_ypt:.2f}",
                                          f"{proj.rb_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
-                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.1f}**"]
+                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.0f}**"]
                             }
                             st.dataframe(pd.DataFrame(recv_data), hide_index=True, use_container_width=True)
                 else:
@@ -14208,12 +14208,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"### {team2} RBs (Home)")
                 if home_projs:
                     for proj in home_projs[:3]:  # Top 3 RBs
-                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.1f} total yards", expanded=True):
+                        with st.expander(f"**{proj.player_name}** - {proj.projected_total_yards:.0f} total yards", expanded=True):
                             # Summary metrics
                             m1, m2, m3 = st.columns(3)
-                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.1f}")
-                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.1f}")
-                            m3.metric("Total Yards", f"{proj.projected_total_yards:.1f}")
+                            m1.metric("Rush Yards", f"{proj.projected_rush_yards:.0f}")
+                            m2.metric("Recv Yards", f"{proj.projected_recv_yards:.0f}")
+                            m3.metric("Total Yards", f"{proj.projected_total_yards:.0f}")
 
                             # Adjustment Controls
                             st.markdown("---")
@@ -14295,12 +14295,12 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                               'Projected Team Rush', 'Rush Share', 'Projected Carries',
                                               'League Avg YPC', 'RB Rush DVOA', 'DEF Rush DVOA',
                                               'Projected YPC', '**RUSH YARDS**'],
-                                'Value': [f"{proj.baseline_carries:.1f}", f"{proj.team_rush_base:.1f}",
-                                         f"{proj.spread_adjustment:+.1f}",
-                                         f"{proj.projected_team_rush:.1f}", f"{proj.rush_share:.1%}",
-                                         f"{proj.projected_carries:.1f}", f"{proj.league_avg_ypc:.2f}",
+                                'Value': [f"{proj.baseline_carries:.0f}", f"{proj.team_rush_base:.0f}",
+                                         f"{proj.spread_adjustment:+.0f}",
+                                         f"{proj.projected_team_rush:.0f}", f"{proj.rush_share:.1%}",
+                                         f"{proj.projected_carries:.0f}", f"{proj.league_avg_ypc:.2f}",
                                          f"{proj.rb_rush_dvoa:+.1f}%", f"{proj.def_rush_dvoa:+.1f}%",
-                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.1f}**"]
+                                         f"{proj.projected_ypc:.2f}", f"**{proj.projected_rush_yards:.0f}**"]
                             }
                             st.dataframe(pd.DataFrame(rush_data), hide_index=True, use_container_width=True)
 
@@ -14310,11 +14310,11 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                                               'Projected Targets', 'Catch Rate', 'League Avg Y/Tgt',
                                               'RB Recv DVOA', 'DEF Pass DVOA', 'Projected Y/Tgt',
                                               '**RECV YARDS**'],
-                                'Value': [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
-                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.1f}",
+                                'Value': [f"{proj.baseline_targets:.0f}", f"{proj.team_target_base:.0f}",
+                                         f"{proj.target_share:.1%}", f"{proj.projected_targets:.0f}",
                                          f"{proj.catch_rate:.1%}", f"{proj.league_avg_ypt:.2f}",
                                          f"{proj.rb_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
-                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.1f}**"]
+                                         f"{proj.projected_ypt:.2f}", f"**{proj.projected_recv_yards:.0f}**"]
                             }
                             st.dataframe(pd.DataFrame(recv_data), hide_index=True, use_container_width=True)
                 else:
@@ -14352,17 +14352,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"### {team1} WRs (Away)")
 
                 for proj in away_wr_projs:
-                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.1f} total yards"):
+                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.0f} total yards"):
                         st.markdown("**📊 BASE PROJECTION**")
                         base_data = {
                             "Metric": ["Baseline Tgts", "Team Base", "Tgt Share %", "Spread Adj", "Proj Tgts",
                                        "League YPT", "WR DVOA", "DEF DVOA", "Proj YPT", "Catch Rate", "**Proj Yds**"],
-                            "Value": [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
-                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.1f}",
-                                     f"{proj.projected_targets:.1f}", f"{proj.league_avg_ypt:.2f}",
+                            "Value": [f"{proj.baseline_targets:.0f}", f"{proj.team_target_base:.0f}",
+                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.0f}",
+                                     f"{proj.projected_targets:.0f}", f"{proj.league_avg_ypt:.2f}",
                                      f"{proj.wr_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
                                      f"{proj.projected_ypt:.2f}", f"{proj.catch_rate:.1%}",
-                                     f"**{proj.projected_recv_yards:.1f}**"]
+                                     f"**{proj.projected_recv_yards:.0f}**"]
                         }
                         st.dataframe(pd.DataFrame(base_data), hide_index=True, use_container_width=True)
 
@@ -14420,17 +14420,17 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                 st.markdown(f"### {team2} WRs (Home)")
 
                 for proj in home_wr_projs:
-                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.1f} total yards"):
+                    with st.expander(f"**{proj.player_name}** - {proj.projected_recv_yards:.0f} total yards"):
                         st.markdown("**📊 BASE PROJECTION**")
                         base_data = {
                             "Metric": ["Baseline Tgts", "Team Base", "Tgt Share %", "Spread Adj", "Proj Tgts",
                                        "League YPT", "WR DVOA", "DEF DVOA", "Proj YPT", "Catch Rate", "**Proj Yds**"],
-                            "Value": [f"{proj.baseline_targets:.1f}", f"{proj.team_target_base:.1f}",
-                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.1f}",
-                                     f"{proj.projected_targets:.1f}", f"{proj.league_avg_ypt:.2f}",
+                            "Value": [f"{proj.baseline_targets:.0f}", f"{proj.team_target_base:.0f}",
+                                     f"{proj.target_share:.1%}", f"{proj.spread_adjustment:+.0f}",
+                                     f"{proj.projected_targets:.0f}", f"{proj.league_avg_ypt:.2f}",
                                      f"{proj.wr_recv_dvoa:+.1f}%", f"{proj.def_pass_dvoa:+.1f}%",
                                      f"{proj.projected_ypt:.2f}", f"{proj.catch_rate:.1%}",
-                                     f"**{proj.projected_recv_yards:.1f}**"]
+                                     f"**{proj.projected_recv_yards:.0f}**"]
                         }
                         st.dataframe(pd.DataFrame(base_data), hide_index=True, use_container_width=True)
 
@@ -20663,10 +20663,10 @@ def render_projections_vs_actuals():
                     available_cols = [col for col in display_cols.keys() if col in pos_df.columns or col == 'Status']
                     display_df = pos_df[available_cols].rename(columns=display_cols)
 
-                    # Round numeric columns
+                    # Round numeric columns to whole numbers (can't have fractional yards/attempts/TDs)
                     for col in display_df.columns:
                         if col not in ['Player', 'Team', 'Status']:
-                            display_df[col] = pd.to_numeric(display_df[col], errors='coerce').round(1)
+                            display_df[col] = pd.to_numeric(display_df[col], errors='coerce').round(0)
 
                     # Display table
                     st.dataframe(

@@ -20175,6 +20175,239 @@ def render_projections_vs_actuals():
         st.divider()
 
         # ============================================================================
+        # Section: Component Accuracy Breakdown
+        # ============================================================================
+
+        st.markdown("## 🎯 Component Accuracy Breakdown")
+        st.caption("Detailed accuracy metrics for each stat component by position")
+
+        if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+            try:
+                import importlib
+                import projection_snapshot_manager as psm
+                importlib.reload(psm)
+                proj_snapshot_mgr = psm.ProjectionSnapshotManager(
+                    db_path=str(DB_PATH),
+                    bucket_name=GCS_BUCKET_NAME,
+                    service_account_dict=dict(st.secrets["gcs_service_account"])
+                )
+
+                # Get comprehensive metrics
+                comp_metrics = proj_snapshot_mgr.calculate_accuracy_metrics(
+                    season=track_season,
+                    week=track_week
+                )
+
+                if comp_metrics and 'by_position' in comp_metrics and comp_metrics['by_position']:
+                    # Position tabs
+                    pos_tabs = st.tabs(["QB", "RB", "WR", "TE"])
+
+                    # --- QB TAB ---
+                    with pos_tabs[0]:
+                        if 'QB' in comp_metrics['by_position']:
+                            qb_metrics = comp_metrics['by_position']['QB']
+
+                            st.markdown("### 🏈 Passing Stats")
+                            if 'passing' in qb_metrics:
+                                cols = st.columns(5)
+                                passing = qb_metrics['passing']
+
+                                cols[0].metric(
+                                    "Pass Attempts",
+                                    f"MAE: {passing['pass_att']['mae']:.1f}",
+                                    f"{passing['pass_att']['bias']:+.1f} bias",
+                                    help="Lower MAE is better. Positive bias = over-projecting attempts"
+                                )
+                                cols[1].metric(
+                                    "Completions",
+                                    f"MAE: {passing['completions']['mae']:.1f}",
+                                    f"{passing['completions']['bias']:+.1f} bias",
+                                    help="Accuracy of completion projections"
+                                )
+                                cols[2].metric(
+                                    "Pass Yards",
+                                    f"MAE: {passing['pass_yds']['mae']:.1f}",
+                                    f"{passing['pass_yds']['bias']:+.1f} bias",
+                                    help="Passing yards accuracy"
+                                )
+                                cols[3].metric(
+                                    "Pass TDs",
+                                    f"MAE: {passing['pass_tds']['mae']:.2f}",
+                                    f"{passing['pass_tds']['bias']:+.2f} bias",
+                                    help="Touchdown projection accuracy"
+                                )
+                                cols[4].metric(
+                                    "Interceptions",
+                                    f"MAE: {passing['interceptions']['mae']:.2f}",
+                                    f"{passing['interceptions']['bias']:+.2f} bias",
+                                    help="Interception projection accuracy"
+                                )
+
+                            st.markdown("### 🏃 Rushing Stats")
+                            if 'rushing' in qb_metrics:
+                                cols = st.columns(3)
+                                rushing = qb_metrics['rushing']
+
+                                cols[0].metric(
+                                    "Rush Attempts",
+                                    f"MAE: {rushing['rush_att']['mae']:.1f}",
+                                    f"{rushing['rush_att']['bias']:+.1f} bias"
+                                )
+                                cols[1].metric(
+                                    "Rush Yards",
+                                    f"MAE: {rushing['rush_yds']['mae']:.1f}",
+                                    f"{rushing['rush_yds']['bias']:+.1f} bias"
+                                )
+                                cols[2].metric(
+                                    "Rush TDs",
+                                    f"MAE: {rushing['rush_tds']['mae']:.2f}",
+                                    f"{rushing['rush_tds']['bias']:+.2f} bias"
+                                )
+
+                            st.caption(f"📊 Based on {qb_metrics['count']} QB projections")
+                        else:
+                            st.info("No QB data available for selected week")
+
+                    # --- RB TAB ---
+                    with pos_tabs[1]:
+                        if 'RB' in comp_metrics['by_position']:
+                            rb_metrics = comp_metrics['by_position']['RB']
+
+                            st.markdown("### 🏃 Rushing Stats")
+                            if 'rushing' in rb_metrics:
+                                cols = st.columns(3)
+                                rushing = rb_metrics['rushing']
+
+                                cols[0].metric(
+                                    "Rush Attempts",
+                                    f"MAE: {rushing['rush_att']['mae']:.1f}",
+                                    f"{rushing['rush_att']['bias']:+.1f} bias"
+                                )
+                                cols[1].metric(
+                                    "Rush Yards",
+                                    f"MAE: {rushing['rush_yds']['mae']:.1f}",
+                                    f"{rushing['rush_yds']['bias']:+.1f} bias"
+                                )
+                                cols[2].metric(
+                                    "Rush TDs",
+                                    f"MAE: {rushing['rush_tds']['mae']:.2f}",
+                                    f"{rushing['rush_tds']['bias']:+.2f} bias"
+                                )
+
+                            st.markdown("### 🎯 Receiving Stats")
+                            if 'receiving' in rb_metrics:
+                                cols = st.columns(4)
+                                receiving = rb_metrics['receiving']
+
+                                cols[0].metric(
+                                    "Targets",
+                                    f"MAE: {receiving['targets']['mae']:.1f}",
+                                    f"{receiving['targets']['bias']:+.1f} bias"
+                                )
+                                cols[1].metric(
+                                    "Receptions",
+                                    f"MAE: {receiving['receptions']['mae']:.1f}",
+                                    f"{receiving['receptions']['bias']:+.1f} bias"
+                                )
+                                cols[2].metric(
+                                    "Rec Yards",
+                                    f"MAE: {receiving['rec_yds']['mae']:.1f}",
+                                    f"{receiving['rec_yds']['bias']:+.1f} bias"
+                                )
+                                cols[3].metric(
+                                    "Rec TDs",
+                                    f"MAE: {receiving['rec_tds']['mae']:.2f}",
+                                    f"{receiving['rec_tds']['bias']:+.2f} bias"
+                                )
+
+                            st.caption(f"📊 Based on {rb_metrics['count']} RB projections")
+                        else:
+                            st.info("No RB data available for selected week")
+
+                    # --- WR TAB ---
+                    with pos_tabs[2]:
+                        if 'WR' in comp_metrics['by_position']:
+                            wr_metrics = comp_metrics['by_position']['WR']
+
+                            st.markdown("### 🎯 Receiving Stats")
+                            if 'receiving' in wr_metrics:
+                                cols = st.columns(4)
+                                receiving = wr_metrics['receiving']
+
+                                cols[0].metric(
+                                    "Targets",
+                                    f"MAE: {receiving['targets']['mae']:.1f}",
+                                    f"{receiving['targets']['bias']:+.1f} bias"
+                                )
+                                cols[1].metric(
+                                    "Receptions",
+                                    f"MAE: {receiving['receptions']['mae']:.1f}",
+                                    f"{receiving['receptions']['bias']:+.1f} bias"
+                                )
+                                cols[2].metric(
+                                    "Rec Yards",
+                                    f"MAE: {receiving['rec_yds']['mae']:.1f}",
+                                    f"{receiving['rec_yds']['bias']:+.1f} bias"
+                                )
+                                cols[3].metric(
+                                    "Rec TDs",
+                                    f"MAE: {receiving['rec_tds']['mae']:.2f}",
+                                    f"{receiving['rec_tds']['bias']:+.2f} bias"
+                                )
+
+                            st.caption(f"📊 Based on {wr_metrics['count']} WR projections")
+                        else:
+                            st.info("No WR data available for selected week")
+
+                    # --- TE TAB ---
+                    with pos_tabs[3]:
+                        if 'TE' in comp_metrics['by_position']:
+                            te_metrics = comp_metrics['by_position']['TE']
+
+                            st.markdown("### 🎯 Receiving Stats")
+                            if 'receiving' in te_metrics:
+                                cols = st.columns(4)
+                                receiving = te_metrics['receiving']
+
+                                cols[0].metric(
+                                    "Targets",
+                                    f"MAE: {receiving['targets']['mae']:.1f}",
+                                    f"{receiving['targets']['bias']:+.1f} bias"
+                                )
+                                cols[1].metric(
+                                    "Receptions",
+                                    f"MAE: {receiving['receptions']['mae']:.1f}",
+                                    f"{receiving['receptions']['bias']:+.1f} bias"
+                                )
+                                cols[2].metric(
+                                    "Rec Yards",
+                                    f"MAE: {receiving['rec_yds']['mae']:.1f}",
+                                    f"{receiving['rec_yds']['bias']:+.1f} bias"
+                                )
+                                cols[3].metric(
+                                    "Rec TDs",
+                                    f"MAE: {receiving['rec_tds']['mae']:.2f}",
+                                    f"{receiving['rec_tds']['bias']:+.2f} bias"
+                                )
+
+                            st.caption(f"📊 Based on {te_metrics['count']} TE projections")
+                        else:
+                            st.info("No TE data available for selected week")
+
+                else:
+                    st.info("No component metrics available. Save projections and fetch actuals first!")
+
+            except Exception as e:
+                st.warning(f"⚠️ Unable to load component metrics: {str(e)[:100]}")
+                with st.expander("Debug Info"):
+                    import traceback
+                    st.code(traceback.format_exc())
+        else:
+            st.warning("⚠️ GCS not configured - component metrics unavailable")
+
+        st.divider()
+
+        # ============================================================================
         # Section: Predictions Table
         # ============================================================================
 

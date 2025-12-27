@@ -731,95 +731,281 @@ class ProjectionSnapshotManager:
         position: Optional[str] = None
     ) -> dict:
         """
-        Calculate aggregate accuracy metrics.
+        Calculate comprehensive accuracy metrics for all component stats.
 
         Args:
             season: Filter by season
             week: Filter by week
-            position: Filter by position
+            position: Filter by position (if None, calculates for all positions)
 
         Returns:
-            Dict with MAE, RMSE, bias, hit_rate, etc.
+            Dict with nested structure:
+            {
+                'overall': {
+                    'total_yds': {'mae': X, 'rmse': X, 'bias': X, 'hit_rate_20': X},
+                    'count': X
+                },
+                'by_position': {
+                    'QB': {'passing': {...}, 'rushing': {...}, 'count': X},
+                    'RB': {'rushing': {...}, 'receiving': {...}, 'count': X},
+                    ...
+                }
+            }
         """
         try:
             conn = sqlite3.connect(self.db_path)
 
-            query = """
+            # Build base WHERE clause
+            where_conditions = ["game_played = TRUE", "actual_yds IS NOT NULL"]
+            params = []
+
+            if season is not None:
+                where_conditions.append("season = ?")
+                params.append(season)
+
+            if week is not None:
+                where_conditions.append("week = ?")
+                params.append(week)
+
+            if position is not None:
+                where_conditions.append("position = ?")
+                params.append(position)
+
+            where_clause = " AND ".join(where_conditions)
+
+            # ==================================================================
+            # OVERALL METRICS (Total Yards - backwards compatible)
+            # ==================================================================
+            overall_query = f"""
                 SELECT
                     projected_yds,
                     actual_yds,
                     variance,
-                    in_range,
-                    position
+                    in_range
                 FROM projection_accuracy
-                WHERE game_played = TRUE
-                  AND actual_yds IS NOT NULL
+                WHERE {where_clause}
             """
-            params = []
 
-            if season is not None:
-                query += " AND season = ?"
-                params.append(season)
+            df_overall = pd.read_sql_query(overall_query, conn, params=params if params else None)
 
-            if week is not None:
-                query += " AND week = ?"
-                params.append(week)
-
-            if position is not None:
-                query += " AND position = ?"
-                params.append(position)
-
-            df = pd.read_sql_query(query, conn, params=params if params else None)
-            conn.close()
-
-            if df.empty:
+            if df_overall.empty:
+                conn.close()
                 return {
-                    "mae": 0,
-                    "rmse": 0,
-                    "bias": 0,
-                    "hit_rate_10": 0,
-                    "hit_rate_20": 0,
-                    "hit_rate_30": 0,
-                    "range_accuracy": 0,
-                    "total_projections": 0
+                    "overall": {
+                        "total_yds": {
+                            "mae": 0, "rmse": 0, "bias": 0,
+                            "hit_rate_10": 0, "hit_rate_20": 0, "hit_rate_30": 0,
+                            "range_accuracy": 0
+                        },
+                        "count": 0
+                    },
+                    "by_position": {}
                 }
 
-            # Calculate metrics
-            errors = df['variance'].abs()
-            mae = errors.mean()
-            rmse = np.sqrt((df['variance'] ** 2).mean())
-            bias = df['variance'].mean()
-
-            # Hit rates
-            hit_rate_10 = (errors <= 10).sum() / len(errors) * 100
-            hit_rate_20 = (errors <= 20).sum() / len(errors) * 100
-            hit_rate_30 = (errors <= 30).sum() / len(errors) * 100
-
-            # Range accuracy (within P10-P90)
-            range_accuracy = df['in_range'].sum() / len(df) * 100 if 'in_range' in df.columns else 0
-
-            return {
-                "mae": float(mae),
-                "rmse": float(rmse),
-                "bias": float(bias),
-                "hit_rate_10": float(hit_rate_10),
-                "hit_rate_20": float(hit_rate_20),
-                "hit_rate_30": float(hit_rate_30),
-                "range_accuracy": float(range_accuracy),
-                "total_projections": len(df)
+            # Calculate overall total yards metrics
+            errors = df_overall['variance'].abs()
+            overall_metrics = {
+                "overall": {
+                    "total_yds": {
+                        "mae": float(errors.mean()),
+                        "rmse": float(np.sqrt((df_overall['variance'] ** 2).mean())),
+                        "bias": float(df_overall['variance'].mean()),
+                        "hit_rate_10": float((errors <= 10).sum() / len(errors) * 100),
+                        "hit_rate_20": float((errors <= 20).sum() / len(errors) * 100),
+                        "hit_rate_30": float((errors <= 30).sum() / len(errors) * 100),
+                        "range_accuracy": float(df_overall['in_range'].sum() / len(df_overall) * 100) if 'in_range' in df_overall.columns else 0
+                    },
+                    "count": len(df_overall)
+                },
+                "by_position": {}
             }
+
+            # ==================================================================
+            # POSITION-SPECIFIC COMPONENT METRICS
+            # ==================================================================
+
+            # --- QB METRICS ---
+            qb_where = where_clause + " AND position = 'QB' AND actual_pass_att IS NOT NULL"
+            qb_params = params.copy()
+
+            qb_query = f"""
+                SELECT
+                    -- Passing stats
+                    AVG(ABS(actual_pass_att - projected_pass_att)) as pass_att_mae,
+                    AVG(actual_pass_att - projected_pass_att) as pass_att_bias,
+                    AVG(ABS(actual_completions - projected_completions)) as completions_mae,
+                    AVG(actual_completions - projected_completions) as completions_bias,
+                    AVG(ABS(actual_pass_yds - projected_pass_yds)) as pass_yds_mae,
+                    AVG(actual_pass_yds - projected_pass_yds) as pass_yds_bias,
+                    AVG(ABS(actual_pass_tds - projected_pass_tds)) as pass_tds_mae,
+                    AVG(actual_pass_tds - projected_pass_tds) as pass_tds_bias,
+                    AVG(ABS(actual_interceptions - projected_interceptions)) as int_mae,
+                    AVG(actual_interceptions - projected_interceptions) as int_bias,
+
+                    -- Rushing stats
+                    AVG(ABS(actual_rush_att - projected_rush_att)) as rush_att_mae,
+                    AVG(actual_rush_att - projected_rush_att) as rush_att_bias,
+                    AVG(ABS(actual_rush_yds - projected_rush_yds)) as rush_yds_mae,
+                    AVG(actual_rush_yds - projected_rush_yds) as rush_yds_bias,
+                    AVG(ABS(actual_rush_tds - projected_rush_tds)) as rush_tds_mae,
+                    AVG(actual_rush_tds - projected_rush_tds) as rush_tds_bias,
+
+                    COUNT(*) as count
+                FROM projection_accuracy
+                WHERE {qb_where}
+            """
+
+            qb_result = pd.read_sql_query(qb_query, conn, params=qb_params if qb_params else None)
+
+            if not qb_result.empty and qb_result['count'].iloc[0] > 0:
+                row = qb_result.iloc[0]
+                overall_metrics['by_position']['QB'] = {
+                    'passing': {
+                        'pass_att': {'mae': float(row['pass_att_mae'] or 0), 'bias': float(row['pass_att_bias'] or 0)},
+                        'completions': {'mae': float(row['completions_mae'] or 0), 'bias': float(row['completions_bias'] or 0)},
+                        'pass_yds': {'mae': float(row['pass_yds_mae'] or 0), 'bias': float(row['pass_yds_bias'] or 0)},
+                        'pass_tds': {'mae': float(row['pass_tds_mae'] or 0), 'bias': float(row['pass_tds_bias'] or 0)},
+                        'interceptions': {'mae': float(row['int_mae'] or 0), 'bias': float(row['int_bias'] or 0)}
+                    },
+                    'rushing': {
+                        'rush_att': {'mae': float(row['rush_att_mae'] or 0), 'bias': float(row['rush_att_bias'] or 0)},
+                        'rush_yds': {'mae': float(row['rush_yds_mae'] or 0), 'bias': float(row['rush_yds_bias'] or 0)},
+                        'rush_tds': {'mae': float(row['rush_tds_mae'] or 0), 'bias': float(row['rush_tds_bias'] or 0)}
+                    },
+                    'count': int(row['count'])
+                }
+
+            # --- RB METRICS ---
+            rb_where = where_clause + " AND position = 'RB' AND actual_rush_att IS NOT NULL"
+            rb_params = params.copy()
+
+            rb_query = f"""
+                SELECT
+                    -- Rushing stats
+                    AVG(ABS(actual_rush_att - projected_rush_att)) as rush_att_mae,
+                    AVG(actual_rush_att - projected_rush_att) as rush_att_bias,
+                    AVG(ABS(actual_rush_yds - projected_rush_yds)) as rush_yds_mae,
+                    AVG(actual_rush_yds - projected_rush_yds) as rush_yds_bias,
+                    AVG(ABS(actual_rush_tds - projected_rush_tds)) as rush_tds_mae,
+                    AVG(actual_rush_tds - projected_rush_tds) as rush_tds_bias,
+
+                    -- Receiving stats
+                    AVG(ABS(actual_targets - projected_targets)) as targets_mae,
+                    AVG(actual_targets - projected_targets) as targets_bias,
+                    AVG(ABS(actual_receptions - projected_receptions)) as receptions_mae,
+                    AVG(actual_receptions - projected_receptions) as receptions_bias,
+                    AVG(ABS(actual_rec_yds - projected_rec_yds)) as rec_yds_mae,
+                    AVG(actual_rec_yds - projected_rec_yds) as rec_yds_bias,
+                    AVG(ABS(actual_rec_tds - projected_rec_tds)) as rec_tds_mae,
+                    AVG(actual_rec_tds - projected_rec_tds) as rec_tds_bias,
+
+                    COUNT(*) as count
+                FROM projection_accuracy
+                WHERE {rb_where}
+            """
+
+            rb_result = pd.read_sql_query(rb_query, conn, params=rb_params if rb_params else None)
+
+            if not rb_result.empty and rb_result['count'].iloc[0] > 0:
+                row = rb_result.iloc[0]
+                overall_metrics['by_position']['RB'] = {
+                    'rushing': {
+                        'rush_att': {'mae': float(row['rush_att_mae'] or 0), 'bias': float(row['rush_att_bias'] or 0)},
+                        'rush_yds': {'mae': float(row['rush_yds_mae'] or 0), 'bias': float(row['rush_yds_bias'] or 0)},
+                        'rush_tds': {'mae': float(row['rush_tds_mae'] or 0), 'bias': float(row['rush_tds_bias'] or 0)}
+                    },
+                    'receiving': {
+                        'targets': {'mae': float(row['targets_mae'] or 0), 'bias': float(row['targets_bias'] or 0)},
+                        'receptions': {'mae': float(row['receptions_mae'] or 0), 'bias': float(row['receptions_bias'] or 0)},
+                        'rec_yds': {'mae': float(row['rec_yds_mae'] or 0), 'bias': float(row['rec_yds_bias'] or 0)},
+                        'rec_tds': {'mae': float(row['rec_tds_mae'] or 0), 'bias': float(row['rec_tds_bias'] or 0)}
+                    },
+                    'count': int(row['count'])
+                }
+
+            # --- WR METRICS ---
+            wr_where = where_clause + " AND position = 'WR' AND actual_targets IS NOT NULL"
+            wr_params = params.copy()
+
+            wr_query = f"""
+                SELECT
+                    AVG(ABS(actual_targets - projected_targets)) as targets_mae,
+                    AVG(actual_targets - projected_targets) as targets_bias,
+                    AVG(ABS(actual_receptions - projected_receptions)) as receptions_mae,
+                    AVG(actual_receptions - projected_receptions) as receptions_bias,
+                    AVG(ABS(actual_rec_yds - projected_rec_yds)) as rec_yds_mae,
+                    AVG(actual_rec_yds - projected_rec_yds) as rec_yds_bias,
+                    AVG(ABS(actual_rec_tds - projected_rec_tds)) as rec_tds_mae,
+                    AVG(actual_rec_tds - projected_rec_tds) as rec_tds_bias,
+                    COUNT(*) as count
+                FROM projection_accuracy
+                WHERE {wr_where}
+            """
+
+            wr_result = pd.read_sql_query(wr_query, conn, params=wr_params if wr_params else None)
+
+            if not wr_result.empty and wr_result['count'].iloc[0] > 0:
+                row = wr_result.iloc[0]
+                overall_metrics['by_position']['WR'] = {
+                    'receiving': {
+                        'targets': {'mae': float(row['targets_mae'] or 0), 'bias': float(row['targets_bias'] or 0)},
+                        'receptions': {'mae': float(row['receptions_mae'] or 0), 'bias': float(row['receptions_bias'] or 0)},
+                        'rec_yds': {'mae': float(row['rec_yds_mae'] or 0), 'bias': float(row['rec_yds_bias'] or 0)},
+                        'rec_tds': {'mae': float(row['rec_tds_mae'] or 0), 'bias': float(row['rec_tds_bias'] or 0)}
+                    },
+                    'count': int(row['count'])
+                }
+
+            # --- TE METRICS ---
+            te_where = where_clause + " AND position = 'TE' AND actual_targets IS NOT NULL"
+            te_params = params.copy()
+
+            te_query = f"""
+                SELECT
+                    AVG(ABS(actual_targets - projected_targets)) as targets_mae,
+                    AVG(actual_targets - projected_targets) as targets_bias,
+                    AVG(ABS(actual_receptions - projected_receptions)) as receptions_mae,
+                    AVG(actual_receptions - projected_receptions) as receptions_bias,
+                    AVG(ABS(actual_rec_yds - projected_rec_yds)) as rec_yds_mae,
+                    AVG(actual_rec_yds - projected_rec_yds) as rec_yds_bias,
+                    AVG(ABS(actual_rec_tds - projected_rec_tds)) as rec_tds_mae,
+                    AVG(actual_rec_tds - projected_rec_tds) as rec_tds_bias,
+                    COUNT(*) as count
+                FROM projection_accuracy
+                WHERE {te_where}
+            """
+
+            te_result = pd.read_sql_query(te_query, conn, params=te_params if te_params else None)
+
+            if not te_result.empty and te_result['count'].iloc[0] > 0:
+                row = te_result.iloc[0]
+                overall_metrics['by_position']['TE'] = {
+                    'receiving': {
+                        'targets': {'mae': float(row['targets_mae'] or 0), 'bias': float(row['targets_bias'] or 0)},
+                        'receptions': {'mae': float(row['receptions_mae'] or 0), 'bias': float(row['receptions_bias'] or 0)},
+                        'rec_yds': {'mae': float(row['rec_yds_mae'] or 0), 'bias': float(row['rec_yds_bias'] or 0)},
+                        'rec_tds': {'mae': float(row['rec_tds_mae'] or 0), 'bias': float(row['rec_tds_bias'] or 0)}
+                    },
+                    'count': int(row['count'])
+                }
+
+            conn.close()
+            return overall_metrics
 
         except Exception as e:
             logging.error(f"Error calculating accuracy metrics: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return {
-                "mae": 0,
-                "rmse": 0,
-                "bias": 0,
-                "hit_rate_10": 0,
-                "hit_rate_20": 0,
-                "hit_rate_30": 0,
-                "range_accuracy": 0,
-                "total_projections": 0
+                "overall": {
+                    "total_yds": {
+                        "mae": 0, "rmse": 0, "bias": 0,
+                        "hit_rate_10": 0, "hit_rate_20": 0, "hit_rate_30": 0,
+                        "range_accuracy": 0
+                    },
+                    "count": 0
+                },
+                "by_position": {}
             }
 
     def get_snapshot_summary(self, snapshot_id: str) -> Optional[dict]:

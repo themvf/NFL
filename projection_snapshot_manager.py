@@ -254,7 +254,7 @@ class ProjectionSnapshotManager:
                             qb_proj.projected_pass_att, qb_proj.projected_completions,
                             qb_proj.projected_pass_yards, qb_proj.projected_pass_tds,
                             qb_proj.projected_interceptions,
-                            qb_proj.projected_rush_att, qb_proj.projected_rush_yards,
+                            int(qb_proj.projected_carries), qb_proj.projected_rush_yards,
                             qb_proj.projected_rush_tds
                         ))
                     except sqlite3.IntegrityError as e:
@@ -290,21 +290,19 @@ class ProjectionSnapshotManager:
                             INSERT INTO projection_accuracy (
                                 player_name, team_abbr, opponent_abbr, season, week,
                                 position, projected_yds, snapshot_id, in_range,
-                                projected_rush_att, projected_rush_yds, projected_rush_tds,
-                                projected_targets, projected_receptions, projected_rec_yds, projected_rec_tds
+                                projected_rush_att, projected_rush_yds,
+                                projected_targets, projected_receptions, projected_rec_yds
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             player.player_name, team_abbr, opponent, season, week,
                             player.position, player.projected_total_yards,
                             snapshot_id, None,  # Will be calculated when actuals are loaded
-                            player.projected_carries if hasattr(player, 'projected_carries') else None,
-                            player.projected_rush_yards if hasattr(player, 'projected_rush_yards') else None,
-                            player.projected_rush_tds if hasattr(player, 'projected_rush_tds') else None,
+                            int(player.projected_carries) if player.projected_carries else None,
+                            player.projected_rush_yards if player.projected_rush_yards else None,
                             player.projected_targets,
                             player.projected_receptions,
-                            player.projected_recv_yards,
-                            player.projected_recv_tds if hasattr(player, 'projected_recv_tds') else None
+                            player.projected_recv_yards
                         ))
                     except sqlite3.IntegrityError as e:
                         error_msg = f"UNIQUE constraint for {player.position} {player.player_name} ({team_abbr}, S{season} W{week}): {e}"
@@ -461,13 +459,13 @@ class ProjectionSnapshotManager:
                         SET actual_yds = ?, variance = ?, game_played = ?,
                             actual_pass_att = ?, actual_completions = ?, actual_pass_yds = ?,
                             actual_pass_tds = ?, actual_interceptions = ?,
-                            actual_rush_att = ?, actual_rush_yds = ?, actual_rush_tds = ?
+                            actual_rush_att = ?, actual_rush_yds = ?
                         WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                     """, (
                         actual, error, actual_stats['game_played'],
                         actual_stats.get('pass_att'), actual_stats.get('completions'), actual_stats.get('pass_yds'),
                         actual_stats.get('pass_tds'), actual_stats.get('interceptions'),
-                        actual_stats.get('rush_att'), actual_stats.get('rush_yds'), actual_stats.get('rush_tds'),
+                        actual_stats.get('rush_att'), actual_stats.get('rush_yds'),
                         snapshot_id, qb['player_name'], qb['team']
                     ))
                     players_updated += 1
@@ -497,13 +495,13 @@ class ProjectionSnapshotManager:
                         cursor.execute("""
                             UPDATE projection_accuracy
                             SET actual_yds = ?, variance = ?, in_range = ?, game_played = ?,
-                                actual_rush_att = ?, actual_rush_yds = ?, actual_rush_tds = ?,
-                                actual_targets = ?, actual_receptions = ?, actual_rec_yds = ?, actual_rec_tds = ?
+                                actual_rush_att = ?, actual_rush_yds = ?,
+                                actual_targets = ?, actual_receptions = ?, actual_rec_yds = ?
                             WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                         """, (
                             actual, error, in_range, actual_stats['game_played'],
-                            actual_stats.get('rush_att'), actual_stats.get('rush_yds'), actual_stats.get('rush_tds'),
-                            actual_stats.get('targets'), actual_stats.get('receptions'), actual_stats.get('rec_yds'), actual_stats.get('rec_tds'),
+                            actual_stats.get('rush_att'), actual_stats.get('rush_yds'),
+                            actual_stats.get('targets'), actual_stats.get('receptions'), actual_stats.get('rec_yds'),
                             snapshot_id, player['player_name'], player['team']
                         ))
                         players_updated += 1

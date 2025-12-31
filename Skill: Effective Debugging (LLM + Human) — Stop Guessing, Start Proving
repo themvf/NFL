@@ -1,0 +1,247 @@
+# Skill: Effective Debugging (LLM + Human) — Stop Guessing, Start Proving
+
+A repeatable, low-token workflow to diagnose bugs quickly, avoid “fix spirals,” and ship stable changes.
+
+---
+
+## 0) Mindset: Debugging is Evidence Collection
+**Rule:** You don’t “fix code.” You **test hypotheses** with **observations**.
+
+- Every claim must be backed by:
+  - a stack trace line number,
+  - a log line,
+  - a minimal repro,
+  - or a diff that directly addresses a verified root cause.
+
+**Anti-patterns to avoid**
+- “It should work now” (no proof)
+- Renaming variables/keys to “reset cache”
+- Fixing the newest error without validating prior behavior
+- Large refactors while the system is unstable
+
+---
+
+## 1) The Debugging Loop (5 Steps)
+
+### Step 1 — Freeze the system
+Goal: Stop changing multiple things at once.
+
+- Create a branch: `debug/<short_issue>`
+- Add a “debug session” header comment in the file with:
+  - error message
+  - date/time
+  - environment (local vs cloud, Python version)
+  - the **exact repro steps**
+
+**Output:** “I can reproduce this on demand.”
+
+---
+
+### Step 2 — Capture the *single* best artifact
+Pick one (in order):
+1. Full stack trace (with file + line)
+2. Structured logs (timestamps)
+3. Minimal failing input
+4. Screenshot of error + UI state
+
+**Rule:** If you can’t reproduce, you’re not debugging; you’re guessing.
+
+---
+
+### Step 3 — Form 1–3 hypotheses (ranked)
+Write them down. Example format:
+
+- H1 (70%): `X is defined twice in same run because…`
+- H2 (20%): `Y is stale/cached because…`
+- H3 (10%): `Z is environment-specific because…`
+
+**Rule:** Don’t exceed 3 hypotheses.
+
+---
+
+### Step 4 — Run the smallest test that can falsify H1
+You’re not proving you’re right—you’re trying to be wrong fast.
+
+- Add a temporary **one-line probe**
+- Or isolate a minimal snippet
+- Or print a single structured debug line
+
+**Good probe examples**
+- “Is this block executing twice?”
+- “What is the value/scope at this line?”
+- “How many widgets are created?”
+
+**Bad probe examples**
+- “Let’s refactor the whole file”
+- “Let’s change three keys and see”
+
+---
+
+### Step 5 — Apply the minimal fix + verify
+A fix is not “done” until you verify:
+
+- The original repro steps no longer fail
+- No new warnings/errors appeared
+- You can explain why it failed and why the fix works
+
+**Verification checklist**
+- ✅ error eliminated
+- ✅ no regressions in adjacent flows
+- ✅ logs look sane
+- ✅ change is minimal and reversible
+
+---
+
+## 2) The “Fix Spiral” Prevention Rules
+
+### One-change rule
+One PR = one root cause.
+
+- If you changed 5 unrelated things, you can’t know what fixed it.
+
+### No “cache resets” without proof
+“Caching issues” are real, but rarely the first diagnosis.
+
+- Prove it with:
+  - versioned artifacts (commit hash, build logs)
+  - known cache behavior docs
+  - repeated behavior across clean runs
+
+### Don’t change identifiers to “make errors go away”
+Renaming keys/variables often just changes the symptom.
+
+---
+
+## 3) Debugging Templates (Copy/Paste)
+
+### A) Debug Note (5 lines)
+- **Bug:**  
+- **Repro:**  
+- **Observed:**  
+- **Hypothesis:**  
+- **Test/Fix:**  
+
+### B) Commit Message Template
+`Fix <symptom> by <root cause> (<verification>)`
+
+Example:  
+`Fix duplicate Streamlit widget by ensuring nav selectbox renders once (verified by rerun probe + clean sidebar render)`
+
+---
+
+## 4) Triage by Error Class
+
+### NameError / Scope errors
+**Common causes**
+- variable used before assignment
+- conditional paths skip initialization
+- scope boundaries (function/block)
+
+**Fast tests**
+- add `assert "<var>" in locals()` at the line above
+- print `locals().keys()` for the smallest block
+
+---
+
+### Resource lifecycle errors (“closed database”)
+**Common causes**
+- closing a shared/cached handle
+- context manager exits unexpectedly
+- connection reused after close
+
+**Fast tests**
+- log connection id: `id(conn)`
+- log `conn` state (or try simple query once)
+
+**Rule of thumb**
+- If a resource is cached/shared, **don’t close it manually**.
+
+---
+
+### UI state / key collision errors (Streamlit, React, etc.)
+**Common causes**
+- the same widget renders twice in one run
+- dynamic render paths create duplicates
+- keys not unique across containers/pages
+
+**Fast tests**
+- add a probe right before widget creation:
+  - `st.sidebar.write("NAV RENDER", time.time())`
+- ensure each widget has stable container + unique key
+- ensure widget code executes once per run
+
+**Golden rule for UI frameworks**
+- Stabilize the render tree first, then tune keys.
+
+---
+
+## 5) How to Debug With an LLM Without Burning Tokens
+
+### Give the model the *right* inputs
+Provide:
+- exact error text
+- stack trace (top + bottom)
+- the relevant code block (not the entire repo)
+- the environment (local/cloud)
+- what changed since last working state (commit hash / diff)
+
+### Force the model into a disciplined mode
+Ask for:
+1. **3 hypotheses**
+2. **1 smallest test** for the top hypothesis
+3. **1 minimal patch** only after evidence
+4. **verification plan**
+
+Prompt snippet:
+> “Don’t propose fixes yet. First list 3 hypotheses and a single smallest test to falsify the top one.”
+
+### Require “proof language”
+Any fix proposal must include:
+- “What observation would change your mind?”
+- “What exact output do we expect from the probe?”
+
+---
+
+## 6) Debugging Probes: Safe, Reversible, Low Noise
+
+### Probe principles
+- Must be removable in one commit
+- Must not leak secrets
+- Must not spam (use conditional flags)
+
+### Probe patterns
+- `DEBUG = st.sidebar.checkbox("Debug", value=False, key="debug_toggle")`
+- Wrap debug logs:
+  - `if DEBUG: st.write(...)`
+- Use unique markers:
+  - `st.write("DEBUG_NAV_RENDER_v1")`
+
+---
+
+## 7) Postmortem (2 minutes that saves hours later)
+
+Answer:
+1. What was the real root cause?
+2. Why did the symptom mislead us?
+3. What guardrail prevents recurrence?
+4. What unit test / lint / assertion could catch it earlier?
+
+---
+
+## 8) “Stop the Bleeding” Checklist (When You’re Stuck)
+- [ ] Revert to last known good commit and reintroduce changes one-by-one
+- [ ] Remove dynamic UI additions and render placeholders instead
+- [ ] Add a single “render-count” probe
+- [ ] Minimize the code path (disable features behind a flag)
+- [ ] Prove whether the code executes once or twice per run
+
+---
+
+## 9) Definition of Done (Debugging)
+You are done when:
+- You can explain the bug in one sentence
+- You can reproduce it and show it’s gone
+- The fix is minimal
+- You added a guardrail (key uniqueness, lifecycle rule, test, or comment)
+
+---

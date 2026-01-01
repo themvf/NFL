@@ -20019,6 +20019,67 @@ def render_projections_vs_actuals():
             key="track_week"
         )
 
+
+    # ============================================================================
+    # Snapshot Selector - Load existing snapshots from GCS
+    # ============================================================================
+
+    selected_snapshot_id = None  # Will be set if user selects a specific snapshot
+
+    # Initialize projection snapshot manager for listing
+    if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
+        try:
+            import importlib
+            import projection_snapshot_manager as psm
+            importlib.reload(psm)
+            proj_snapshot_mgr = psm.ProjectionSnapshotManager(
+                db_path=str(DB_PATH),
+                bucket_name=GCS_BUCKET_NAME,
+                service_account_dict=dict(st.secrets["gcs_service_account"])
+            )
+
+            # List all snapshots for this week
+            all_week_snapshots = proj_snapshot_mgr.list_snapshots(season=track_season, week=track_week)
+
+            if not all_week_snapshots.empty:
+                # Create display labels: "KC vs BAL - 2025-01-01 12:30 (pending)"
+                all_week_snapshots['display'] = (
+                    all_week_snapshots['away_team'] + ' @ ' +
+                    all_week_snapshots['home_team'] + ' - ' +
+                    all_week_snapshots['created_at'].astype(str).str[:16] + ' (' +
+                    all_week_snapshots['status'] + ')'
+                )
+
+                # Dropdown to select snapshot
+                st.markdown("#### 📂 Load Existing Snapshot")
+                snapshot_options = ['🔄 All Pending Snapshots'] + all_week_snapshots['display'].tolist()
+                selected_display = st.selectbox(
+                    "Select a saved snapshot",
+                    options=snapshot_options,
+                    index=0,
+                    key="snapshot_selector",
+                    help="Load a previously saved projection snapshot instead of creating a new one"
+                )
+
+                if selected_display != '🔄 All Pending Snapshots':
+                    # Find the selected snapshot
+                    selected_row = all_week_snapshots[all_week_snapshots['display'] == selected_display].iloc[0]
+                    selected_snapshot_id = selected_row['snapshot_id']
+
+                    col_info1, col_info2 = st.columns(2)
+                    with col_info1:
+                        st.info(f"📋 **Matchup:** {selected_row['away_team']} @ {selected_row['home_team']}")
+                    with col_info2:
+                        status_icon = "✅" if selected_row['status'] == 'completed' else "⏳"
+                        st.info(f"{status_icon} **Status:** {selected_row['status'].capitalize()}")
+            else:
+                st.info(f"ℹ️ No snapshots saved for Week {track_week}. Save projections first!")
+
+        except Exception as e:
+            st.warning(f"Could not load snapshots: {e}")
+
+    st.markdown("---")
+
     with col_actions:
         st.markdown("")  # Spacing
         st.markdown("")  # Spacing
@@ -20030,35 +20091,47 @@ def render_projections_vs_actuals():
                         help="Fetch actual stats from database and calculate accuracy"):
                 with st.spinner("Fetching actual stats from database..."):
                     try:
-                        # Initialize projection snapshot manager
                         if GCS_BUCKET_NAME and 'gcs_service_account' in st.secrets:
-                            import importlib
-                            import projection_snapshot_manager as psm
-                            importlib.reload(psm)
-                            proj_snapshot_mgr = psm.ProjectionSnapshotManager(
-                                db_path=str(DB_PATH),
-                                bucket_name=GCS_BUCKET_NAME,
-                                service_account_dict=dict(st.secrets["gcs_service_account"])
-                            )
+                            # Re-use the proj_snapshot_mgr if already initialized, or create new
+                            if 'proj_snapshot_mgr' not in dir() or proj_snapshot_mgr is None:
+                                import importlib
+                                import projection_snapshot_manager as psm
+                                importlib.reload(psm)
+                                proj_snapshot_mgr = psm.ProjectionSnapshotManager(
+                                    db_path=str(DB_PATH),
+                                    bucket_name=GCS_BUCKET_NAME,
+                                    service_account_dict=dict(st.secrets["gcs_service_account"])
+                                )
 
-                            # Get all snapshots for this week
-                            snapshots = proj_snapshot_mgr.list_snapshots(season=track_season, week=track_week)
+                            total_updated = 0
 
-                            if not snapshots.empty:
-                                total_updated = 0
-                                for _, snap in snapshots.iterrows():
-                                    if snap['status'] == 'pending':
-                                        success, count, debug_info = proj_snapshot_mgr.update_actuals_v2(snap['snapshot_id'])
-                                        if success:
-                                            total_updated += count
-
-                                if total_updated > 0:
-                                    st.success(f"✅ Updated {total_updated} player projections")
+                            # If a specific snapshot is selected, use that one
+                            if selected_snapshot_id is not None:
+                                success, count, debug_info = proj_snapshot_mgr.update_actuals_v2(selected_snapshot_id)
+                                if success:
+                                    total_updated = count
+                                    st.success(f"✅ Updated {total_updated} player projections from selected snapshot")
                                     st.rerun()
                                 else:
-                                    st.warning(f"⚠️ No stats found for Week {track_week}. Make sure game data has been fetched!")
+                                    st.warning(f"⚠️ No stats found. Make sure game data has been fetched!")
                             else:
-                                st.info(f"ℹ️ No projections saved for Week {track_week}. Save projections in Team Comparison View 2 first!")
+                                # Process all pending snapshots for this week
+                                snapshots = proj_snapshot_mgr.list_snapshots(season=track_season, week=track_week)
+
+                                if not snapshots.empty:
+                                    for _, snap in snapshots.iterrows():
+                                        if snap['status'] == 'pending':
+                                            success, count, debug_info = proj_snapshot_mgr.update_actuals_v2(snap['snapshot_id'])
+                                            if success:
+                                                total_updated += count
+
+                                    if total_updated > 0:
+                                        st.success(f"✅ Updated {total_updated} player projections")
+                                        st.rerun()
+                                    else:
+                                        st.warning(f"⚠️ No stats found for Week {track_week}. Make sure game data has been fetched!")
+                                else:
+                                    st.info(f"ℹ️ No projections saved for Week {track_week}. Save projections first!")
                         else:
                             st.error("❌ GCS not configured")
                     except Exception as e:

@@ -10,6 +10,7 @@ Author: NFL Fantasy App
 import json
 import sqlite3
 import logging
+import streamlit as st
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
@@ -752,11 +753,11 @@ class ProjectionSnapshotManager:
                     similar_names = name_df.to_dict('records') if not name_df.empty else []
                     
                     debug_conn.close()
-                    logging.warning(f"NO MATCH for '{player_name}' (team='{team}') S{season} W{week}")
-                    logging.warning(f"  Available teams in W{week}: {available_teams}")
-                    logging.warning(f"  Similar names found: {similar_names}")
+                    st.warning(f"🔍 DEBUG: NO MATCH for '{player_name}' (team='{team}') S{season} W{week}")
+                    st.warning(f"📋 Available teams in W{week}: {available_teams}")
+                    st.warning(f"👤 Similar names found: {similar_names}")
                 except Exception as debug_e:
-                    logging.warning(f"Debug query failed: {debug_e}")
+                    st.warning(f"⚠️ Debug query failed: {debug_e}")
                 return None
 
             row = result.iloc[0]

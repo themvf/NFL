@@ -1446,6 +1446,8 @@ class ProjectionSnapshotManager:
             # Step 3: Create lookup dictionary by normalized player name
             stats_by_name = {}
             for _, row in all_stats_df.iterrows():
+                if row["player_display_name"] is None:
+                    continue
                 name_key = row['player_display_name'].lower().strip()
                 stats_by_name[name_key] = row
 

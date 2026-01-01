@@ -601,7 +601,7 @@ class ProjectionSnapshotManager:
                         UPDATE projection_accuracy
                         SET actual_yds = ?, variance = ?, game_played = ?,
                             actual_pass_att = ?, actual_completions = ?, actual_pass_yds = ?,
-                            actual_pass_tds = ?, actual_interceptions = ?,
+                            actual_pass_tds = ?,
                             actual_rush_att = ?, actual_rush_yds = ?
                         WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                     """, (
@@ -716,7 +716,7 @@ class ProjectionSnapshotManager:
                     completions,
                     passing_yards as pass_yds,
                     passing_tds as pass_tds,
-                    interceptions,
+
 
                     -- Rushing stats
                     carries as rush_att,
@@ -1421,7 +1421,7 @@ class ProjectionSnapshotManager:
                     attempts as pass_att,
                     completions,
                     passing_tds,
-                    interceptions,
+
                     carries as rush_att,
                     rushing_tds,
                     targets,
@@ -1498,13 +1498,13 @@ class ProjectionSnapshotManager:
                                 UPDATE projection_accuracy
                                 SET actual_yds = ?, variance = ?, game_played = ?,
                                     actual_pass_att = ?, actual_completions = ?, actual_pass_yds = ?,
-                                    actual_pass_tds = ?, actual_interceptions = ?,
+                                    actual_pass_tds = ?,
                                     actual_rush_att = ?, actual_rush_yds = ?
                                 WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
                             """, (
                                 total_yards, error, game_played,
                                 row['pass_att'], row['completions'], row['passing_yards'],
-                                row['passing_tds'], row['interceptions'],
+                                row['passing_tds'],
                                 row['rush_att'], row['rushing_yards'],
                                 snapshot_id, player_name, team
                             ))

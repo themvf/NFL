@@ -1365,3 +1365,179 @@ class ProjectionSnapshotManager:
         except Exception as e:
             logging.error(f"Error getting snapshot summary: {e}")
             return None
+
+
+    # =====================================================
+    # NEW SIMPLIFIED FETCH METHOD (V2)
+    # =====================================================
+
+    def update_actuals_v2(self, snapshot_id: str) -> Tuple[bool, int, str]:
+        """
+        SIMPLIFIED: Update snapshot with actual game results.
+
+        This version loads all player stats for the week first,
+        then matches by player name (more flexible).
+
+        Returns:
+            Tuple of (success, players_updated, debug_info)
+        """
+        import streamlit as st
+
+        debug_lines = []
+
+        def log(msg):
+            """Log to both UI and console"""
+            debug_lines.append(msg)
+            print(msg)
+            try:
+                st.info(msg)
+            except:
+                pass
+
+        try:
+            # Step 1: Load snapshot from GCS
+            log(f"Loading snapshot: {snapshot_id}")
+            snapshot = self.load_snapshot(snapshot_id)
+            if not snapshot:
+                log("FAILED to load snapshot from GCS")
+                return False, 0, "\n".join(debug_lines)
+
+            season = snapshot['season']
+            week = snapshot['week']
+            log(f"Snapshot loaded: Season {season}, Week {week}")
+
+            # Step 2: Load ALL player stats for this week in ONE query
+            log(f"Loading all player stats for S{season} W{week}...")
+            conn = sqlite3.connect(self.db_path)
+
+            all_stats_query = """
+                SELECT
+                    player_display_name,
+                    team,
+                    position,
+                    passing_yards,
+                    rushing_yards,
+                    receiving_yards,
+                    attempts as pass_att,
+                    completions,
+                    passing_tds,
+                    interceptions,
+                    carries as rush_att,
+                    rushing_tds,
+                    targets,
+                    receptions,
+                    receiving_tds
+                FROM player_stats
+                WHERE season = ? AND week = ?
+            """
+
+            all_stats_df = pd.read_sql_query(all_stats_query, conn, params=(season, week))
+            log(f"Loaded {len(all_stats_df)} player records from database")
+
+            if all_stats_df.empty:
+                log(f"NO player stats found for S{season} W{week}")
+                conn.close()
+                return False, 0, "\n".join(debug_lines)
+
+            # Show available teams
+            available_teams = sorted(all_stats_df['team'].dropna().unique().tolist())
+            log(f"Teams in database: {available_teams}")
+
+            # Step 3: Create lookup dictionary by normalized player name
+            stats_by_name = {}
+            for _, row in all_stats_df.iterrows():
+                name_key = row['player_display_name'].lower().strip()
+                stats_by_name[name_key] = row
+
+            log(f"Created lookup with {len(stats_by_name)} unique player names")
+
+            # Step 4: Process each player from snapshot
+            cursor = conn.cursor()
+            players_updated = 0
+            players_not_found = []
+
+            all_positions = ['QB', 'RB', 'WR', 'TE']
+
+            for position in all_positions:
+                players_in_pos = snapshot['player_projections'].get(position, [])
+                log(f"Processing {len(players_in_pos)} {position}s...")
+
+                for player in players_in_pos:
+                    player_name = player['player_name']
+                    team = player['team']
+                    name_key = player_name.lower().strip()
+
+                    # Try to find in stats
+                    if name_key in stats_by_name:
+                        row = stats_by_name[name_key]
+
+                        # Calculate yards based on position
+                        if position == 'QB':
+                            total_yards = (row['passing_yards'] or 0) + (row['rushing_yards'] or 0)
+                            touches = (row['pass_att'] or 0) + (row['rush_att'] or 0)
+                        elif position == 'RB':
+                            total_yards = (row['rushing_yards'] or 0) + (row['receiving_yards'] or 0)
+                            touches = (row['rush_att'] or 0) + (row['targets'] or 0)
+                        else:  # WR, TE
+                            total_yards = row['receiving_yards'] or 0
+                            touches = row['targets'] or 0
+
+                        game_played = touches > 0 or total_yards > 0
+
+                        # Get projected yards for error calc
+                        if position == 'QB':
+                            projected = player.get('projected_pass_yards', 0) + player.get('projected_rush_yards', 0)
+                        else:
+                            projected = player.get('projected_total_yards', 0)
+
+                        error = total_yards - projected
+
+                        # Update database
+                        if position == 'QB':
+                            cursor.execute("""
+                                UPDATE projection_accuracy
+                                SET actual_yds = ?, variance = ?, game_played = ?,
+                                    actual_pass_att = ?, actual_completions = ?, actual_pass_yds = ?,
+                                    actual_pass_tds = ?, actual_interceptions = ?,
+                                    actual_rush_att = ?, actual_rush_yds = ?
+                                WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
+                            """, (
+                                total_yards, error, game_played,
+                                row['pass_att'], row['completions'], row['passing_yards'],
+                                row['passing_tds'], row['interceptions'],
+                                row['rush_att'], row['rushing_yards'],
+                                snapshot_id, player_name, team
+                            ))
+                        else:
+                            cursor.execute("""
+                                UPDATE projection_accuracy
+                                SET actual_yds = ?, variance = ?, game_played = ?,
+                                    actual_rush_att = ?, actual_rush_yds = ?, actual_rush_tds = ?,
+                                    actual_targets = ?, actual_receptions = ?, actual_rec_yds = ?, actual_rec_tds = ?
+                                WHERE snapshot_id = ? AND player_name = ? AND team_abbr = ?
+                            """, (
+                                total_yards, error, game_played,
+                                row['rush_att'], row['rushing_yards'], row['rushing_tds'],
+                                row['targets'], row['receptions'], row['receiving_yards'], row['receiving_tds'],
+                                snapshot_id, player_name, team
+                            ))
+
+                        players_updated += 1
+                    else:
+                        players_not_found.append(f"{position} {player_name} ({team})")
+
+            conn.commit()
+            conn.close()
+
+            log(f"SUCCESS: Updated {players_updated} players")
+            if players_not_found:
+                log(f"Not found ({len(players_not_found)}): {players_not_found[:10]}")
+
+            return True, players_updated, "\n".join(debug_lines)
+
+        except Exception as e:
+            error_msg = f"ERROR in update_actuals_v2: {str(e)}"
+            log(error_msg)
+            import traceback
+            log(traceback.format_exc())
+            return False, 0, "\n".join(debug_lines)

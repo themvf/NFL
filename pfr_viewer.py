@@ -20048,7 +20048,7 @@ def render_projections_vs_actuals():
                                 total_updated = 0
                                 for _, snap in snapshots.iterrows():
                                     if snap['status'] == 'pending':
-                                        success, count = proj_snapshot_mgr.update_actuals(snap['snapshot_id'])
+                                        success, count, debug_info = proj_snapshot_mgr.update_actuals_v2(snap['snapshot_id'])
                                         if success:
                                             total_updated += count
 
@@ -22107,7 +22107,7 @@ Description: {inj_description if inj_description else 'None'}
                                         if st.button("🔄 Update Actuals", key=f"update_{snap['snapshot_id'][:30]}"):
                                             with st.spinner("Fetching actual stats from database..."):
                                                 try:
-                                                    success, count = proj_snapshot_mgr.update_actuals(snap['snapshot_id'])
+                                                    success, count, debug_info = proj_snapshot_mgr.update_actuals_v2(snap['snapshot_id'])
                                                     if success:
                                                         st.success(f"✅ Updated {count} players")
                                                         st.rerun()

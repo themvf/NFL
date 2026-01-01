@@ -738,6 +738,25 @@ class ProjectionSnapshotManager:
 
             if result.empty:
                 # Player not found - DNP or missing data
+                # DEBUG: Log what we searched for and what exists
+                try:
+                    debug_conn = sqlite3.connect(self.db_path)
+                    # Check what teams exist for this week
+                    teams_query = "SELECT DISTINCT team FROM player_stats WHERE season = ? AND week = ? ORDER BY team"
+                    teams_df = pd.read_sql_query(teams_query, debug_conn, params=(season, week))
+                    available_teams = teams_df['team'].tolist() if not teams_df.empty else []
+                    
+                    # Check if any player with similar name exists
+                    name_query = "SELECT player_display_name, team FROM player_stats WHERE season = ? AND week = ? AND player_display_name LIKE ? LIMIT 5"
+                    name_df = pd.read_sql_query(name_query, debug_conn, params=(season, week, f"%{player_name.split()[0]}%"))
+                    similar_names = name_df.to_dict('records') if not name_df.empty else []
+                    
+                    debug_conn.close()
+                    logging.warning(f"NO MATCH for '{player_name}' (team='{team}') S{season} W{week}")
+                    logging.warning(f"  Available teams in W{week}: {available_teams}")
+                    logging.warning(f"  Similar names found: {similar_names}")
+                except Exception as debug_e:
+                    logging.warning(f"Debug query failed: {debug_e}")
                 return None
 
             row = result.iloc[0]

@@ -753,10 +753,18 @@ class ProjectionSnapshotManager:
                     similar_names = name_df.to_dict('records') if not name_df.empty else []
                     
                     debug_conn.close()
-                    st.warning(f"🔍 DEBUG: NO MATCH for '{player_name}' (team='{team}') S{season} W{week}")
-                    st.warning(f"📋 Available teams in W{week}: {available_teams}")
-                    st.warning(f"👤 Similar names found: {similar_names}")
+                    # Output to both UI and logs
+                    debug_msg1 = f"🔍 DEBUG: NO MATCH for '{player_name}' (team='{team}') S{season} W{week}"
+                    debug_msg2 = f"📋 Available teams in W{week}: {available_teams}"
+                    debug_msg3 = f"👤 Similar names found: {similar_names}"
+                    print(debug_msg1)
+                    print(debug_msg2)
+                    print(debug_msg3)
+                    st.warning(debug_msg1)
+                    st.warning(debug_msg2)
+                    st.warning(debug_msg3)
                 except Exception as debug_e:
+                    print(f"⚠️ Debug query failed: {debug_e}")
                     st.warning(f"⚠️ Debug query failed: {debug_e}")
                 return None
 

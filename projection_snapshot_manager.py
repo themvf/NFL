@@ -729,11 +729,11 @@ class ProjectionSnapshotManager:
                     receiving_tds as rec_tds
 
                 FROM player_stats
-                WHERE player_display_name = ? AND season = ? AND week = ?
+                WHERE player_display_name = ? AND team = ? AND season = ? AND week = ?
                 LIMIT 1
             """
 
-            result = pd.read_sql_query(query, conn, params=(player_name, season, week))
+            result = pd.read_sql_query(query, conn, params=(player_name, team, season, week))
             conn.close()
 
             if result.empty:

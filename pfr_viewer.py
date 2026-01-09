@@ -10297,7 +10297,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         weeks_query = f"""
             SELECT DISTINCT week
             FROM schedules
-            WHERE season = {season} AND game_type = 'REG'
+            WHERE season = {season} AND game_type IN ('REG', 'WC', 'DIV', 'CON', 'SB')
             ORDER BY week
         """
         weeks_df = pd.read_sql_query(weeks_query, conn)

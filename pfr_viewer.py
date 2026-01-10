@@ -1343,7 +1343,7 @@ def get_database_stats():
         injury_count = cursor.fetchone()[0]
 
         # Count upcoming games
-        cursor.execute("SELECT COUNT(*) FROM upcoming_games")
+        cursor.execute("SELECT COUNT(*) FROM games")
         game_count = cursor.fetchone()[0]
 
         conn.close()
@@ -2470,7 +2470,7 @@ def get_upcoming_games(season=None, week=None):
     try:
         conn = sqlite3.connect(DB_PATH)
 
-        sql = "SELECT * FROM upcoming_games WHERE 1=1"
+        sql = "SELECT * FROM games WHERE 1=1"
         params = []
 
         if season:
@@ -2497,7 +2497,7 @@ def delete_upcoming_game(game_id):
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM upcoming_games WHERE game_id = ?", (game_id,))
+        cursor.execute("DELETE FROM games WHERE game_id = ?", (game_id,))
         conn.commit()
         conn.close()
         return True
@@ -2511,7 +2511,7 @@ def clear_upcoming_games(season):
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM upcoming_games WHERE season = ?", (season,))
+        cursor.execute("DELETE FROM games WHERE season = ?", (season,))
         conn.commit()
         conn.close()
         return True
@@ -7649,8 +7649,8 @@ def save_projections_for_week(season, week):
         # Get upcoming games for this week
         conn = sqlite3.connect(DB_PATH)
         query_str = """
-            SELECT DISTINCT home_team, away_team
-            FROM upcoming_games
+            SELECT DISTINCT home_team_abbr AS home_team, away_team_abbr AS away_team
+            FROM games
             WHERE season = ? AND week = ?
         """
         games_df = pd.read_sql_query(query_str, conn, params=(season, week))

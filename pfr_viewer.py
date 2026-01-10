@@ -3000,8 +3000,8 @@ def generate_player_projections(season, week, teams_playing):
         # Query from schedules table instead of upcoming_games
         matchups_query = f"""
             SELECT home_team, away_team
-            FROM schedules
-            WHERE season = {season} AND week = {week} AND game_type = 'REG'
+            FROM games
+            WHERE season = {season} AND week = {week} 
         """
         matchups_df = pd.read_sql_query(matchups_query, conn)
 
@@ -10296,8 +10296,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         conn = sqlite3.connect(DB_PATH)
         weeks_query = f"""
             SELECT DISTINCT week
-            FROM schedules
-            WHERE season = {season} AND game_type IN ('REG', 'WC', 'DIV', 'CON', 'SB')
+            FROM games
+            WHERE season = {season} 
             ORDER BY week
         """
         weeks_df = pd.read_sql_query(weeks_query, conn)
@@ -10325,9 +10325,9 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             # If a week is selected, show matchups for that week
             if selected_matchup_week != "Manual Selection":
                 matchups_query = f"""
-                    SELECT home_team, away_team, game_id, gameday
-                    FROM schedules
-                    WHERE season = {season} AND week = {selected_matchup_week} AND game_type = 'REG'
+                    SELECT home_team_abbr AS home_team, away_team_abbr AS away_team, game_id, gameday
+                    FROM games
+                    WHERE season = {season} AND week = {selected_matchup_week} 
                     ORDER BY gameday
                 """
                 matchups_df = pd.read_sql_query(matchups_query, conn)
@@ -10433,8 +10433,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
         # Determine home/away from schedule if possible
         conn = sqlite3.connect(DB_PATH)
         schedule_query = """
-            SELECT home_team, away_team, spread_line, total_line
-            FROM schedules
+            SELECT home_team_abbr AS home_team, away_team_abbr AS away_team, spread_line, total_line
+            FROM games
             WHERE season = ? AND week = ?
               AND ((home_team = ? AND away_team = ?) OR (home_team = ? AND away_team = ?))
             LIMIT 1
@@ -13368,8 +13368,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             # Get schedule info to determine home/away games
             schedules_query = f"""
-                SELECT week, season, away_team, home_team
-                FROM schedules
+                SELECT week, season, away_team_abbr AS away_team, home_team_abbr AS home_team
+                FROM games
                 WHERE season={season}
             """
             schedules_info = query(schedules_query)
@@ -13631,8 +13631,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             # Get schedule info to determine home/away games
             schedules_query = f"""
-                SELECT week, season, away_team, home_team
-                FROM schedules
+                SELECT week, season, away_team_abbr AS away_team, home_team_abbr AS home_team
+                FROM games
                 WHERE season={season}
             """
             schedules_info = query(schedules_query)
@@ -13847,8 +13847,8 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
 
             # Get schedule info to determine home/away games
             schedules_query = f"""
-                SELECT week, season, away_team, home_team
-                FROM schedules
+                SELECT week, season, away_team_abbr AS away_team, home_team_abbr AS home_team
+                FROM games
                 WHERE season={season}
             """
             schedules_info = query(schedules_query)
@@ -15950,7 +15950,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             st.markdown("### Home vs Away Performance Splits")
 
             # Join with schedules to get location (using week and teams)
-            schedules_query = f"SELECT week, season, home_team, away_team FROM schedules WHERE season={season}"
+            schedules_query = f"SELECT week, season, home_team_abbr AS home_team, away_team_abbr AS away_team FROM games WHERE season={season}"
             schedules_info = query(schedules_query)
 
             # Determine home/away for each player game
@@ -19870,7 +19870,7 @@ def render_projections_vs_actuals():
                         conn = sqlite3.connect(DB_PATH)
                         schedule_query = """
                             SELECT DISTINCT home_team, away_team
-                            FROM schedules
+                            FROM games
                             WHERE season = ? AND week = ?
                         """
                         schedule_df = pd.read_sql_query(schedule_query, conn, params=(batch_season, batch_week))
@@ -22388,7 +22388,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
         # (games without scores are future games)
         cursor.execute("""
             SELECT DISTINCT season, week
-            FROM schedules
+            FROM games
             WHERE game_type = 'REG'
             ORDER BY season DESC, week ASC
         """)
@@ -22446,8 +22446,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     away_rest,
                     home_rest,
                     location
-                FROM schedules
-                WHERE season = ? AND game_type = 'REG'
+                FROM games
+                WHERE season = ? 
                 ORDER BY week ASC, gameday ASC
             """, (selected_season,))
         else:
@@ -22472,8 +22472,8 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     away_rest,
                     home_rest,
                     location
-                FROM schedules
-                WHERE season = ? AND week = ? AND game_type = 'REG'
+                FROM games
+                WHERE season = ? AND week = ? 
                 ORDER BY gameday ASC
             """, (selected_season, selected_week))
 

@@ -10482,7 +10482,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             proj_week = st.number_input(
                 "Projection Week",
                 min_value=1,
-                max_value=18,
+                max_value=22,
                 value=default_proj_week,
                 help="Week to project for (uses data up to but not including this week)"
             )
@@ -21296,7 +21296,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                 effective_week = st.number_input(
                     "Effective Week *",
                     min_value=1,
-                    max_value=18,
+                    max_value=22,
                     value=week if week else 1,
                     help="Week when transaction takes effect"
                 )
@@ -21477,7 +21477,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                     inj_start_week = st.number_input(
                         "Start Week",
                         min_value=1,
-                        max_value=18,
+                        max_value=22,
                         value=week if week else 1,
                         help="Week when injury began (optional)"
                     )
@@ -21485,7 +21485,7 @@ def render_transaction_manager(season: Optional[int], week: Optional[int]):
                     inj_end_week = st.number_input(
                         "End Week",
                         min_value=1,
-                        max_value=18,
+                        max_value=22,
                         value=18,
                         help="Expected return week (18 = season-ending)"
                     )
@@ -21718,7 +21718,7 @@ Description: {inj_description if inj_description else 'None'}
                         snap_week = st.number_input(
                             "Week",
                             min_value=1,
-                            max_value=18,
+                            max_value=22,
                             value=week if week else 1,
                             key="snapshot_week"
                         )
@@ -21865,7 +21865,7 @@ Description: {inj_description if inj_description else 'None'}
                         comp_week1 = st.number_input(
                             "Week 1 (Earlier)",
                             min_value=1,
-                            max_value=18,
+                            max_value=22,
                             value=1,
                             key="compare_week1"
                         )
@@ -21874,7 +21874,7 @@ Description: {inj_description if inj_description else 'None'}
                         comp_week2 = st.number_input(
                             "Week 2 (Later)",
                             min_value=1,
-                            max_value=18,
+                            max_value=22,
                             value=2,
                             key="compare_week2"
                         )

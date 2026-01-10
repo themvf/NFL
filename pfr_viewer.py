@@ -19469,7 +19469,7 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
         with col1:
             save_season = st.selectbox("Season", options=get_seasons(), key="save_season", index=0)
         with col2:
-            save_week = st.selectbox("Week", options=list(range(1, 19)), key="save_week")
+            save_week = st.selectbox("Week", options=list(range(1, 23)), key="save_week")
 
         # Check if projections already exist
         try:
@@ -19535,7 +19535,7 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
         with col1:
             update_season = st.selectbox("Season", options=get_seasons(), key="update_season", index=0)
         with col2:
-            update_week = st.selectbox("Week", options=list(range(1, 19)), key="update_week")
+            update_week = st.selectbox("Week", options=list(range(1, 23)), key="update_week")
 
         # Check status
         try:
@@ -19580,7 +19580,7 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
         with col1:
             dash_season = st.selectbox("Season", options=[None] + get_seasons(), key="dash_season", format_func=lambda x: "All Seasons" if x is None else str(x))
         with col2:
-            dash_week = st.selectbox("Week", options=[None] + list(range(1, 19)), key="dash_week", format_func=lambda x: "All Weeks" if x is None else f"Week {x}")
+            dash_week = st.selectbox("Week", options=[None] + list(range(1, 23)), key="dash_week", format_func=lambda x: "All Weeks" if x is None else f"Week {x}")
         with col3:
             dash_position = st.selectbox("Position", options=[None, "QB", "RB", "WR", "TE"], key="dash_position", format_func=lambda x: "All Positions" if x is None else x)
 
@@ -19751,7 +19751,7 @@ def render_projection_analytics(season: Optional[int], week: Optional[int]):
         with col1:
             detail_season = st.selectbox("Season", options=[None] + get_seasons(), key="detail_season", format_func=lambda x: "All" if x is None else str(x))
         with col2:
-            detail_week = st.selectbox("Week", options=[None] + list(range(1, 19)), key="detail_week", format_func=lambda x: "All" if x is None else f"Week {x}")
+            detail_week = st.selectbox("Week", options=[None] + list(range(1, 23)), key="detail_week", format_func=lambda x: "All" if x is None else f"Week {x}")
         with col3:
             detail_position = st.selectbox("Position", options=[None, "QB", "RB", "WR", "TE"], key="detail_position", format_func=lambda x: "All" if x is None else x)
 
@@ -19830,7 +19830,7 @@ def render_projections_vs_actuals():
     with col_batch_week:
         batch_week = st.selectbox(
             "Week",
-            list(range(1, 19)),
+            list(range(1, 23)),
             index=17,  # Default to Week 18
             key="batch_week"
         )
@@ -20011,7 +20011,7 @@ def render_projections_vs_actuals():
         )
 
     with col_week:
-        week_options = list(range(1, 19))
+        week_options = list(range(1, 23))
         track_week = st.selectbox(
             "Week",
             week_options,
@@ -22055,7 +22055,7 @@ Description: {inj_description if inj_description else 'None'}
                     )
 
                 with col2:
-                    week_options = ["All Weeks"] + list(range(1, 19))
+                    week_options = ["All Weeks"] + list(range(1, 23))
                     filter_week = st.selectbox(
                         "Week",
                         week_options,

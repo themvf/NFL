@@ -19869,7 +19869,7 @@ def render_projections_vs_actuals():
                         # Get schedule for this week
                         conn = sqlite3.connect(DB_PATH)
                         schedule_query = """
-                            SELECT DISTINCT home_team, away_team
+                            SELECT DISTINCT home_team_abbr AS home_team, away_team_abbr AS away_team
                             FROM games
                             WHERE season = ? AND week = ?
                         """

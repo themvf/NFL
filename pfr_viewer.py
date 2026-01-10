@@ -10325,10 +10325,10 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
             # If a week is selected, show matchups for that week
             if selected_matchup_week != "Manual Selection":
                 matchups_query = f"""
-                    SELECT home_team_abbr AS home_team, away_team_abbr AS away_team, game_id, gameday
+                    SELECT home_team_abbr AS home_team, away_team_abbr AS away_team, game_id
                     FROM games
                     WHERE season = {season} AND week = {selected_matchup_week} 
-                    ORDER BY gameday
+                    ORDER BY game_id
                 """
                 matchups_df = pd.read_sql_query(matchups_query, conn)
 
@@ -10337,7 +10337,7 @@ def render_team_comparison(season: Optional[int], week: Optional[int]):
                     matchup_options = []
                     for _, game in matchups_df.iterrows():
                         matchup_str = f"{game['away_team']} @ {game['home_team']}"
-                        if pd.notna(game['gameday']):
+                        if False:  # gameday not in games table
                             matchup_str += f" ({game['gameday']})"
                         matchup_options.append({
                             'display': matchup_str,
@@ -22474,7 +22474,7 @@ def render_upcoming_matches(season: Optional[int], week: Optional[int]):
                     location
                 FROM games
                 WHERE season = ? AND week = ? 
-                ORDER BY gameday ASC
+                ORDER BY game_id ASC
             """, (selected_season, selected_week))
 
         games = cursor.fetchall()

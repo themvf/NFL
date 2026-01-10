@@ -1737,6 +1737,52 @@ def validate_projections(
 # Main Pipeline - Project Complete Matchup
 # ============================================================================
 
+
+def merge_player_projections(rbs: List[PlayerProjection], recs: List[PlayerProjection]) -> List[PlayerProjection]:
+    """
+    Merge rushing and receiving projections for players that appear in both lists.
+    RBs can appear in both allocations - once for rushing, once for receiving.
+    This merges them into single PlayerProjection objects with combined stats.
+    """
+    merged = {}
+    
+    # First add all rushing projections (RBs)
+    for rb in rbs:
+        merged[rb.player_name] = rb
+    
+    # Then merge receiving projections
+    for rec in recs:
+        if rec.player_name in merged:
+            # Merge receiving stats into existing RB projection
+            existing = merged[rec.player_name]
+            existing.projected_targets = rec.projected_targets
+            existing.projected_receptions = rec.projected_receptions
+            existing.projected_recv_yards = rec.projected_recv_yards
+            existing.projected_ypt = rec.projected_ypt
+            existing.projected_ypr = rec.projected_ypr
+            existing.projected_catch_rate = rec.projected_catch_rate
+            # Update ranges
+            existing.projected_targets_p10 = rec.projected_targets_p10
+            existing.projected_targets_p90 = rec.projected_targets_p90
+            existing.projected_receptions_p10 = rec.projected_receptions_p10
+            existing.projected_receptions_p90 = rec.projected_receptions_p90
+            existing.projected_recv_yards_p10 = rec.projected_recv_yards_p10
+            existing.projected_recv_yards_p90 = rec.projected_recv_yards_p90
+            existing.projected_ypt_p10 = rec.projected_ypt_p10
+            existing.projected_ypt_p90 = rec.projected_ypt_p90
+            existing.projected_ypr_p10 = rec.projected_ypr_p10
+            existing.projected_ypr_p90 = rec.projected_ypr_p90
+            # Update total yards (rush + recv)
+            existing.projected_total_yards = existing.projected_rush_yards + rec.projected_recv_yards
+            existing.projected_total_yards_p10 = existing.projected_rush_yards_p10 + rec.projected_recv_yards_p10
+            existing.projected_total_yards_p90 = existing.projected_rush_yards_p90 + rec.projected_recv_yards_p90
+        else:
+            # New receiver (WR/TE), add directly
+            merged[rec.player_name] = rec
+    
+    return list(merged.values())
+
+
 def project_matchup(
     away_team: str,
     home_team: str,
@@ -1901,9 +1947,9 @@ def project_matchup(
     validate_projections(away_proj, away_rbs, away_recs, away_qb)
     validate_projections(home_proj, home_rbs, home_recs, home_qb)
 
-    # Combine player lists
-    away_players = away_rbs + away_recs
-    home_players = home_rbs + home_recs
+    # Combine player lists (merge RBs that appear in both rushing and receiving)
+    away_players = merge_player_projections(away_rbs, away_recs)
+    home_players = merge_player_projections(home_rbs, home_recs)
 
     return away_proj, away_players, away_qb, home_proj, home_players, home_qb
 

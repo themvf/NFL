@@ -657,58 +657,39 @@ def get_defensive_matchup_adjustment(
 
 def get_neutral_pass_rate(team: str, season: int, week: int, lookback: int = 6) -> float:
     """
-    Compute neutral pass rate from Q1-Q3 dropbacks vs designed rushes with score differential <= 8.
-    Uses "pass intent" (dropbacks including sacks) not just completions/incompletions.
-
+    Calculate neutral game pass rate from box score data.
+    Uses pass_att and rush_att from box_score_summary table.
+    
     Returns:
-        Neutral pass rate (0.0-1.0), defaults to 0.60 if insufficient data
+        Pass rate as decimal (0.0-1.0)
     """
     conn = get_connection()
     start_week = max(1, week - lookback)
-
-    # Query plays table filtering for neutral game script
-    # Include sacks in pass intent, exclude kneels/spikes
+    
     query = """
-        SELECT
-            SUM(CASE
-                WHEN play_type IN ('pass', 'sack') OR qb_dropback = 1
-                THEN 1
-                ELSE 0
-            END) as dropbacks,
-            SUM(CASE
-                WHEN play_type = 'run' AND qb_kneel = 0
-                THEN 1
-                ELSE 0
-            END) as rush_plays
-        FROM plays
-        WHERE posteam = ?
+        SELECT SUM(pass_att) as total_pass,
+               SUM(rush_att) as total_rush
+        FROM box_score_summary
+        WHERE team = ?
           AND season = ?
           AND week >= ?
           AND week < ?
-          AND quarter IN (1, 2, 3)
-          AND ABS(score_differential) <= 8
-          AND play_type IN ('pass', 'run', 'sack')
-          AND COALESCE(qb_spike, 0) = 0
-          AND COALESCE(qb_kneel, 0) = 0
     """
-
+    
     df = pd.read_sql_query(query, conn, params=(team, season, start_week, week))
     conn.close()
-
-    if len(df) == 0 or df['dropbacks'].iloc[0] is None:
-        return 0.60  # Default
-
-    dropbacks = df['dropbacks'].iloc[0] or 0
-    rush_plays = df['rush_plays'].iloc[0] or 0
-    total_plays = dropbacks + rush_plays
-
-    # Adaptive threshold: 30 for 6-week lookback, 20 for shorter
-    min_plays_threshold = 20 if lookback <= 4 else 30
-
-    if total_plays < min_plays_threshold:
+    
+    if len(df) == 0 or df['total_pass'].iloc[0] is None:
+        return 0.60  # Default ~60% pass rate
+    
+    total_pass = df['total_pass'].iloc[0] or 0
+    total_rush = df['total_rush'].iloc[0] or 0
+    total_plays = total_pass + total_rush
+    
+    if total_plays < 20:
         return 0.60
-
-    return dropbacks / total_plays
+    
+    return total_pass / total_plays
 
 
 def split_plays_pass_rush(

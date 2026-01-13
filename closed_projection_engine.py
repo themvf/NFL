@@ -610,91 +610,8 @@ def predict_team_plays(
 # Layer 2: Team Layer - Split Plays into Pass/Rush
 # ============================================================================
 
-def get_defensive_matchup_adjustment(
-    opponent: str,
-    season: int,
-    week: int,
-    neutral_pass_rate: float
-) -> float:
-    """
-    Calculate pass rate adjustment based on opponent defensive tendencies.
-    Uses DVOA difference to identify run-funnel vs pass-funnel defenses.
-
-    Higher def_pass_dvoa (worse vs pass) = opponent weak vs pass = boost pass rate
-    Higher def_rush_dvoa (worse vs run) = opponent weak vs run = reduce pass rate
-
-    Returns:
-        Pass rate adjustment (-0.03 to +0.03)
-    """
-    # Get defensive DVOA values
-    try:
-        def_pass_dvoa = ydvoa.get_defensive_dvoa(opponent, season, week, 'pass')
-        def_rush_dvoa = ydvoa.get_defensive_dvoa(opponent, season, week, 'rush')
-    except:
-        return 0.0  # No adjustment if DVOA unavailable
-
-    # Funnel score from relative weakness (positive DVOA = worse defense)
-    # If pass DVOA > rush DVOA → weak vs pass, strong vs run → run funnel → boost pass
-    # If rush DVOA > pass DVOA → weak vs run, strong vs pass → pass funnel → reduce pass
-    dvoa_diff = def_pass_dvoa - def_rush_dvoa
-
-    # Squash with tanh to prevent extreme values
-    # ±20% DVOA diff → ±0.85 after tanh
-    funnel_score = math.tanh(dvoa_diff / 20.0)
-
-    # Base adjustment: ±3% max
-    base_adjustment = funnel_score * 0.03
-
-    # Identity dampener: balanced offenses more sensitive, extreme offenses less
-    # identity_weight ranges from 0.0 (extreme offense) to 1.0 (balanced offense)
-    identity_weight = 1.0 - 2.0 * abs(neutral_pass_rate - 0.5)
-
-    # Final adjustment
-    matchup_adj = base_adjustment * identity_weight
-
-    return max(-0.03, min(0.03, matchup_adj))
-
-
-def get_neutral_pass_rate(team: str, season: int, week: int, lookback: int = 6) -> float:
-    """
-    Calculate neutral game pass rate from box score data.
-    Uses pass_att and rush_att from box_score_summary table.
-    
-    Returns:
-        Pass rate as decimal (0.0-1.0)
-    """
-    conn = get_connection()
-    start_week = max(1, week - lookback)
-    
-    query = """
-        SELECT SUM(pass_att) as total_pass,
-               SUM(rush_att) as total_rush
-        FROM box_score_summary
-        WHERE team = ?
-          AND season = ?
-          AND week >= ?
-          AND week < ?
-    """
-    
-    df = pd.read_sql_query(query, conn, params=(team, season, start_week, week))
-    conn.close()
-    
-    if len(df) == 0 or df['total_pass'].iloc[0] is None:
-        return 0.60  # Default ~60% pass rate
-    
-    total_pass = df['total_pass'].iloc[0] or 0
-    total_rush = df['total_rush'].iloc[0] or 0
-    total_plays = total_pass + total_rush
-    
-    if total_plays < 20:
-        return 0.60
-    
-    return total_pass / total_plays
-
-
 def split_plays_pass_rush(
     team: str,
-    opponent: str,
     season: int,
     week: int,
     total_plays: int,
@@ -724,11 +641,36 @@ def split_plays_pass_rush(
     Returns:
         Tuple of (pass_attempts, rush_attempts)
     """
-    # Get neutral pass rate from play-by-play data (Q1-Q3, close games)
-    lookback = min(6, week - 1)
-    neutral_pass_rate = get_neutral_pass_rate(team, season, week, lookback)
+    conn = get_connection()
 
-    # Saturating spread adjustment using tanh function
+    # Query for neutral game script (close score, not 4th quarter)
+    # Note: box_score_summary may not have quarter/score_differential columns
+    # We'll use overall pass rate from recent games as approximation
+    lookback = min(6, week - 1)
+    start_week = max(1, week - lookback)
+
+    query = """
+        SELECT SUM(pass_att) as total_pass,
+               SUM(rush_att) as total_rush
+        FROM box_score_summary
+        WHERE team = ?
+          AND season = ?
+          AND week >= ?
+          AND week < ?
+    """
+
+    df = pd.read_sql_query(query, conn, params=(team, season, start_week, week))
+    conn.close()
+
+    if len(df) == 0 or df['total_pass'].iloc[0] is None:
+        # No data - use league average
+        neutral_pass_rate = 0.60  # Typical ~60% pass rate in modern NFL
+    else:
+        total_pass = df['total_pass'].iloc[0]
+        total_rush = df['total_rush'].iloc[0]
+        neutral_pass_rate = total_pass / (total_pass + total_rush) if (total_pass + total_rush) > 0 else 0.60
+
+    # Game script adjustment from spread
     script_adj = 0.0
     if spread_line is not None:
         # Determine team spread
@@ -737,26 +679,19 @@ def split_plays_pass_rush(
         else:
             team_spread = spread_line
 
-        # Caps around ±6% with smooth saturation
-        base_spread_adj = 0.06 * math.tanh(team_spread / 7.0)
-
-        # Reduce effect for teams with extreme neutral pass rates
-        # Balanced offenses (50%) get full effect, extreme offenses (30% or 70%) get half
-        identity_dampener = 1.0 - abs(neutral_pass_rate - 0.5)  # 0.0 to 0.5 range
-        script_adj = base_spread_adj * (0.5 + identity_dampener)
-
-    # Defensive matchup volume adjustment
-    matchup_adj = get_defensive_matchup_adjustment(opponent, season, week, neutral_pass_rate)
+        # Trailing teams (underdogs) pass more
+        # Leading teams (favorites) rush more
+        # Formula: +1% pass rate per point as underdog
+        script_adj = team_spread * 0.01  # If +7 underdog, pass 7% more
 
     # High-pace boost: +2% pass rate only if close game (spread <= 4)
     high_pace_adj = 0.0
     if high_pace and spread_line is not None and abs(spread_line) <= 4:
         high_pace_adj = 0.02  # +2 percentage points
 
-    # Applied pass rate with hard clamp to prevent nonsense outcomes
-    game_pass_rate = neutral_pass_rate + script_adj + matchup_adj + high_pace_adj
-    # Hard clamp to 40-75% regardless of input combination
-    game_pass_rate = max(0.40, min(0.75, game_pass_rate))
+    # Applied pass rate
+    game_pass_rate = neutral_pass_rate + script_adj + high_pace_adj
+    game_pass_rate = max(0.45, min(0.75, game_pass_rate))
 
     # Allocate plays
     pass_attempts = round(total_plays * game_pass_rate)
@@ -994,218 +929,8 @@ def allocate_rushing_volume(
 # Layer 3B: Passing Volume Allocation
 # ============================================================================
 
-def get_targeted_attempt_rate(team: str, season: int, week: int, opponent: str) -> float:
-    """
-    Calculate team/QB-specific targeted attempt rate.
-    Uses team total targets / team total pass attempts as base rate.
-
-    CRITICAL: Sacks are NOT included in pass attempts, so we use
-    targets/attempts directly as the proxy for targetable rate.
-
-    Returns:
-        Targeted attempt rate (0.86-0.95), representing % of attempts that become targets
-    """
-    conn = get_connection()
-
-    # Get recent team passing attempts and targets (last 4 games)
-    lookback = min(4, week - 1)
-    start_week = max(1, week - lookback)
-
-    # Query team-level pass attempts
-    attempts_query = """
-        SELECT SUM(attempts) as total_attempts
-        FROM player_stats
-        WHERE team = ?
-          AND season = ?
-          AND position = 'QB'
-          AND week >= ?
-          AND week < ?
-          AND season_type = 'REG'
-    """
-
-    # Query team-level targets (WR/TE/RB)
-    targets_query = """
-        SELECT SUM(targets) as total_targets
-        FROM player_stats
-        WHERE team = ?
-          AND season = ?
-          AND position IN ('WR', 'TE', 'RB')
-          AND week >= ?
-          AND week < ?
-          AND season_type = 'REG'
-    """
-
-    attempts_df = pd.read_sql_query(attempts_query, conn, params=(team, season, start_week, week))
-    targets_df = pd.read_sql_query(targets_query, conn, params=(team, season, start_week, week))
-    conn.close()
-
-    if len(attempts_df) == 0 or attempts_df['total_attempts'].iloc[0] is None:
-        return 0.92  # Default
-
-    total_attempts = attempts_df['total_attempts'].iloc[0] or 0
-    total_targets = targets_df['total_targets'].iloc[0] or 0
-
-    if total_attempts == 0:
-        return 0.92
-
-    # Base rate: targets / attempts
-    # This accounts for sacks, throwaways, spikes implicitly
-    base_rate = total_targets / total_attempts
-
-    # Adjust for opponent pressure (use defensive pass DVOA as coarse proxy)
-    try:
-        def_pass_dvoa = ydvoa.get_defensive_dvoa(opponent, season, week, 'pass')
-
-        # Negative DVOA = better defense = more pressure = slightly lower target rate
-        # Keep adjustment small since this is a coarse proxy
-        # Scale: ±10% DVOA = ±0.5% target rate adjustment
-        pressure_adj = -0.0005 * def_pass_dvoa
-        pressure_adj = max(-0.02, min(0.02, pressure_adj))  # Cap at ±2%
-    except:
-        pressure_adj = 0.0
-
-    adjusted_rate = base_rate + pressure_adj
-
-    # Clamp to sane range
-    return max(0.86, min(0.95, adjusted_rate))
-
-
-def apply_share_stabilizers(
-    projections: List[PlayerProjection],
-    total_targets: float,
-    team: str,
-    season: int,
-    week: int
-) -> None:
-    """
-    Apply consistency weighting and floor/ceiling caps to target projections.
-    PERFORMANCE: Uses batch query for all players (not per-player loop).
-    BEHAVIOR: Enforces participation pool to prevent 0-target projections for active players.
-
-    Modifies projections in-place while maintaining conservation.
-    """
-    if len(projections) == 0:
-        return
-
-    conn = get_connection()
-
-    # 5a: BATCH query for all player target history (performance fix)
-    lookback = min(4, week - 1)
-    start_week = max(1, week - lookback)
-
-    player_names = [p.player_name for p in projections]
-    placeholders = ','.join('?' * len(player_names))
-
-    query = f"""
-        SELECT player_display_name, week, targets
-        FROM player_stats
-        WHERE team = ?
-          AND season = ?
-          AND week >= ?
-          AND week < ?
-          AND season_type = 'REG'
-          AND player_display_name IN ({placeholders})
-    """
-
-    params = (team, season, start_week, week) + tuple(player_names)
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-
-    # Build per-player metrics
-    player_metrics = {}
-    for player_name in player_names:
-        player_df = df[df['player_display_name'] == player_name]
-
-        # Check if player is "in rotation" (has targets in recent games)
-        has_recent_activity = len(player_df) > 0 and player_df['targets'].sum() > 0
-
-        # Calculate consistency (CV)
-        if len(player_df) >= 2:
-            targets_list = player_df['targets'].tolist()
-            mean_targets = sum(targets_list) / len(targets_list)
-            variance = sum((t - mean_targets) ** 2 for t in targets_list) / len(targets_list)
-            std_targets = variance ** 0.5
-            cv = std_targets / mean_targets if mean_targets > 0 else 1.0
-        else:
-            cv = 1.0  # Unknown consistency
-
-        player_metrics[player_name] = {
-            'in_rotation': has_recent_activity,
-            'cv': cv,
-            'recent_games': len(player_df)
-        }
-
-    # Apply consistency weighting and tag high performers
-    for proj in projections:
-        metrics = player_metrics.get(proj.player_name, {'cv': 1.0, 'in_rotation': False})
-        cv = metrics['cv']
-
-        # Consistency weight
-        if cv < 0.4:
-            consistency_weight = 1.10
-            proj._is_consistent_alpha = True  # Tag for ceiling exception
-        elif cv > 0.8:
-            consistency_weight = 0.90
-            proj._is_consistent_alpha = False
-        else:
-            consistency_weight = 1.0
-            proj._is_consistent_alpha = False
-
-        proj.projected_targets *= consistency_weight
-        proj._in_rotation = metrics['in_rotation']
-
-    # 5b: Participation pool rule (fixes "active player → 0 targets" issue)
-    PARTICIPATION_FLOOR = 0.8  # Minimum targets for in-rotation players
-
-    for proj in projections:
-        if proj._in_rotation and proj.projected_targets < PARTICIPATION_FLOOR:
-            proj.projected_targets = PARTICIPATION_FLOOR
-
-    # Apply ceiling caps
-    CEILING = 15.0
-
-    for proj in projections:
-        if proj.projected_targets > CEILING:
-            # Exception: consistent alphas can exceed ceiling
-            if not getattr(proj, '_is_consistent_alpha', False):
-                proj.projected_targets = CEILING
-
-    # Re-normalize to maintain conservation
-    current_total = sum(p.projected_targets for p in projections)
-
-    if current_total > 0:
-        scaling_factor = total_targets / current_total
-        for proj in projections:
-            proj.projected_targets *= scaling_factor
-            proj.projected_targets = round(proj.projected_targets, 1)
-
-    # Final drift correction
-    allocated_total = sum(p.projected_targets for p in projections)
-    drift = total_targets - allocated_total
-
-    if abs(drift) > 0.01:
-        projections_sorted = sorted(projections, key=lambda x: x.weighted_share, reverse=True)
-        increment = 0.5
-        adjustments_needed = int(abs(drift) / increment)
-
-        for i in range(adjustments_needed):
-            idx = i % len(projections_sorted)
-            if drift > 0:
-                projections_sorted[idx].projected_targets += increment
-            else:
-                projections_sorted[idx].projected_targets -= increment
-
-        # Force exact conservation
-        allocated_total = sum(p.projected_targets for p in projections)
-        final_drift = total_targets - allocated_total
-        if abs(final_drift) > 0.01:
-            projections_sorted[0].projected_targets += final_drift
-            projections_sorted[0].projected_targets = round(projections_sorted[0].projected_targets, 1)
-
-
 def allocate_passing_volume(
     team: str,
-    opponent: str,
     season: int,
     week: int,
     team_pass_att: int
@@ -1214,18 +939,17 @@ def allocate_passing_volume(
     Allocate targets to receivers (WR/TE/RB) with exact conservation.
 
     Formula:
-    - Targeted attempts: Dynamic % based on team/QB/opponent (86-95%)
-    - Other attempts: Sacks, throwaways, spikes (varies by team)
+    - Targeted attempts: 92% of pass attempts become targets
+    - Other attempts: 8% (throwaways, spikes, sacks)
     - Weighted share: 70% last 4 games, 30% season
     - Initial allocation: targets = TotalTargets * share
-    - Share stabilizers: Consistency weighting + floor/ceiling caps
     - Fix rounding drift to ensure sum = TotalTargets
 
     Returns:
         List of PlayerProjection objects with targets allocated
     """
-    # Determine total targets available (dynamic rate based on team/QB/opponent)
-    targeted_att_rate = get_targeted_attempt_rate(team, season, week, opponent)
+    # Determine total targets available
+    targeted_att_rate = 0.92
     total_targets = round(team_pass_att * targeted_att_rate)
 
     # Get receiver shares (WR, TE, RB who receive)
@@ -1267,9 +991,29 @@ def allocate_passing_volume(
         proj.projected_targets = round(total_targets * weighted_share, 1)
         projections.append(proj)
 
-    # Apply share stabilizers (consistency weighting, floor/ceiling caps, drift correction)
-    # This replaces the old simple drift reconciliation with comprehensive stabilization
-    apply_share_stabilizers(projections, total_targets, team, season, week)
+    # Fix rounding drift
+    allocated_total = sum(p.projected_targets for p in projections)
+    drift = total_targets - allocated_total
+
+    if abs(drift) > 0.01:
+        projections_sorted = sorted(projections, key=lambda x: x.weighted_share, reverse=True)
+
+        increment = 0.5
+        adjustments_needed = int(abs(drift) / increment)
+
+        for i in range(adjustments_needed):
+            idx = i % len(projections_sorted)
+            if drift > 0:
+                projections_sorted[idx].projected_targets += increment
+            else:
+                projections_sorted[idx].projected_targets -= increment
+
+        # Force exact conservation by giving any remaining drift to the highest-share player
+        allocated_total = sum(p.projected_targets for p in projections)
+        final_drift = total_targets - allocated_total
+        if abs(final_drift) > 0.01:
+            projections_sorted[0].projected_targets += final_drift
+            projections_sorted[0].projected_targets = round(projections_sorted[0].projected_targets, 1)
 
     return projections
 
@@ -2071,7 +1815,7 @@ def project_matchup(
     away_plays = predict_team_plays(away_team, home_team, season, week, vegas_total, spread_line, is_home=False, high_pace=high_pace)
 
     # Layer 2: Team - Split plays into pass/rush
-    away_pass, away_rush = split_plays_pass_rush(away_team, home_team, season, week, away_plays, spread_line, is_home=False, high_pace=high_pace)
+    away_pass, away_rush = split_plays_pass_rush(away_team, season, week, away_plays, spread_line, is_home=False, high_pace=high_pace)
 
     # Layer 3: Volume - Allocate to players
     # Layer 3C: QB allocation first (to determine mobile QB carries)
@@ -2084,7 +1828,7 @@ def project_matchup(
 
     # Layer 3A/3B: RB and receiver allocation
     away_rbs = allocate_rushing_volume(away_team, season, week, away_rb_rush_att)
-    away_recs = allocate_passing_volume(away_team, home_team, season, week, away_pass)
+    away_recs = allocate_passing_volume(away_team, season, week, away_pass)
 
     # Layer 4: Efficiency - Apply DVOA
     apply_rushing_efficiency(away_rbs, home_team, season, week)
@@ -2138,7 +1882,7 @@ def project_matchup(
     home_plays = predict_team_plays(home_team, away_team, season, week, vegas_total, spread_line, is_home=True, high_pace=high_pace)
 
     # Layer 2: Team - Split plays into pass/rush
-    home_pass, home_rush = split_plays_pass_rush(home_team, away_team, season, week, home_plays, spread_line, is_home=True, high_pace=high_pace)
+    home_pass, home_rush = split_plays_pass_rush(home_team, season, week, home_plays, spread_line, is_home=True, high_pace=high_pace)
 
     # Layer 3: Volume - Allocate to players
     # Layer 3C: QB allocation first (to determine mobile QB carries)
@@ -2151,7 +1895,7 @@ def project_matchup(
 
     # Layer 3A/3B: RB and receiver allocation
     home_rbs = allocate_rushing_volume(home_team, season, week, home_rb_rush_att)
-    home_recs = allocate_passing_volume(home_team, away_team, season, week, home_pass)
+    home_recs = allocate_passing_volume(home_team, season, week, home_pass)
 
     # Layer 4: Efficiency - Apply DVOA
     apply_rushing_efficiency(home_rbs, away_team, season, week)
@@ -2226,7 +1970,7 @@ if __name__ == "__main__":
     print(f"  Projected plays: {total_plays}")
 
     print(f"\nLayer 2: Splitting plays into pass/rush")
-    pass_att, rush_att = split_plays_pass_rush(team, opponent, season, week, total_plays, is_home=False)
+    pass_att, rush_att = split_plays_pass_rush(team, season, week, total_plays, is_home=False)
     print(f"  Pass attempts: {pass_att} ({pass_att/total_plays:.1%})")
     print(f"  Rush attempts: {rush_att} ({rush_att/total_plays:.1%})")
     print(f"  Conservation: {pass_att} + {rush_att} = {pass_att + rush_att} (should be {total_plays})")
@@ -2240,7 +1984,7 @@ if __name__ == "__main__":
     print(f"  Conservation: Sum carries = {total_carries:.1f} (should be {rush_att})")
 
     print(f"\nLayer 3B: Allocating passing volume to receivers")
-    rec_projs = allocate_passing_volume(team, opponent, season, week, pass_att)
+    rec_projs = allocate_passing_volume(team, season, week, pass_att)
     print(f"  Found {len(rec_projs)} receivers")
     total_targets = sum(p.projected_targets for p in rec_projs)
     for proj in rec_projs[:5]:

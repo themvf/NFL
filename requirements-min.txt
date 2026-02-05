@@ -8,4 +8,5 @@ rich==13.8.1
 loguru==0.7.2
 pydantic==2.9.2
 python-dotenv==1.0.1
+pulp==2.8.0
 

@@ -1,0 +1,818 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+import math
+import re
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+
+DATA_BASE = Path("data/processed").resolve()
+
+TEAM_ALIASES = {
+    "JAC": "JAX",
+    "JAX": "JAX",
+    "LAR": "LA",
+    "LA": "LA",
+    "LAC": "LAC",
+    "LVR": "LV",
+    "LV": "LV",
+    "WSH": "WAS",
+    "WAS": "WAS",
+    "GNB": "GB",
+    "GB": "GB",
+    "KAN": "KC",
+    "KC": "KC",
+    "SFO": "SF",
+    "SF": "SF",
+    "TAM": "TB",
+    "TB": "TB",
+    "NWE": "NE",
+    "NE": "NE",
+    "NOR": "NO",
+    "NO": "NO",
+}
+
+NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+
+
+def normalize_team(team: str) -> str:
+    if team is None:
+        return ""
+    t = str(team).strip().upper()
+    return TEAM_ALIASES.get(t, t)
+
+
+def normalize_name(name: str) -> str:
+    if name is None:
+        return ""
+    txt = str(name).lower().strip()
+    txt = re.sub(r"[^a-z0-9 ]+", " ", txt)
+    parts = [p for p in txt.split() if p and p not in NAME_SUFFIXES]
+    return "".join(parts)
+
+
+def _pick_column(columns: Sequence[str], candidates: Sequence[str]) -> Optional[str]:
+    col_set = {c.lower(): c for c in columns}
+    for c in candidates:
+        if c in columns:
+            return c
+        c_lower = c.lower()
+        if c_lower in col_set:
+            return col_set[c_lower]
+    return None
+
+
+def _list_available_weeks(table: str, season: int) -> List[int]:
+    season_dir = DATA_BASE / table / f"season={season}"
+    if not season_dir.exists():
+        return []
+    weeks: List[int] = []
+    for p in season_dir.glob("week=*"):
+        wk = p.name.split("=", 1)[1]
+        if wk.isdigit():
+            weeks.append(int(wk))
+    return sorted(set(weeks))
+
+
+def _read_player_week(season: int, weeks: Sequence[int]) -> pd.DataFrame:
+    if not weeks:
+        return pd.DataFrame()
+    cols = [
+        "player_name",
+        "player_display_name",
+        "position",
+        "recent_team",
+        "team",
+        "season",
+        "week",
+        "passing_yards",
+        "passing_tds",
+        "interceptions",
+        "passing_2pt_conversions",
+        "rushing_yards",
+        "rushing_tds",
+        "rushing_2pt_conversions",
+        "receiving_yards",
+        "receiving_tds",
+        "receiving_2pt_conversions",
+        "receptions",
+        "special_teams_tds",
+        "rushing_fumbles_lost",
+        "receiving_fumbles_lost",
+        "sack_fumbles_lost",
+        "fantasy_points",
+        "fantasy_points_ppr",
+    ]
+    parts = []
+    for wk in weeks:
+        path = DATA_BASE / f"player_week/season={season}/week={wk}/player_week.parquet"
+        if path.exists():
+            try:
+                parts.append(pd.read_parquet(path, columns=cols))
+            except Exception:
+                parts.append(pd.read_parquet(path))
+    if not parts:
+        return pd.DataFrame()
+    df = pd.concat(parts, ignore_index=True)
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
+
+def _compute_dk_points(df: pd.DataFrame) -> pd.Series:
+    def col(name: str) -> pd.Series:
+        if name in df.columns:
+            return pd.to_numeric(df[name], errors="coerce").fillna(0.0)
+        return pd.Series([0.0] * len(df), index=df.index)
+
+    passing_yards = col("passing_yards")
+    passing_tds = col("passing_tds")
+    interceptions = col("interceptions")
+    pass_2pt = col("passing_2pt_conversions")
+
+    rushing_yards = col("rushing_yards")
+    rushing_tds = col("rushing_tds")
+    rush_2pt = col("rushing_2pt_conversions")
+
+    receiving_yards = col("receiving_yards")
+    receiving_tds = col("receiving_tds")
+    rec_2pt = col("receiving_2pt_conversions")
+    receptions = col("receptions")
+
+    special_tds = col("special_teams_tds")
+
+    fumbles_lost = col("rushing_fumbles_lost") + col("receiving_fumbles_lost") + col("sack_fumbles_lost")
+
+    pass_bonus = (passing_yards >= 300).astype(float) * 3.0
+    rush_bonus = (rushing_yards >= 100).astype(float) * 3.0
+    rec_bonus = (receiving_yards >= 100).astype(float) * 3.0
+
+    return (
+        passing_yards * 0.04
+        + passing_tds * 4.0
+        + pass_bonus
+        - interceptions
+        + rushing_yards * 0.1
+        + rushing_tds * 6.0
+        + rush_bonus
+        + receiving_yards * 0.1
+        + receiving_tds * 6.0
+        + rec_bonus
+        + receptions
+        + special_tds * 6.0
+        + (pass_2pt + rush_2pt + rec_2pt) * 2.0
+        - fumbles_lost
+    )
+
+
+def _build_stat_projections(
+    season: int,
+    week: int,
+    recent_weeks: int,
+    use_full_season: bool,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    weeks_all = _list_available_weeks("player_week", season)
+    if not weeks_all:
+        return pd.DataFrame(), pd.DataFrame()
+
+    if use_full_season:
+        weeks = [w for w in weeks_all if w <= week]
+    else:
+        past = [w for w in weeks_all if w <= week]
+        weeks = past[-recent_weeks:] if past else []
+
+    df = _read_player_week(season, weeks)
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    df["dk_points"] = _compute_dk_points(df)
+    name_col = "player_display_name" if "player_display_name" in df.columns else "player_name"
+    team_col = "recent_team" if "recent_team" in df.columns else "team"
+
+    df["name_key"] = df[name_col].astype(str).map(normalize_name)
+    df["team_key"] = df[team_col].astype(str).map(normalize_team)
+    df = df[df["name_key"] != ""]
+
+    agg = df.groupby(["name_key", "team_key"], as_index=False)["dk_points"].mean()
+    agg = agg.rename(columns={"dk_points": "avg_dk_points"})
+
+    by_name = agg.groupby("name_key", as_index=False).agg(
+        avg_dk_points=("avg_dk_points", "mean"),
+        team_count=("team_key", "nunique"),
+    )
+    return agg, by_name
+
+
+def _load_local_injuries(season: int, week: int) -> Tuple[pd.DataFrame, Optional[int]]:
+    base = DATA_BASE / "injuries" / f"season={season}"
+    if not base.exists():
+        return pd.DataFrame(), None
+    weeks = _list_available_weeks("injuries", season)
+    if not weeks:
+        return pd.DataFrame(), None
+    use_week = week if week in weeks else max(weeks)
+    path = base / f"week={use_week}/injuries.parquet"
+    if not path.exists():
+        return pd.DataFrame(), None
+    df = pd.read_parquet(path)
+    df.columns = [c.lower() for c in df.columns]
+    return df, use_week
+
+
+def _load_live_injuries(season: int) -> pd.DataFrame:
+    try:
+        import nfl_data_py as nfl  # type: ignore
+    except Exception:
+        return pd.DataFrame()
+    try:
+        df = nfl.import_injuries([season])
+        if df is None:
+            return pd.DataFrame()
+        df = df.copy()
+        df.columns = [c.lower() for c in df.columns]
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
+def _prepare_player_pool(
+    dk_df: pd.DataFrame,
+    name_col: str,
+    id_col: Optional[str],
+    pos_col: Optional[str],
+    roster_col: Optional[str],
+    team_col: Optional[str],
+    salary_col: str,
+    avg_col: Optional[str],
+    game_col: Optional[str],
+) -> pd.DataFrame:
+    df = dk_df.copy()
+    df.columns = [c.strip() for c in df.columns]
+
+    df["player_name"] = df[name_col].astype(str).str.strip()
+    if id_col:
+        df["dk_id"] = df[id_col].astype(str).str.strip()
+    else:
+        df["dk_id"] = ""
+    df["position"] = df[pos_col].astype(str).str.strip() if pos_col else ""
+    df["team"] = df[team_col].astype(str).str.strip() if team_col else ""
+    df["team"] = df["team"].map(normalize_team)
+    df["salary"] = pd.to_numeric(df[salary_col], errors="coerce").fillna(0).astype(int)
+    if avg_col and avg_col in df.columns:
+        df["avg_points"] = pd.to_numeric(df[avg_col], errors="coerce").fillna(0.0)
+    else:
+        df["avg_points"] = 0.0
+    if roster_col and roster_col in df.columns:
+        df["roster_position"] = df[roster_col].astype(str).str.upper().str.strip()
+    else:
+        df["roster_position"] = ""
+    if game_col and game_col in df.columns:
+        df["game_info"] = df[game_col].astype(str)
+    else:
+        df["game_info"] = ""
+
+    if df["roster_position"].str.contains("CPT").any():
+        flex_only = df[df["roster_position"].str.contains("FLEX")]
+        if not flex_only.empty:
+            df = flex_only
+
+    df["name_key"] = df["player_name"].map(normalize_name)
+    df["player_key"] = df["team"].astype(str) + "|" + df["player_name"] + "|" + df["position"].astype(str)
+
+    agg = (
+        df.sort_values("salary", ascending=True)
+        .groupby("player_key", as_index=False)
+        .agg(
+            player_name=("player_name", "first"),
+            dk_id=("dk_id", "first"),
+            position=("position", "first"),
+            team=("team", "first"),
+            salary=("salary", "min"),
+            avg_points=("avg_points", "max"),
+            game_info=("game_info", "first"),
+            name_key=("name_key", "first"),
+        )
+    )
+
+    if (agg["dk_id"].astype(str) != "").any():
+        agg["dk_name_id"] = agg["player_name"] + " (" + agg["dk_id"].astype(str) + ")"
+    else:
+        agg["dk_name_id"] = agg["player_name"]
+
+    agg["display_name"] = agg["player_name"] + " (" + agg["position"].astype(str) + ", " + agg["team"].astype(str) + ")"
+    return agg
+
+
+def _apply_injury_exclusions(
+    pool: pd.DataFrame,
+    season: int,
+    week: int,
+    exclude_statuses: Sequence[str],
+    use_live: bool,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[int]]:
+    if use_live:
+        inj = _load_live_injuries(season)
+        injury_week = None
+    else:
+        inj, injury_week = _load_local_injuries(season, week)
+
+    if inj.empty:
+        return pool, pd.DataFrame(), injury_week
+
+    status_col = "report_status" if "report_status" in inj.columns else "practice_status"
+    if status_col not in inj.columns:
+        return pool, pd.DataFrame(), injury_week
+
+    name_col = "full_name" if "full_name" in inj.columns else "player_name"
+    team_col = "team" if "team" in inj.columns else "club"
+
+    inj = inj.copy()
+    inj["status"] = inj[status_col].astype(str).str.upper().str.strip()
+    inj["name_key"] = inj[name_col].astype(str).map(normalize_name)
+    inj["team_key"] = inj[team_col].astype(str).map(normalize_team)
+
+    excluded = inj[inj["status"].isin([s.upper() for s in exclude_statuses])]
+    if excluded.empty:
+        return pool, pd.DataFrame(), injury_week
+
+    merged = pool.merge(
+        excluded[["name_key", "team_key", "status"]],
+        left_on=["name_key", "team"],
+        right_on=["name_key", "team_key"],
+        how="left",
+    )
+    injured = merged[merged["status"].notna()].copy()
+    filtered = merged[merged["status"].isna()].drop(columns=["team_key", "status"])
+    return filtered, injured, injury_week
+
+
+def _build_optimizer_pool(pool: pd.DataFrame) -> pd.DataFrame:
+    base = pool.copy()
+    base["base_id"] = base["player_key"]
+    base["proj_points"] = pd.to_numeric(base["proj_points"], errors="coerce").fillna(0.0)
+    base["salary"] = pd.to_numeric(base["salary"], errors="coerce").fillna(0).astype(int)
+
+    flex = base.copy()
+    flex["roster"] = "FLEX"
+    flex["is_captain"] = False
+    flex["salary"] = flex["salary"]
+    flex["proj"] = flex["proj_points"]
+
+    cpt = base.copy()
+    cpt["roster"] = "CPT"
+    cpt["is_captain"] = True
+    cpt["salary"] = (cpt["salary"] * 1.5 / 50).round().astype(int) * 50
+    cpt["proj"] = cpt["proj_points"] * 1.5
+
+    all_rows = pd.concat([cpt, flex], ignore_index=True)
+    all_rows["row_id"] = np.arange(len(all_rows))
+    return all_rows
+
+
+def _solve_showdown_lineup(
+    pool: pd.DataFrame,
+    salary_cap: int,
+    min_team_players: int,
+    must_include: Sequence[str],
+    exclude: Sequence[str],
+    lock_captain: Optional[str],
+    lock_flex: Sequence[str],
+    allowed_captains: Optional[Sequence[str]],
+    avoid_lineups: Sequence[Sequence[int]],
+) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    try:
+        import pulp  # type: ignore
+    except Exception:
+        return None, "PuLP not installed. Add pulp to requirements to enable optimizer."
+
+    df = pool.copy()
+    if exclude:
+        df = df[~df["base_id"].isin(exclude)]
+    if allowed_captains is not None:
+        mask = df["is_captain"] & (~df["base_id"].isin(allowed_captains))
+        df = df[~mask]
+    if df.empty:
+        return None, "No players left after exclusions."
+
+    df = df.set_index("row_id", drop=False)
+
+    x = {rid: pulp.LpVariable(f"x_{rid}", cat="Binary") for rid in df.index}
+    prob = pulp.LpProblem("showdown", pulp.LpMaximize)
+    prob += pulp.lpSum(x[rid] * df.loc[rid, "proj_adj"] for rid in df.index)
+
+    prob += pulp.lpSum(x[rid] * df.loc[rid, "salary"] for rid in df.index) <= int(salary_cap)
+
+    prob += pulp.lpSum(x[rid] for rid in df.index if df.loc[rid, "is_captain"]) == 1
+    prob += pulp.lpSum(x[rid] for rid in df.index if not df.loc[rid, "is_captain"]) == 5
+
+    for base_id, rows in df.groupby("base_id").groups.items():
+        prob += pulp.lpSum(x[rid] for rid in rows) <= 1
+
+    teams = [t for t in sorted(df["team"].dropna().unique().tolist()) if t]
+    if len(teams) == 2 and min_team_players > 0:
+        for t in teams:
+            rows = df.index[df["team"] == t].tolist()
+            if rows:
+                prob += pulp.lpSum(x[rid] for rid in rows) >= int(min_team_players)
+
+    for base_id in must_include:
+        rows = df.index[df["base_id"] == base_id].tolist()
+        if not rows:
+            return None, f"Must-include player missing from pool: {base_id}"
+        prob += pulp.lpSum(x[rid] for rid in rows) == 1
+
+    if lock_captain:
+        rows = df.index[(df["base_id"] == lock_captain) & (df["is_captain"])].tolist()
+        if not rows:
+            return None, "Locked captain not available in pool."
+        prob += x[rows[0]] == 1
+
+    for base_id in lock_flex:
+        rows = df.index[(df["base_id"] == base_id) & (~df["is_captain"])].tolist()
+        if not rows:
+            return None, f"Locked flex not available in pool: {base_id}"
+        prob += x[rows[0]] == 1
+
+    for prev in avoid_lineups:
+        rows = [rid for rid in prev if rid in x]
+        if rows:
+            prob += pulp.lpSum(x[rid] for rid in rows) <= 5
+
+    solver = pulp.PULP_CBC_CMD(msg=False)
+    status = prob.solve(solver)
+    if pulp.LpStatus[status] != "Optimal":
+        return None, "Optimizer failed to find a valid lineup."
+
+    chosen = df[df.index.map(lambda rid: x[rid].value() == 1)].copy()
+    return chosen, None
+
+
+def _generate_lineups(
+    pool: pd.DataFrame,
+    num_lineups: int,
+    salary_cap: int,
+    min_team_players: int,
+    exposure_limits: Dict[str, Tuple[int, int]],
+    exclude: Sequence[str],
+    lock_captain: Optional[str],
+    lock_flex: Sequence[str],
+    allowed_captains: Optional[Sequence[str]],
+    randomness: float,
+    enforce_unique: bool,
+) -> Tuple[List[pd.DataFrame], List[str]]:
+    rng = np.random.default_rng(42)
+    counts: Dict[str, int] = {bid: 0 for bid in pool["base_id"].unique().tolist()}
+    min_counts = {bid: exposure_limits.get(bid, (0, num_lineups))[0] for bid in counts}
+    max_counts = {bid: exposure_limits.get(bid, (0, num_lineups))[1] for bid in counts}
+
+    lineups: List[pd.DataFrame] = []
+    errors: List[str] = []
+    previous_lineups: List[List[int]] = []
+
+    for i in range(num_lineups):
+        remaining = num_lineups - i
+        forced = [bid for bid, min_ct in min_counts.items() if min_ct - counts.get(bid, 0) >= remaining]
+        maxed = [bid for bid, max_ct in max_counts.items() if counts.get(bid, 0) >= max_ct]
+
+        df = pool.copy()
+        if randomness > 0:
+            noise = rng.normal(1.0, randomness, size=len(df))
+            noise = np.clip(noise, 0.5, 1.5)
+            df["proj_adj"] = df["proj"] * noise
+        else:
+            df["proj_adj"] = df["proj"]
+
+        chosen, err = _solve_showdown_lineup(
+            df,
+            salary_cap=salary_cap,
+            min_team_players=min_team_players,
+            must_include=forced,
+            exclude=list(set(exclude) | set(maxed)),
+            lock_captain=lock_captain,
+            lock_flex=lock_flex,
+            allowed_captains=allowed_captains,
+            avoid_lineups=previous_lineups if enforce_unique else [],
+        )
+        if chosen is None:
+            errors.append(err or "Unknown optimizer failure.")
+            break
+
+        lineups.append(chosen)
+        previous_lineups.append(chosen["row_id"].tolist())
+        for bid in chosen["base_id"].unique().tolist():
+            counts[bid] = counts.get(bid, 0) + 1
+
+    return lineups, errors
+
+
+def render_showdown_generator(season: int, week: int) -> None:
+    st.header("DFS Showdown Generator (DraftKings)")
+    st.caption("Upload a DraftKings Showdown salaries CSV to build projections and generate lineups.")
+
+    salary_file = st.file_uploader("DK salaries CSV", type=["csv"], key="dk_salaries")
+    entry_file = st.file_uploader("Optional: DK entries template CSV", type=["csv"], key="dk_entries")
+
+    if not salary_file:
+        st.info("Upload a DK salaries CSV to get started.")
+        return
+
+    try:
+        dk_df = pd.read_csv(salary_file)
+    except Exception as exc:
+        st.error(f"Failed to read CSV: {exc}")
+        return
+
+    if dk_df.empty:
+        st.warning("The uploaded CSV is empty.")
+        return
+
+    cols = list(dk_df.columns)
+    name_col = _pick_column(cols, ["Name", "Name + ID", "Player", "PlayerName"])
+    id_col = _pick_column(cols, ["ID", "Player ID", "PlayerID"])
+    pos_col = _pick_column(cols, ["Position", "Pos"])
+    roster_col = _pick_column(cols, ["Roster Position", "RosterPosition"])
+    team_col = _pick_column(cols, ["TeamAbbrev", "Team", "TeamAbbr", "Team Abbrev"])
+    salary_col = _pick_column(cols, ["Salary"])
+    avg_col = _pick_column(cols, ["AvgPointsPerGame", "Avg Points", "AvgPoints"])
+    game_col = _pick_column(cols, ["Game Info", "GameInfo", "Game"])
+
+    with st.expander("Column mapping", expanded=False):
+        name_col = st.selectbox("Player name column", cols, index=cols.index(name_col) if name_col in cols else 0)
+        id_col = st.selectbox("Player ID column (optional)", [""] + cols, index=(cols.index(id_col) + 1) if id_col in cols else 0)
+        pos_col = st.selectbox("Position column (optional)", [""] + cols, index=(cols.index(pos_col) + 1) if pos_col in cols else 0)
+        roster_col = st.selectbox("Roster position column (optional)", [""] + cols, index=(cols.index(roster_col) + 1) if roster_col in cols else 0)
+        team_col = st.selectbox("Team column (optional)", [""] + cols, index=(cols.index(team_col) + 1) if team_col in cols else 0)
+        salary_col = st.selectbox("Salary column", cols, index=cols.index(salary_col) if salary_col in cols else 0)
+        avg_col = st.selectbox("Avg points column (optional)", [""] + cols, index=(cols.index(avg_col) + 1) if avg_col in cols else 0)
+        game_col = st.selectbox("Game info column (optional)", [""] + cols, index=(cols.index(game_col) + 1) if game_col in cols else 0)
+
+    if not name_col or not salary_col:
+        st.error("Name and Salary columns are required.")
+        return
+
+    pool = _prepare_player_pool(
+        dk_df,
+        name_col=name_col,
+        id_col=id_col or None,
+        pos_col=pos_col or None,
+        roster_col=roster_col or None,
+        team_col=team_col or None,
+        salary_col=salary_col,
+        avg_col=avg_col or None,
+        game_col=game_col or None,
+    )
+
+    if pool.empty:
+        st.warning("No players found after parsing the CSV.")
+        return
+
+    teams = sorted([t for t in pool["team"].dropna().unique().tolist() if t])
+    if len(teams) > 2:
+        st.warning("More than two teams detected. Showdown requires a single game slate.")
+
+    team_filter = st.multiselect("Teams in slate", options=teams, default=teams)
+    if team_filter:
+        pool = pool[pool["team"].isin(team_filter)]
+        pool = pool.reset_index(drop=True)
+
+    st.subheader("Projections")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        use_full_season = st.checkbox("Use full season data", value=False)
+    with col2:
+        recent_weeks = st.number_input("Recent weeks", min_value=1, max_value=10, value=4, step=1)
+    with col3:
+        fallback_to_dk_avg = st.checkbox("Fallback to DK AvgPointsPerGame", value=True)
+
+    stat_projections = None
+    by_name = None
+    try:
+        stat_projections, by_name = _build_stat_projections(season, week, int(recent_weeks), use_full_season)
+    except Exception:
+        stat_projections, by_name = None, None
+
+    pool["proj_points"] = np.nan
+    pool["proj_source"] = ""
+
+    if stat_projections is not None and not stat_projections.empty:
+        merged = pool.merge(
+            stat_projections,
+            left_on=["name_key", "team"],
+            right_on=["name_key", "team_key"],
+            how="left",
+        )
+        pool["proj_points"] = merged["avg_dk_points"]
+        pool["proj_source"] = np.where(pool["proj_points"].notna(), "stats", "")
+
+        if by_name is not None and not by_name.empty:
+            missing = pool["proj_points"].isna()
+            pool_missing = pool[missing].copy()
+            pool_missing = pool_missing.join(by_name.set_index("name_key"), on="name_key")
+            fill_mask = pool_missing["team_count"] == 1
+            pool.loc[pool_missing.index[fill_mask], "proj_points"] = pool_missing.loc[fill_mask, "avg_dk_points"].values
+            pool.loc[pool_missing.index[fill_mask], "proj_source"] = "stats"
+
+    if fallback_to_dk_avg:
+        missing = pool["proj_points"].isna()
+        pool.loc[missing, "proj_points"] = pool.loc[missing, "avg_points"]
+        pool.loc[missing & (pool["avg_points"] > 0), "proj_source"] = "dk_avg"
+
+    pool["proj_points"] = pool["proj_points"].fillna(0.0)
+
+    proj_display = pool[["display_name", "team", "position", "salary", "proj_points", "proj_source"]].copy()
+    proj_display = proj_display.rename(
+        columns={"display_name": "Player", "proj_points": "Proj", "proj_source": "Source"}
+    )
+    edited = st.data_editor(
+        proj_display,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Proj": st.column_config.NumberColumn("Proj", format="%.2f"),
+        },
+        disabled=["Player", "team", "position", "salary", "Source"],
+        key="showdown_proj_editor",
+    )
+    pool = pool.merge(edited[["Player", "Proj"]], left_on="display_name", right_on="Player", how="left")
+    pool["proj_points"] = pool["Proj"].fillna(pool["proj_points"])
+    pool = pool.drop(columns=["Player", "Proj"])
+
+    st.subheader("Injury Filters")
+    use_live_injuries = st.checkbox("Use live injuries (if available)", value=False)
+    status_options = ["Out", "IR", "PUP", "Suspended", "DNP", "Doubtful", "Questionable"]
+    exclude_statuses = st.multiselect(
+        "Exclude injury statuses",
+        options=status_options,
+        default=["Out", "IR", "PUP", "Suspended", "DNP", "Doubtful"],
+    )
+
+    filtered_pool, injured, injury_week = _apply_injury_exclusions(
+        pool,
+        season=season,
+        week=week,
+        exclude_statuses=exclude_statuses,
+        use_live=use_live_injuries,
+    )
+    if injury_week:
+        st.caption(f"Using local injury data for week {injury_week}.")
+    if not injured.empty:
+        st.warning(f"Excluded {len(injured)} injured players.")
+        st.dataframe(injured[["player_name", "team", "position", "status"]].rename(columns={"player_name": "Player"}), use_container_width=True)
+
+    pool = filtered_pool.copy().reset_index(drop=True)
+    pool["proj_points"] = pd.to_numeric(pool["proj_points"], errors="coerce").fillna(0.0)
+
+    st.subheader("Lineup Controls")
+    ctrl1, ctrl2, ctrl3 = st.columns(3)
+    with ctrl1:
+        num_lineups = st.number_input("Lineups to generate", min_value=1, max_value=150, value=20, step=1)
+    with ctrl2:
+        salary_cap = st.number_input("Salary cap", min_value=1, max_value=100000, value=50000, step=500)
+    with ctrl3:
+        randomness = st.slider("Projection randomness", min_value=0.0, max_value=0.30, value=0.05, step=0.01)
+
+    enforce_unique = st.checkbox("Enforce unique lineups", value=True)
+
+    player_labels = pool["display_name"].tolist()
+    label_to_id = dict(zip(pool["display_name"], pool["player_key"]))
+
+    exclude_players = st.multiselect("Exclude players", options=player_labels, default=[])
+    lock_captain_label = st.selectbox("Lock captain (optional)", options=[""] + player_labels, index=0)
+    lock_flex_labels = st.multiselect("Lock flex players (optional)", options=player_labels, default=[])
+
+    captain_pool_labels = st.multiselect("Captain pool (optional)", options=player_labels, default=player_labels)
+
+    st.subheader("Exposure Limits")
+    exposure_players = st.multiselect("Set exposure limits for players", options=player_labels, default=[])
+    exposure_limits: Dict[str, Tuple[int, int]] = {}
+    if exposure_players:
+        exp_df = pd.DataFrame({"Player": exposure_players, "Min%": 0, "Max%": 100})
+        exp_df = st.data_editor(exp_df, use_container_width=True, hide_index=True, key="showdown_exposure_editor")
+        for _, row in exp_df.iterrows():
+            base_id = label_to_id.get(row["Player"])
+            if not base_id:
+                continue
+            min_ct = math.ceil(float(row["Min%"]) / 100.0 * int(num_lineups))
+            max_ct = math.floor(float(row["Max%"]) / 100.0 * int(num_lineups))
+            exposure_limits[base_id] = (min_ct, max_ct)
+
+    if st.button("Generate lineups", key="showdown_generate"):
+        exclude_ids = [label_to_id[x] for x in exclude_players if x in label_to_id]
+        lock_captain_id = label_to_id.get(lock_captain_label) if lock_captain_label else None
+        lock_flex_ids = [label_to_id[x] for x in lock_flex_labels if x in label_to_id]
+        allowed_captains = [label_to_id[x] for x in captain_pool_labels if x in label_to_id]
+
+        invalid_exposures = []
+        for label, base_id in label_to_id.items():
+            if base_id in exposure_limits:
+                min_ct, max_ct = exposure_limits[base_id]
+                if min_ct > max_ct:
+                    invalid_exposures.append(label)
+        if invalid_exposures:
+            st.error(f"Exposure limits invalid (min > max) for: {', '.join(invalid_exposures)}")
+            return
+
+        if lock_captain_id and lock_captain_id in lock_flex_ids:
+            st.error("A player cannot be locked as both captain and flex.")
+            return
+
+        for locked_id in [lock_captain_id] + lock_flex_ids:
+            if not locked_id:
+                continue
+            min_ct, max_ct = exposure_limits.get(locked_id, (0, int(num_lineups)))
+            if max_ct < int(num_lineups):
+                st.error("Locked players must have max exposure of 100%.")
+                return
+
+        opt_pool = _build_optimizer_pool(pool)
+
+        lineups, errors = _generate_lineups(
+            opt_pool,
+            num_lineups=int(num_lineups),
+            salary_cap=int(salary_cap),
+            min_team_players=1,
+            exposure_limits=exposure_limits,
+            exclude=exclude_ids,
+            lock_captain=lock_captain_id,
+            lock_flex=lock_flex_ids,
+            allowed_captains=allowed_captains,
+            randomness=float(randomness),
+            enforce_unique=enforce_unique,
+        )
+
+        if errors:
+            st.error(errors[0])
+            return
+        if not lineups:
+            st.error("No lineups generated.")
+            return
+
+        lineup_rows = []
+        for idx, lineup in enumerate(lineups, start=1):
+            cpt_row = lineup[lineup["is_captain"]].iloc[0]
+            flex_rows = lineup[~lineup["is_captain"]].sort_values("proj", ascending=False)
+            flex_names = flex_rows["dk_name_id"].tolist()
+            total_salary = int(lineup["salary"].sum())
+            total_proj = float(lineup["proj"].sum())
+            lineup_rows.append(
+                {
+                    "Lineup": idx,
+                    "CPT": cpt_row["dk_name_id"],
+                    "FLEX1": flex_names[0],
+                    "FLEX2": flex_names[1],
+                    "FLEX3": flex_names[2],
+                    "FLEX4": flex_names[3],
+                    "FLEX5": flex_names[4],
+                    "Salary": total_salary,
+                    "Proj": round(total_proj, 2),
+                }
+            )
+
+        lineup_df = pd.DataFrame(lineup_rows)
+        st.subheader("Generated Lineups")
+        st.dataframe(lineup_df, use_container_width=True, hide_index=True)
+
+        all_selected = pd.concat(lineups, ignore_index=True)
+        exposure_counts = all_selected.groupby("base_id")["base_id"].count().reset_index(name="Count")
+        exposure_counts["Exposure%"] = (exposure_counts["Count"] / float(num_lineups) * 100).round(1)
+        exposure_view = pool[["player_key", "display_name"]].drop_duplicates().merge(
+            exposure_counts, left_on="player_key", right_on="base_id", how="right"
+        )
+        exposure_view = exposure_view.sort_values("Exposure%", ascending=False)
+        st.subheader("Exposure Summary")
+        st.dataframe(
+            exposure_view[["display_name", "Count", "Exposure%"]].rename(columns={"display_name": "Player"}),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        upload_cols = ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
+        upload_values = lineup_df[["CPT", "FLEX1", "FLEX2", "FLEX3", "FLEX4", "FLEX5"]].values.tolist()
+        lineup_upload = pd.DataFrame(upload_values, columns=upload_cols)
+
+        if entry_file is not None:
+            try:
+                entries = pd.read_csv(entry_file)
+                cpt_cols = [c for c in entries.columns if c.upper() == "CPT"]
+                flex_cols = [c for c in entries.columns if c.upper().startswith("FLEX")]
+                entry_cols = cpt_cols + flex_cols
+                if len(entry_cols) >= 6:
+                    limit = min(len(entries), len(lineup_upload))
+                    for i, col in enumerate(entry_cols[:6]):
+                        entries.loc[: limit - 1, col] = lineup_upload.iloc[:limit, i].values
+                    lineup_upload = entries
+                else:
+                    st.warning("Entries template missing lineup columns. Using basic upload format.")
+            except Exception as exc:
+                st.warning(f"Failed to read entries template: {exc}")
+
+        st.download_button(
+            "Download DK lineups CSV",
+            data=lineup_upload.to_csv(index=False),
+            file_name="dk_showdown_lineups.csv",
+            mime="text/csv",
+        )

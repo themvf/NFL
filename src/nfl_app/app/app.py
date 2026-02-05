@@ -10,6 +10,7 @@ import subprocess
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+from dfs_showdown import render_showdown_generator
 
 # Add parent directory to path for player_impact_analytics import
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -254,6 +255,7 @@ with colD:
             "First TD Grid",
             "First TD",
             "Data Updates",
+            "DFS Showdown",
             "Player Week",
             "Team Leaders",
             "Player Impact",
@@ -1972,6 +1974,12 @@ elif view == "Data Updates":
     st.write("- Play-by-Play (PBP): available when nflverse publishes; app auto-falls back until then.")
     st.write("- First TD views require PBP. Until PBP is published, the fallbacks show RB/WR/TE TD information from player_week.")
 
+
+# ========================================
+# DFS SHOWDOWN VIEW
+# ========================================
+elif view == "DFS Showdown":
+    render_showdown_generator(season, week)
 
 # ========================================
 # PLAYER IMPACT VIEW

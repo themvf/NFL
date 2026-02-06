@@ -737,23 +737,31 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     pool["proj_points"] = pool["proj_points"].fillna(0.0)
 
-    proj_display = pool[["display_name", "team", "position", "salary", "proj_points", "proj_source"]].copy()
+    proj_display = pool[
+        ["display_name", "team", "position", "salary", "avg_points", "proj_points", "proj_source"]
+    ].copy()
     proj_display = proj_display.rename(
-        columns={"display_name": "Player", "proj_points": "Proj", "proj_source": "Source"}
+        columns={
+            "display_name": "Player",
+            "avg_points": "DK Avg",
+            "proj_points": "My Proj",
+            "proj_source": "Source",
+        }
     )
     edited = st.data_editor(
         proj_display,
         use_container_width=True,
         hide_index=True,
         column_config={
-            "Proj": st.column_config.NumberColumn("Proj", format="%.2f"),
+            "DK Avg": st.column_config.NumberColumn("DK Avg", format="%.2f"),
+            "My Proj": st.column_config.NumberColumn("My Proj", format="%.2f"),
         },
-        disabled=["Player", "team", "position", "salary", "Source"],
+        disabled=["Player", "team", "position", "salary", "DK Avg", "Source"],
         key="showdown_proj_editor",
     )
-    pool = pool.merge(edited[["Player", "Proj"]], left_on="display_name", right_on="Player", how="left")
-    pool["proj_points"] = pool["Proj"].fillna(pool["proj_points"])
-    pool = pool.drop(columns=["Player", "Proj"])
+    pool = pool.merge(edited[["Player", "My Proj"]], left_on="display_name", right_on="Player", how="left")
+    pool["proj_points"] = pool["My Proj"].fillna(pool["proj_points"])
+    pool = pool.drop(columns=["Player", "My Proj"])
 
     with st.expander("Matching diagnostics", expanded=False):
         total = len(pool)
@@ -772,8 +780,14 @@ def render_showdown_generator(season: int, week: int) -> None:
         if not fallback.empty:
             st.caption("Players using DK AvgPointsPerGame or no match:")
             st.dataframe(
-                fallback[["display_name", "team", "position", "avg_points", "proj_points", "proj_source"]]
-                .rename(columns={"display_name": "Player", "proj_points": "Proj", "proj_source": "Source"}),
+                fallback[["display_name", "team", "position", "avg_points", "proj_points", "proj_source"]].rename(
+                    columns={
+                        "display_name": "Player",
+                        "avg_points": "DK Avg",
+                        "proj_points": "My Proj",
+                        "proj_source": "Source",
+                    }
+                ),
                 use_container_width=True,
                 hide_index=True,
             )

@@ -765,6 +765,12 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     source_key = "db" if projection_source.startswith("DB") else "parquet"
 
+    kdst_col1, kdst_col2 = st.columns(2)
+    with kdst_col1:
+        force_kdst_dk_avg = st.checkbox("Force DK Avg for K/DST", value=True)
+    with kdst_col2:
+        replace_zero_with_dk_avg = st.checkbox("Replace zero proj with DK Avg", value=True)
+
     weeks_available = _list_db_weeks(season) if source_key == "db" else _list_available_weeks("player_week", season)
     max_week_available = max(weeks_available) if weeks_available else week
     effective_week = min(week, max_week_available) if week else max_week_available
@@ -822,6 +828,15 @@ def render_showdown_generator(season: int, week: int) -> None:
         pool.loc[missing, "proj_points"] = pool.loc[missing, "avg_points"]
         pool.loc[missing & (pool["avg_points"] > 0), "proj_source"] = "dk_avg"
 
+    if force_kdst_dk_avg:
+        is_kdst = pool["position"].astype(str).str.upper().isin(["K", "DST", "D/ST", "DEF"])
+        if replace_zero_with_dk_avg:
+            kdst_mask = is_kdst & (pool["avg_points"] > 0) & (pool["proj_points"].fillna(0) <= 0)
+        else:
+            kdst_mask = is_kdst & (pool["avg_points"] > 0)
+        pool.loc[kdst_mask, "proj_points"] = pool.loc[kdst_mask, "avg_points"]
+        pool.loc[kdst_mask, "proj_source"] = "dk_avg_kdst"
+
     pool["proj_points"] = pool["proj_points"].fillna(0.0)
 
     proj_display = pool[
@@ -861,10 +876,11 @@ def render_showdown_generator(season: int, week: int) -> None:
             "stats_last": counts.get("stats:last", 0),
             "stats_unique": counts.get("stats:unique", 0),
             "dk_avg": counts.get("dk_avg", 0),
+            "dk_avg_kdst": counts.get("dk_avg_kdst", 0),
             "zero_projection": int((pool["proj_points"] <= 0).sum()),
         })
         st.caption(f"Projection source: {projection_source} | Week used: {effective_week}")
-        fallback = pool[pool["proj_source"].isin(["dk_avg", ""])]
+        fallback = pool[pool["proj_source"].isin(["dk_avg", "dk_avg_kdst", ""])]
         if not fallback.empty:
             st.caption("Players using DK AvgPointsPerGame or no match:")
             st.dataframe(

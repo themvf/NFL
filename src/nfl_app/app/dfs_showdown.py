@@ -240,6 +240,123 @@ def _list_db_weeks(season: int) -> List[int]:
     return weeks
 
 
+def _load_histories(
+    season: int,
+    week: int,
+    recent_weeks: int,
+    use_full_season: bool,
+    source: str,
+) -> pd.DataFrame:
+    if source == "db":
+        weeks_all = _list_db_weeks(season)
+    else:
+        weeks_all = _list_available_weeks("player_week", season)
+    if not weeks_all:
+        return pd.DataFrame()
+
+    if use_full_season:
+        weeks = [w for w in weeks_all if w <= week]
+    else:
+        past = [w for w in weeks_all if w <= week]
+        weeks = past[-recent_weeks:] if past else []
+
+    if not weeks:
+        return pd.DataFrame()
+
+    if source == "db":
+        df = _read_player_stats_db(season, weeks)
+    else:
+        df = _read_player_week(season, weeks)
+    if df.empty:
+        return pd.DataFrame()
+
+    df["dk_points"] = _compute_dk_points(df)
+    name_col = "player_display_name" if "player_display_name" in df.columns else "player_name"
+    team_col = "recent_team" if "recent_team" in df.columns else "team"
+    df["name_key"] = df[name_col].astype(str).map(normalize_name)
+    df["team_key"] = df[team_col].astype(str).map(normalize_team)
+    if "position" not in df.columns:
+        df["position"] = ""
+    df = df[df["name_key"] != ""]
+    return df[["name_key", "team_key", "position", "dk_points"]].copy()
+
+
+def _simulate_lineups(
+    lineups: List[pd.DataFrame],
+    pool: pd.DataFrame,
+    history_df: pd.DataFrame,
+    sims: int,
+    top_pct: float,
+    force_kdst_dk_avg: bool,
+    replace_zero_with_dk_avg: bool,
+) -> Tuple[List[float], List[float]]:
+    rng = np.random.default_rng(42)
+
+    hist_map: Dict[Tuple[str, str], List[float]] = {}
+    pos_map: Dict[str, List[float]] = {}
+    league_hist: List[float] = []
+    if not history_df.empty:
+        history_df["dk_points"] = pd.to_numeric(history_df["dk_points"], errors="coerce").fillna(0.0)
+        league_hist = history_df["dk_points"].tolist()
+        for (name_key, team_key), group in history_df.groupby(["name_key", "team_key"]):
+            hist_map[(name_key, team_key)] = group["dk_points"].tolist()
+        for pos, group in history_df.groupby("position"):
+            pos_map[str(pos).upper()] = group["dk_points"].tolist()
+
+    pool_index = pool.set_index("player_key")
+
+    def sample_player(base_id: str) -> np.ndarray:
+        row = pool_index.loc[base_id]
+        pos = str(row["position"]).upper()
+        mean = float(row.get("proj_points", 0.0))
+        dk_avg = float(row.get("avg_points", 0.0))
+
+        is_kdst = pos in {"K", "DST", "D/ST", "DEF"}
+        if force_kdst_dk_avg:
+            if replace_zero_with_dk_avg:
+                if dk_avg > 0 and mean <= 0:
+                    mean = dk_avg
+            else:
+                if dk_avg > 0:
+                    mean = dk_avg
+            if is_kdst:
+                std = 3.0 if pos == "K" else 4.5
+                samples = rng.normal(mean, std, size=sims)
+                return np.clip(samples, -5, None)
+
+        key = (row["name_key"], row["team"])
+        hist = hist_map.get(key, [])
+        if len(hist) >= 3:
+            return rng.choice(hist, size=sims, replace=True)
+        pos_hist = pos_map.get(pos, [])
+        if len(pos_hist) >= 10:
+            return rng.choice(pos_hist, size=sims, replace=True)
+        if league_hist:
+            return rng.choice(league_hist, size=sims, replace=True)
+        std = max(3.0, mean * 0.5)
+        samples = rng.normal(mean, std, size=sims)
+        return np.clip(samples, -5, None)
+
+    metrics: List[float] = []
+    means: List[float] = []
+
+    top_n = max(1, int(math.ceil(sims * (top_pct / 100.0))))
+
+    for lineup in lineups:
+        scores = np.zeros(sims)
+        for _, row in lineup.iterrows():
+            samples = sample_player(row["base_id"])
+            if row["is_captain"]:
+                scores += samples * 1.5
+            else:
+                scores += samples
+        means.append(float(np.mean(scores)))
+        top_scores = np.partition(scores, -top_n)[-top_n:]
+        metrics.append(float(np.mean(top_scores)))
+
+    return metrics, means
+
+
 def _build_stat_projections(
     season: int,
     week: int,
@@ -932,6 +1049,14 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     enforce_unique = st.checkbox("Enforce unique lineups", value=True)
 
+    sim_col1, sim_col2, sim_col3 = st.columns(3)
+    with sim_col1:
+        use_simulation = st.checkbox("Use simulation scoring (GPP)", value=False)
+    with sim_col2:
+        sim_count = st.number_input("Simulations", min_value=200, max_value=5000, value=1000, step=100)
+    with sim_col3:
+        top_pct = st.slider("Top % average", min_value=1, max_value=20, value=5, step=1)
+
     player_labels = pool["display_name"].tolist()
     label_to_id = dict(zip(pool["display_name"], pool["player_key"]))
 
@@ -939,7 +1064,14 @@ def render_showdown_generator(season: int, week: int) -> None:
     lock_captain_label = st.selectbox("Lock captain (optional)", options=[""] + player_labels, index=0)
     lock_flex_labels = st.multiselect("Lock flex players (optional)", options=player_labels, default=[])
 
-    captain_pool_labels = st.multiselect("Captain pool (optional)", options=player_labels, default=player_labels)
+    restrict_cpt = st.checkbox("Restrict CPT to QB/RB/WR/TE", value=False)
+    if restrict_cpt:
+        cpt_labels = pool[
+            pool["position"].astype(str).str.upper().isin(["QB", "RB", "WR", "TE"])
+        ]["display_name"].tolist()
+    else:
+        cpt_labels = player_labels
+    captain_pool_labels = st.multiselect("Captain pool (optional)", options=cpt_labels, default=cpt_labels)
 
     st.subheader("Exposure Limits")
     exposure_players = st.multiselect("Set exposure limits for players", options=player_labels, default=[])
@@ -1028,6 +1160,26 @@ def render_showdown_generator(season: int, week: int) -> None:
             )
 
         lineup_df = pd.DataFrame(lineup_rows)
+        if use_simulation:
+            history_df = _load_histories(
+                season=season,
+                week=effective_week,
+                recent_weeks=int(recent_weeks),
+                use_full_season=use_full_season,
+                source=source_key,
+            )
+            sim_metrics, sim_means = _simulate_lineups(
+                lineups,
+                pool,
+                history_df,
+                sims=int(sim_count),
+                top_pct=float(top_pct),
+                force_kdst_dk_avg=force_kdst_dk_avg,
+                replace_zero_with_dk_avg=replace_zero_with_dk_avg,
+            )
+            lineup_df["Sim Mean"] = [round(x, 2) for x in sim_means]
+            lineup_df[f"Top {int(top_pct)}% Avg"] = [round(x, 2) for x in sim_metrics]
+            lineup_df = lineup_df.sort_values(f"Top {int(top_pct)}% Avg", ascending=False)
         st.subheader("Generated Lineups")
         st.dataframe(lineup_df, use_container_width=True, hide_index=True)
 

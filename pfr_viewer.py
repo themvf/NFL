@@ -5,6 +5,7 @@ Displays NFL game data from the Pro-Football-Reference SQLite database.
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Optional, List, Tuple
 import re
@@ -25,6 +26,16 @@ import rb_projections as rbp
 import wr_projections as wrp
 import closed_projection_engine as cpe
 import injury_snapshot_manager as ism
+
+# Enable access to Streamlit app utilities (DFS Showdown view)
+APP_DIR = Path(__file__).parent / "src" / "nfl_app" / "app"
+render_showdown_generator = None
+if APP_DIR.exists():
+    sys.path.insert(0, str(APP_DIR))
+    try:
+        from dfs_showdown import render_showdown_generator
+    except Exception:
+        render_showdown_generator = None
 
 # Configure logging
 logging.basicConfig(
@@ -10000,6 +10011,7 @@ def render_sidebar() -> Tuple[str, Optional[int], Optional[int], Optional[str]]:
             "Notes Manager",
             "Projection Analytics",
             "Projections vs. Actuals",
+            "DFS Showdown",
             "Player Impact",
             "Database Manager",
             "Transaction Manager",
@@ -27194,6 +27206,15 @@ def main():
 
     elif view == "Projections vs. Actuals":
         render_projections_vs_actuals()
+
+    elif view == "DFS Showdown":
+        if render_showdown_generator is None:
+            st.error("DFS Showdown view is unavailable (module import failed).")
+        else:
+            showdown_season = season if season else 2024
+            weeks = get_weeks(showdown_season)
+            showdown_week = week if week else (max(weeks) if weeks else 1)
+            render_showdown_generator(showdown_season, showdown_week)
 
     elif view == "Player Impact":
         st.header("🚑 Player Impact Analysis")

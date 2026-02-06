@@ -56,6 +56,17 @@ def normalize_name(name: str) -> str:
     return "".join(parts)
 
 
+def split_name_tokens(name: str) -> Tuple[str, str]:
+    if name is None:
+        return "", ""
+    txt = str(name).lower().strip()
+    txt = re.sub(r"[^a-z0-9 ]+", " ", txt)
+    parts = [p for p in txt.split() if p and p not in NAME_SUFFIXES]
+    if not parts:
+        return "", ""
+    return parts[0], parts[-1]
+
+
 def _pick_column(columns: Sequence[str], candidates: Sequence[str]) -> Optional[str]:
     col_set = {c.lower(): c for c in columns}
     for c in candidates:
@@ -174,10 +185,10 @@ def _build_stat_projections(
     week: int,
     recent_weeks: int,
     use_full_season: bool,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> Dict[str, pd.DataFrame]:
     weeks_all = _list_available_weeks("player_week", season)
     if not weeks_all:
-        return pd.DataFrame(), pd.DataFrame()
+        return {}
 
     if use_full_season:
         weeks = [w for w in weeks_all if w <= week]
@@ -187,24 +198,62 @@ def _build_stat_projections(
 
     df = _read_player_week(season, weeks)
     if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        return {}
 
     df["dk_points"] = _compute_dk_points(df)
     name_col = "player_display_name" if "player_display_name" in df.columns else "player_name"
     team_col = "recent_team" if "recent_team" in df.columns else "team"
 
-    df["name_key"] = df[name_col].astype(str).map(normalize_name)
+    df["full_name"] = df[name_col].astype(str)
+    df["name_key"] = df["full_name"].map(normalize_name)
     df["team_key"] = df[team_col].astype(str).map(normalize_team)
+    tokens = df["full_name"].map(split_name_tokens)
+    df["first_name"] = tokens.map(lambda x: x[0])
+    df["last_name"] = tokens.map(lambda x: x[1])
+    df["last_key"] = df["last_name"].map(normalize_name)
+    df["first_last_key"] = (
+        df["first_name"].str[:1].fillna("") + " " + df["last_name"].fillna("")
+    ).map(normalize_name)
     df = df[df["name_key"] != ""]
 
-    agg = df.groupby(["name_key", "team_key"], as_index=False)["dk_points"].mean()
-    agg = agg.rename(columns={"dk_points": "avg_dk_points"})
+    agg_name_team = df.groupby(["name_key", "team_key"], as_index=False)["dk_points"].mean()
+    agg_name_team = agg_name_team.rename(columns={"dk_points": "avg_dk_points"})
 
-    by_name = agg.groupby("name_key", as_index=False).agg(
-        avg_dk_points=("avg_dk_points", "mean"),
-        team_count=("team_key", "nunique"),
+    unique_players = df[["name_key", "first_last_key", "last_key", "team_key"]].drop_duplicates()
+    counts_first_last = unique_players.groupby(["first_last_key", "team_key"]).size().reset_index(name="count")
+    counts_last = unique_players.groupby(["last_key", "team_key"]).size().reset_index(name="count")
+    counts_name = unique_players.groupby(["name_key"]).size().reset_index(name="count")
+
+    agg_first_last = df.groupby(["first_last_key", "team_key"], as_index=False)["dk_points"].mean()
+    agg_first_last = agg_first_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_first_last = agg_first_last.merge(
+        counts_first_last[counts_first_last["count"] == 1][["first_last_key", "team_key"]],
+        on=["first_last_key", "team_key"],
+        how="inner",
     )
-    return agg, by_name
+
+    agg_last = df.groupby(["last_key", "team_key"], as_index=False)["dk_points"].mean()
+    agg_last = agg_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_last = agg_last.merge(
+        counts_last[counts_last["count"] == 1][["last_key", "team_key"]],
+        on=["last_key", "team_key"],
+        how="inner",
+    )
+
+    agg_name_unique = df.groupby(["name_key"], as_index=False)["dk_points"].mean()
+    agg_name_unique = agg_name_unique.rename(columns={"dk_points": "avg_dk_points"})
+    agg_name_unique = agg_name_unique.merge(
+        counts_name[counts_name["count"] == 1][["name_key"]],
+        on="name_key",
+        how="inner",
+    )
+
+    return {
+        "by_name_team": agg_name_team,
+        "by_first_last_team": agg_first_last,
+        "by_last_team": agg_last,
+        "by_name_unique": agg_name_unique,
+    }
 
 
 def _load_local_injuries(season: int, week: int) -> Tuple[pd.DataFrame, Optional[int]]:
@@ -281,6 +330,13 @@ def _prepare_player_pool(
             df = flex_only
 
     df["name_key"] = df["player_name"].map(normalize_name)
+    tokens = df["player_name"].map(split_name_tokens)
+    df["first_name"] = tokens.map(lambda x: x[0])
+    df["last_name"] = tokens.map(lambda x: x[1])
+    df["last_key"] = df["last_name"].map(normalize_name)
+    df["first_last_key"] = (
+        df["first_name"].str[:1].fillna("") + " " + df["last_name"].fillna("")
+    ).map(normalize_name)
     df["player_key"] = df["team"].astype(str) + "|" + df["player_name"] + "|" + df["position"].astype(str)
 
     agg = (
@@ -295,6 +351,10 @@ def _prepare_player_pool(
             avg_points=("avg_points", "max"),
             game_info=("game_info", "first"),
             name_key=("name_key", "first"),
+            first_name=("first_name", "first"),
+            last_name=("last_name", "first"),
+            last_key=("last_key", "first"),
+            first_last_key=("first_last_key", "first"),
         )
     )
 
@@ -371,6 +431,27 @@ def _build_optimizer_pool(pool: pd.DataFrame) -> pd.DataFrame:
     all_rows = pd.concat([cpt, flex], ignore_index=True)
     all_rows["row_id"] = np.arange(len(all_rows))
     return all_rows
+
+
+def _fill_from_map(
+    pool: pd.DataFrame,
+    map_df: pd.DataFrame,
+    left_keys: List[str],
+    right_keys: List[str],
+    label: str,
+) -> pd.DataFrame:
+    if map_df is None or map_df.empty:
+        return pool
+    missing = pool["proj_points"].isna()
+    if not missing.any():
+        return pool
+    subset = pool.loc[missing].copy()
+    subset = subset.join(map_df.set_index(right_keys), on=left_keys)
+    fill_mask = subset["avg_dk_points"].notna()
+    if fill_mask.any():
+        pool.loc[subset.index[fill_mask], "proj_points"] = subset.loc[fill_mask, "avg_dk_points"].values
+        pool.loc[subset.index[fill_mask], "proj_source"] = label
+    return pool
 
 
 def _solve_showdown_lineup(
@@ -588,33 +669,44 @@ def render_showdown_generator(season: int, week: int) -> None:
     with col3:
         fallback_to_dk_avg = st.checkbox("Fallback to DK AvgPointsPerGame", value=True)
 
-    stat_projections = None
-    by_name = None
+    stat_maps: Dict[str, pd.DataFrame] = {}
     try:
-        stat_projections, by_name = _build_stat_projections(season, week, int(recent_weeks), use_full_season)
+        stat_maps = _build_stat_projections(season, week, int(recent_weeks), use_full_season)
     except Exception:
-        stat_projections, by_name = None, None
+        stat_maps = {}
 
     pool["proj_points"] = np.nan
     pool["proj_source"] = ""
 
-    if stat_projections is not None and not stat_projections.empty:
-        merged = pool.merge(
-            stat_projections,
-            left_on=["name_key", "team"],
-            right_on=["name_key", "team_key"],
-            how="left",
+    if stat_maps:
+        pool = _fill_from_map(
+            pool,
+            stat_maps.get("by_name_team", pd.DataFrame()),
+            left_keys=["name_key", "team"],
+            right_keys=["name_key", "team_key"],
+            label="stats:exact",
         )
-        pool["proj_points"] = merged["avg_dk_points"]
-        pool["proj_source"] = np.where(pool["proj_points"].notna(), "stats", "")
-
-        if by_name is not None and not by_name.empty:
-            missing = pool["proj_points"].isna()
-            pool_missing = pool[missing].copy()
-            pool_missing = pool_missing.join(by_name.set_index("name_key"), on="name_key")
-            fill_mask = pool_missing["team_count"] == 1
-            pool.loc[pool_missing.index[fill_mask], "proj_points"] = pool_missing.loc[fill_mask, "avg_dk_points"].values
-            pool.loc[pool_missing.index[fill_mask], "proj_source"] = "stats"
+        pool = _fill_from_map(
+            pool,
+            stat_maps.get("by_first_last_team", pd.DataFrame()),
+            left_keys=["first_last_key", "team"],
+            right_keys=["first_last_key", "team_key"],
+            label="stats:init+last",
+        )
+        pool = _fill_from_map(
+            pool,
+            stat_maps.get("by_last_team", pd.DataFrame()),
+            left_keys=["last_key", "team"],
+            right_keys=["last_key", "team_key"],
+            label="stats:last",
+        )
+        pool = _fill_from_map(
+            pool,
+            stat_maps.get("by_name_unique", pd.DataFrame()),
+            left_keys=["name_key"],
+            right_keys=["name_key"],
+            label="stats:unique",
+        )
 
     if fallback_to_dk_avg:
         missing = pool["proj_points"].isna()
@@ -640,6 +732,28 @@ def render_showdown_generator(season: int, week: int) -> None:
     pool = pool.merge(edited[["Player", "Proj"]], left_on="display_name", right_on="Player", how="left")
     pool["proj_points"] = pool["Proj"].fillna(pool["proj_points"])
     pool = pool.drop(columns=["Player", "Proj"])
+
+    with st.expander("Matching diagnostics", expanded=False):
+        total = len(pool)
+        counts = pool["proj_source"].value_counts().to_dict()
+        st.write({
+            "total_players": total,
+            "stats_exact": counts.get("stats:exact", 0),
+            "stats_init_last": counts.get("stats:init+last", 0),
+            "stats_last": counts.get("stats:last", 0),
+            "stats_unique": counts.get("stats:unique", 0),
+            "dk_avg": counts.get("dk_avg", 0),
+            "zero_projection": int((pool["proj_points"] <= 0).sum()),
+        })
+        fallback = pool[pool["proj_source"].isin(["dk_avg", ""])]
+        if not fallback.empty:
+            st.caption("Players using DK AvgPointsPerGame or no match:")
+            st.dataframe(
+                fallback[["display_name", "team", "position", "avg_points", "proj_points", "proj_source"]]
+                .rename(columns={"display_name": "Player", "proj_points": "Proj", "proj_source": "Source"}),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     st.subheader("Injury Filters")
     use_live_injuries = st.checkbox("Use live injuries (if available)", value=False)

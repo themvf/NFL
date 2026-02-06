@@ -892,7 +892,7 @@ def render_showdown_generator(season: int, week: int) -> None:
     with own_col1:
         ownership_method = st.selectbox(
             "Ownership projection",
-            options=["None", "Proxy (My Proj + Salary)", "Proxy (DK Avg + Salary)"],
+            options=["None", "Proxy (My Proj + DK Avg)", "Proxy (My Proj + Salary)", "Proxy (DK Avg + Salary)"],
             index=1,
         )
     with own_col2:
@@ -974,7 +974,9 @@ def render_showdown_generator(season: int, week: int) -> None:
         proj = pool["proj_points"].astype(float)
         dk_avg = pool["avg_points"].astype(float)
         salary = pool["salary"].replace(0, np.nan).astype(float)
-        if ownership_method.startswith("Proxy (My Proj"):
+        if ownership_method == "Proxy (My Proj + DK Avg)":
+            base = proj + dk_avg
+        elif ownership_method.startswith("Proxy (My Proj"):
             base = proj
         else:
             base = dk_avg

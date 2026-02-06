@@ -211,7 +211,8 @@ def _build_stat_projections(
     df["first_name"] = tokens.map(lambda x: x[0])
     df["last_name"] = tokens.map(lambda x: x[1])
     df["last_key"] = df["last_name"].map(normalize_name)
-    df["first_last_key"] = (
+    df["first_last_key"] = (df["first_name"].fillna("") + " " + df["last_name"].fillna("")).map(normalize_name)
+    df["first_initial_last_key"] = (
         df["first_name"].str[:1].fillna("") + " " + df["last_name"].fillna("")
     ).map(normalize_name)
     df = df[df["name_key"] != ""]
@@ -219,8 +220,11 @@ def _build_stat_projections(
     agg_name_team = df.groupby(["name_key", "team_key"], as_index=False)["dk_points"].mean()
     agg_name_team = agg_name_team.rename(columns={"dk_points": "avg_dk_points"})
 
-    unique_players = df[["name_key", "first_last_key", "last_key", "team_key"]].drop_duplicates()
+    unique_players = df[["name_key", "first_last_key", "first_initial_last_key", "last_key", "team_key"]].drop_duplicates()
     counts_first_last = unique_players.groupby(["first_last_key", "team_key"]).size().reset_index(name="count")
+    counts_first_initial_last = (
+        unique_players.groupby(["first_initial_last_key", "team_key"]).size().reset_index(name="count")
+    )
     counts_last = unique_players.groupby(["last_key", "team_key"]).size().reset_index(name="count")
     counts_name = unique_players.groupby(["name_key"]).size().reset_index(name="count")
 
@@ -229,6 +233,14 @@ def _build_stat_projections(
     agg_first_last = agg_first_last.merge(
         counts_first_last[counts_first_last["count"] == 1][["first_last_key", "team_key"]],
         on=["first_last_key", "team_key"],
+        how="inner",
+    )
+
+    agg_first_initial_last = df.groupby(["first_initial_last_key", "team_key"], as_index=False)["dk_points"].mean()
+    agg_first_initial_last = agg_first_initial_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_first_initial_last = agg_first_initial_last.merge(
+        counts_first_initial_last[counts_first_initial_last["count"] == 1][["first_initial_last_key", "team_key"]],
+        on=["first_initial_last_key", "team_key"],
         how="inner",
     )
 
@@ -251,6 +263,7 @@ def _build_stat_projections(
     return {
         "by_name_team": agg_name_team,
         "by_first_last_team": agg_first_last,
+        "by_first_initial_last_team": agg_first_initial_last,
         "by_last_team": agg_last,
         "by_name_unique": agg_name_unique,
     }
@@ -334,7 +347,8 @@ def _prepare_player_pool(
     df["first_name"] = tokens.map(lambda x: x[0])
     df["last_name"] = tokens.map(lambda x: x[1])
     df["last_key"] = df["last_name"].map(normalize_name)
-    df["first_last_key"] = (
+    df["first_last_key"] = (df["first_name"].fillna("") + " " + df["last_name"].fillna("")).map(normalize_name)
+    df["first_initial_last_key"] = (
         df["first_name"].str[:1].fillna("") + " " + df["last_name"].fillna("")
     ).map(normalize_name)
     df["player_key"] = df["team"].astype(str) + "|" + df["player_name"] + "|" + df["position"].astype(str)
@@ -355,6 +369,7 @@ def _prepare_player_pool(
             last_name=("last_name", "first"),
             last_key=("last_key", "first"),
             first_last_key=("first_last_key", "first"),
+            first_initial_last_key=("first_initial_last_key", "first"),
         )
     )
 
@@ -691,6 +706,13 @@ def render_showdown_generator(season: int, week: int) -> None:
             stat_maps.get("by_first_last_team", pd.DataFrame()),
             left_keys=["first_last_key", "team"],
             right_keys=["first_last_key", "team_key"],
+            label="stats:first+last",
+        )
+        pool = _fill_from_map(
+            pool,
+            stat_maps.get("by_first_initial_last_team", pd.DataFrame()),
+            left_keys=["first_initial_last_key", "team"],
+            right_keys=["first_initial_last_key", "team_key"],
             label="stats:init+last",
         )
         pool = _fill_from_map(
@@ -739,6 +761,7 @@ def render_showdown_generator(season: int, week: int) -> None:
         st.write({
             "total_players": total,
             "stats_exact": counts.get("stats:exact", 0),
+            "stats_first_last": counts.get("stats:first+last", 0),
             "stats_init_last": counts.get("stats:init+last", 0),
             "stats_last": counts.get("stats:last", 0),
             "stats_unique": counts.get("stats:unique", 0),

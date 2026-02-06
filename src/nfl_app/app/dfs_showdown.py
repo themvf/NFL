@@ -401,8 +401,10 @@ def _build_stat_projections(
     ).map(normalize_name)
     df = df[df["name_key"] != ""]
 
-    agg_name_team = df.groupby(["name_key", "team_key"], as_index=False)["dk_points"].mean()
-    agg_name_team = agg_name_team.rename(columns={"dk_points": "avg_dk_points"})
+    agg_name_team = df.groupby(["name_key", "team_key"], as_index=False).agg(
+        avg_dk_points=("dk_points", "mean"),
+        games=("dk_points", "size"),
+    )
 
     unique_players = df[["name_key", "first_last_key", "first_initial_last_key", "last_key", "team_key"]].drop_duplicates()
     counts_first_last = unique_players.groupby(["first_last_key", "team_key"]).size().reset_index(name="count")
@@ -412,32 +414,40 @@ def _build_stat_projections(
     counts_last = unique_players.groupby(["last_key", "team_key"]).size().reset_index(name="count")
     counts_name = unique_players.groupby(["name_key"]).size().reset_index(name="count")
 
-    agg_first_last = df.groupby(["first_last_key", "team_key"], as_index=False)["dk_points"].mean()
-    agg_first_last = agg_first_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_first_last = df.groupby(["first_last_key", "team_key"], as_index=False).agg(
+        avg_dk_points=("dk_points", "mean"),
+        games=("dk_points", "size"),
+    )
     agg_first_last = agg_first_last.merge(
         counts_first_last[counts_first_last["count"] == 1][["first_last_key", "team_key"]],
         on=["first_last_key", "team_key"],
         how="inner",
     )
 
-    agg_first_initial_last = df.groupby(["first_initial_last_key", "team_key"], as_index=False)["dk_points"].mean()
-    agg_first_initial_last = agg_first_initial_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_first_initial_last = df.groupby(["first_initial_last_key", "team_key"], as_index=False).agg(
+        avg_dk_points=("dk_points", "mean"),
+        games=("dk_points", "size"),
+    )
     agg_first_initial_last = agg_first_initial_last.merge(
         counts_first_initial_last[counts_first_initial_last["count"] == 1][["first_initial_last_key", "team_key"]],
         on=["first_initial_last_key", "team_key"],
         how="inner",
     )
 
-    agg_last = df.groupby(["last_key", "team_key"], as_index=False)["dk_points"].mean()
-    agg_last = agg_last.rename(columns={"dk_points": "avg_dk_points"})
+    agg_last = df.groupby(["last_key", "team_key"], as_index=False).agg(
+        avg_dk_points=("dk_points", "mean"),
+        games=("dk_points", "size"),
+    )
     agg_last = agg_last.merge(
         counts_last[counts_last["count"] == 1][["last_key", "team_key"]],
         on=["last_key", "team_key"],
         how="inner",
     )
 
-    agg_name_unique = df.groupby(["name_key"], as_index=False)["dk_points"].mean()
-    agg_name_unique = agg_name_unique.rename(columns={"dk_points": "avg_dk_points"})
+    agg_name_unique = df.groupby(["name_key"], as_index=False).agg(
+        avg_dk_points=("dk_points", "mean"),
+        games=("dk_points", "size"),
+    )
     agg_name_unique = agg_name_unique.merge(
         counts_name[counts_name["count"] == 1][["name_key"]],
         on="name_key",
@@ -650,6 +660,8 @@ def _fill_from_map(
     if fill_mask.any():
         pool.loc[subset.index[fill_mask], "proj_points"] = subset.loc[fill_mask, "avg_dk_points"].values
         pool.loc[subset.index[fill_mask], "proj_source"] = label
+        if "games" in subset.columns:
+            pool.loc[subset.index[fill_mask], "games_used"] = subset.loc[fill_mask, "games"].values
     return pool
 
 
@@ -882,6 +894,12 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     source_key = "db" if projection_source.startswith("DB") else "parquet"
 
+    min_games_col1, min_games_col2 = st.columns(2)
+    with min_games_col1:
+        min_games = st.number_input("Min games for projection", min_value=1, max_value=10, value=3, step=1)
+    with min_games_col2:
+        use_dk_if_low_games = st.checkbox("Use DK Avg if games < min", value=True)
+
     kdst_col1, kdst_col2 = st.columns(2)
     with kdst_col1:
         force_kdst_dk_avg = st.checkbox("Force DK Avg for K/DST", value=True)
@@ -914,6 +932,7 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     pool["proj_points"] = np.nan
     pool["proj_source"] = ""
+    pool["games_used"] = np.nan
 
     if stat_maps:
         pool = _fill_from_map(
@@ -951,6 +970,12 @@ def render_showdown_generator(season: int, week: int) -> None:
             right_keys=["name_key"],
             label="stats:unique",
         )
+
+        if use_dk_if_low_games and min_games > 1:
+            low_games = pool["games_used"].fillna(0).astype(int) < int(min_games)
+            dk_ok = pool["avg_points"] > 0
+            pool.loc[low_games & dk_ok, "proj_points"] = pool.loc[low_games & dk_ok, "avg_points"]
+            pool.loc[low_games & dk_ok, "proj_source"] = "dk_avg_low_games"
 
     if fallback_to_dk_avg:
         missing = pool["proj_points"].isna()
@@ -997,13 +1022,14 @@ def render_showdown_generator(season: int, week: int) -> None:
         pool["own_proj"] = np.nan
 
     proj_display = pool[
-        ["display_name", "team", "position", "salary", "avg_points", "proj_points", "own_proj", "proj_source"]
+        ["display_name", "team", "position", "salary", "avg_points", "proj_points", "games_used", "own_proj", "proj_source"]
     ].copy()
     proj_display = proj_display.rename(
         columns={
             "display_name": "Player",
             "avg_points": "DK Avg",
             "proj_points": "My Proj",
+            "games_used": "Games",
             "own_proj": "Own %",
             "proj_source": "Source",
         }
@@ -1015,9 +1041,10 @@ def render_showdown_generator(season: int, week: int) -> None:
         column_config={
             "DK Avg": st.column_config.NumberColumn("DK Avg", format="%.2f"),
             "My Proj": st.column_config.NumberColumn("My Proj", format="%.2f"),
+            "Games": st.column_config.NumberColumn("Games", format="%.0f"),
             "Own %": st.column_config.NumberColumn("Own %", format="%.1f"),
         },
-        disabled=["Player", "team", "position", "salary", "DK Avg", "Source"],
+        disabled=["Player", "team", "position", "salary", "DK Avg", "Games", "Source"],
         key="showdown_proj_editor",
     )
     pool = pool.merge(
@@ -1038,21 +1065,23 @@ def render_showdown_generator(season: int, week: int) -> None:
             "stats_last": counts.get("stats:last", 0),
             "stats_unique": counts.get("stats:unique", 0),
             "dk_avg": counts.get("dk_avg", 0),
+            "dk_avg_low_games": counts.get("dk_avg_low_games", 0),
             "dk_avg_kdst": counts.get("dk_avg_kdst", 0),
             "zero_projection": int((pool["proj_points"] <= 0).sum()),
         })
         st.caption(f"Projection source: {projection_source} | Week used: {effective_week}")
-        fallback = pool[pool["proj_source"].isin(["dk_avg", "dk_avg_kdst", ""])]
+        fallback = pool[pool["proj_source"].isin(["dk_avg", "dk_avg_kdst", "dk_avg_low_games", ""])]
         if not fallback.empty:
             st.caption("Players using DK AvgPointsPerGame or no match:")
             st.dataframe(
                 fallback[
-                    ["display_name", "team", "position", "avg_points", "proj_points", "own_proj", "proj_source"]
+                    ["display_name", "team", "position", "avg_points", "proj_points", "games_used", "own_proj", "proj_source"]
                 ].rename(
                     columns={
                         "display_name": "Player",
                         "avg_points": "DK Avg",
                         "proj_points": "My Proj",
+                        "games_used": "Games",
                         "own_proj": "Own %",
                         "proj_source": "Source",
                     }

@@ -624,18 +624,21 @@ def _build_optimizer_pool(pool: pd.DataFrame) -> pd.DataFrame:
     base["base_id"] = base["player_key"]
     base["proj_points"] = pd.to_numeric(base["proj_points"], errors="coerce").fillna(0.0)
     base["salary"] = pd.to_numeric(base["salary"], errors="coerce").fillna(0).astype(int)
+    base["own_proj"] = pd.to_numeric(base.get("own_proj", 0), errors="coerce").fillna(0.0)
 
     flex = base.copy()
     flex["roster"] = "FLEX"
     flex["is_captain"] = False
     flex["salary"] = flex["salary"]
     flex["proj"] = flex["proj_points"]
+    flex["own_proj"] = flex["own_proj"]
 
     cpt = base.copy()
     cpt["roster"] = "CPT"
     cpt["is_captain"] = True
     cpt["salary"] = (cpt["salary"] * 1.5 / 50).round().astype(int) * 50
     cpt["proj"] = cpt["proj_points"] * 1.5
+    cpt["own_proj"] = cpt["own_proj"]
 
     all_rows = pd.concat([cpt, flex], ignore_index=True)
     all_rows["row_id"] = np.arange(len(all_rows))
@@ -674,7 +677,17 @@ def _solve_showdown_lineup(
     lock_captain: Optional[str],
     lock_flex: Sequence[str],
     allowed_captains: Optional[Sequence[str]],
-    avoid_lineups: Sequence[Sequence[int]],
+    avoid_bases: Sequence[Sequence[str]],
+    max_overlap: Optional[int],
+    min_salary_unused: int,
+    max_lineup_own: Optional[float],
+    min_qb: Optional[int],
+    max_qb: Optional[int],
+    min_rb: Optional[int],
+    min_wrte: Optional[int],
+    require_dst: bool,
+    onslaught_team: Optional[str],
+    onslaught_min: Optional[int],
 ) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
     try:
         import pulp  # type: ignore
@@ -696,13 +709,40 @@ def _solve_showdown_lineup(
     prob = pulp.LpProblem("showdown", pulp.LpMaximize)
     prob += pulp.lpSum(x[rid] * df.loc[rid, "proj_adj"] for rid in df.index)
 
-    prob += pulp.lpSum(x[rid] * df.loc[rid, "salary"] for rid in df.index) <= int(salary_cap)
+    max_salary = int(salary_cap) - int(min_salary_unused)
+    if max_salary <= 0:
+        return None, "Min salary unused exceeds salary cap."
+    prob += pulp.lpSum(x[rid] * df.loc[rid, "salary"] for rid in df.index) <= max_salary
+
+    if max_lineup_own is not None and max_lineup_own > 0:
+        prob += pulp.lpSum(x[rid] * df.loc[rid, "own_proj"] for rid in df.index) <= float(max_lineup_own)
 
     prob += pulp.lpSum(x[rid] for rid in df.index if df.loc[rid, "is_captain"]) == 1
     prob += pulp.lpSum(x[rid] for rid in df.index if not df.loc[rid, "is_captain"]) == 5
 
     for base_id, rows in df.groupby("base_id").groups.items():
         prob += pulp.lpSum(x[rid] for rid in rows) <= 1
+
+    if min_qb is not None:
+        qb_rows = df.index[df["position"].astype(str).str.upper() == "QB"].tolist()
+        if qb_rows:
+            prob += pulp.lpSum(x[rid] for rid in qb_rows) >= int(min_qb)
+    if max_qb is not None:
+        qb_rows = df.index[df["position"].astype(str).str.upper() == "QB"].tolist()
+        if qb_rows:
+            prob += pulp.lpSum(x[rid] for rid in qb_rows) <= int(max_qb)
+    if min_rb is not None:
+        rb_rows = df.index[df["position"].astype(str).str.upper() == "RB"].tolist()
+        if rb_rows:
+            prob += pulp.lpSum(x[rid] for rid in rb_rows) >= int(min_rb)
+    if min_wrte is not None:
+        wrte_rows = df.index[df["position"].astype(str).str.upper().isin(["WR", "TE"])].tolist()
+        if wrte_rows:
+            prob += pulp.lpSum(x[rid] for rid in wrte_rows) >= int(min_wrte)
+    if require_dst:
+        dst_rows = df.index[df["position"].astype(str).str.upper().isin(["DST", "D/ST", "DEF"])].tolist()
+        if dst_rows:
+            prob += pulp.lpSum(x[rid] for rid in dst_rows) >= 1
 
     teams = [t for t in sorted(df["team"].dropna().unique().tolist()) if t]
     if len(teams) == 2 and min_team_players > 0:
@@ -729,10 +769,16 @@ def _solve_showdown_lineup(
             return None, f"Locked flex not available in pool: {base_id}"
         prob += x[rows[0]] == 1
 
-    for prev in avoid_lineups:
-        rows = [rid for rid in prev if rid in x]
+    if max_overlap is not None:
+        for prev in avoid_bases:
+            rows = df.index[df["base_id"].isin(prev)].tolist()
+            if rows:
+                prob += pulp.lpSum(x[rid] for rid in rows) <= int(max_overlap)
+
+    if onslaught_team and onslaught_min:
+        rows = df.index[df["team"] == onslaught_team].tolist()
         if rows:
-            prob += pulp.lpSum(x[rid] for rid in rows) <= 5
+            prob += pulp.lpSum(x[rid] for rid in rows) >= int(onslaught_min)
 
     solver = pulp.PULP_CBC_CMD(msg=False)
     status = prob.solve(solver)
@@ -755,6 +801,17 @@ def _generate_lineups(
     allowed_captains: Optional[Sequence[str]],
     randomness: float,
     enforce_unique: bool,
+    max_cpt_pct: Optional[float],
+    max_lineup_own: Optional[float],
+    min_salary_unused: int,
+    max_overlap: Optional[int],
+    min_qb: Optional[int],
+    max_qb: Optional[int],
+    min_rb: Optional[int],
+    min_wrte: Optional[int],
+    require_dst: bool,
+    onslaught_team: Optional[str],
+    onslaught_min: Optional[int],
 ) -> Tuple[List[pd.DataFrame], List[str]]:
     rng = np.random.default_rng(42)
     counts: Dict[str, int] = {bid: 0 for bid in pool["base_id"].unique().tolist()}
@@ -763,7 +820,12 @@ def _generate_lineups(
 
     lineups: List[pd.DataFrame] = []
     errors: List[str] = []
-    previous_lineups: List[List[int]] = []
+    previous_bases: List[List[str]] = []
+    cpt_counts: Dict[str, int] = {}
+    if max_cpt_pct is not None:
+        max_cpt_count = max(1, int(math.floor(max_cpt_pct / 100.0 * num_lineups)))
+    else:
+        max_cpt_count = None
 
     for i in range(num_lineups):
         remaining = num_lineups - i
@@ -778,6 +840,11 @@ def _generate_lineups(
         else:
             df["proj_adj"] = df["proj"]
 
+        if max_cpt_count is not None:
+            blocked = [bid for bid, ct in cpt_counts.items() if ct >= max_cpt_count]
+            if allowed_captains is not None:
+                allowed_captains = [bid for bid in allowed_captains if bid not in blocked]
+
         chosen, err = _solve_showdown_lineup(
             df,
             salary_cap=salary_cap,
@@ -787,14 +854,27 @@ def _generate_lineups(
             lock_captain=lock_captain,
             lock_flex=lock_flex,
             allowed_captains=allowed_captains,
-            avoid_lineups=previous_lineups if enforce_unique else [],
+            avoid_bases=previous_bases if (enforce_unique or max_overlap is not None) else [],
+            max_overlap=max_overlap,
+            min_salary_unused=min_salary_unused,
+            max_lineup_own=max_lineup_own,
+            min_qb=min_qb,
+            max_qb=max_qb,
+            min_rb=min_rb,
+            min_wrte=min_wrte,
+            require_dst=require_dst,
+            onslaught_team=onslaught_team,
+            onslaught_min=onslaught_min,
         )
         if chosen is None:
             errors.append(err or "Unknown optimizer failure.")
             break
 
         lineups.append(chosen)
-        previous_lineups.append(chosen["row_id"].tolist())
+        previous_bases.append(chosen["base_id"].unique().tolist())
+        if max_cpt_count is not None:
+            cap = chosen[chosen["is_captain"]].iloc[0]["base_id"]
+            cpt_counts[cap] = cpt_counts.get(cap, 0) + 1
         for bid in chosen["base_id"].unique().tolist():
             counts[bid] = counts.get(bid, 0) + 1
 
@@ -1126,6 +1206,17 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     enforce_unique = st.checkbox("Enforce unique lineups", value=True)
 
+    uniq_col1, uniq_col2, uniq_col3 = st.columns(3)
+    with uniq_col1:
+        max_overlap_enabled = st.checkbox("Max player overlap", value=False)
+    with uniq_col2:
+        max_overlap = st.slider("Max overlap", min_value=1, max_value=5, value=4, step=1, disabled=not max_overlap_enabled)
+    with uniq_col3:
+        min_unused_enabled = st.checkbox("Min salary unused", value=False)
+    min_unused = st.number_input(
+        "Min salary unused", min_value=0, max_value=5000, value=1000, step=100, disabled=not min_unused_enabled
+    )
+
     sim_col1, sim_col2, sim_col3 = st.columns(3)
     with sim_col1:
         use_simulation = st.checkbox("Use simulation scoring (GPP)", value=False)
@@ -1133,6 +1224,24 @@ def render_showdown_generator(season: int, week: int) -> None:
         sim_count = st.number_input("Simulations", min_value=200, max_value=5000, value=1000, step=100)
     with sim_col3:
         top_pct = st.slider("Top % average", min_value=1, max_value=20, value=5, step=1)
+    leverage_col1, leverage_col2 = st.columns(2)
+    with leverage_col1:
+        leverage_enabled = st.checkbox("Leverage scoring (Top% Avg - λ*Own)", value=False)
+    with leverage_col2:
+        leverage_lambda = st.slider("Leverage λ", min_value=0.0, max_value=0.5, value=0.15, step=0.01)
+
+    own_ctrl1, own_ctrl2, own_ctrl3 = st.columns(3)
+    with own_ctrl1:
+        max_cpt_own_enabled = st.checkbox("Max CPT ownership", value=False)
+    with own_ctrl2:
+        max_cpt_own_pct = st.slider(
+            "Max CPT own %", min_value=5, max_value=50, value=15, step=1, disabled=not max_cpt_own_enabled
+        )
+    with own_ctrl3:
+        max_lineup_own_enabled = st.checkbox("Max total lineup ownership", value=False)
+    max_lineup_own_pct = st.slider(
+        "Max lineup own %", min_value=60, max_value=300, value=140, step=5, disabled=not max_lineup_own_enabled
+    )
 
     player_labels = pool["display_name"].tolist()
     label_to_id = dict(zip(pool["display_name"], pool["player_key"]))
@@ -1149,6 +1258,25 @@ def render_showdown_generator(season: int, week: int) -> None:
     else:
         cpt_labels = player_labels
     captain_pool_labels = st.multiselect("Captain pool (optional)", options=cpt_labels, default=cpt_labels)
+
+    script_enabled = st.checkbox("Game-script presets", value=False)
+    script = None
+    min_qb = max_qb = min_rb = min_wrte = None
+    require_dst = False
+    onslaught_team = None
+    onslaught_min = None
+    if script_enabled:
+        script = st.selectbox("Script", ["Pass-Heavy", "Run-Heavy", "Onslaught"], index=0)
+        if script == "Pass-Heavy":
+            min_qb = st.slider("Min QB", min_value=1, max_value=2, value=1, step=1)
+            min_wrte = st.slider("Min WR/TE", min_value=1, max_value=5, value=2, step=1)
+        elif script == "Run-Heavy":
+            min_rb = st.slider("Min RB", min_value=1, max_value=4, value=2, step=1)
+            max_qb = st.slider("Max QB", min_value=0, max_value=2, value=1, step=1)
+            require_dst = st.checkbox("Require DST", value=False)
+        else:
+            onslaught_team = st.selectbox("Onslaught team", options=teams, index=0 if teams else 0)
+            onslaught_min = st.slider("Min players from team", min_value=3, max_value=5, value=4, step=1)
 
     st.subheader("Exposure Limits")
     exposure_players = st.multiselect("Set exposure limits for players", options=player_labels, default=[])
@@ -1169,6 +1297,10 @@ def render_showdown_generator(season: int, week: int) -> None:
         lock_captain_id = label_to_id.get(lock_captain_label) if lock_captain_label else None
         lock_flex_ids = [label_to_id[x] for x in lock_flex_labels if x in label_to_id]
         allowed_captains = [label_to_id[x] for x in captain_pool_labels if x in label_to_id]
+
+        if restrict_cpt and not allowed_captains:
+            st.error("Captain pool is empty after restrictions.")
+            return
 
         invalid_exposures = []
         for label, base_id in label_to_id.items():
@@ -1192,6 +1324,31 @@ def render_showdown_generator(season: int, week: int) -> None:
                 st.error("Locked players must have max exposure of 100%.")
                 return
 
+        max_overlap_value = None
+        if max_overlap_enabled:
+            max_overlap_value = int(max_overlap)
+        elif enforce_unique:
+            max_overlap_value = 5
+
+        min_unused_value = int(min_unused) if min_unused_enabled else 0
+
+        max_cpt_pct = float(max_cpt_own_pct) if max_cpt_own_enabled else None
+        if max_cpt_pct is not None and lock_captain_id:
+            if max_cpt_pct < 100.0:
+                st.error("Locked captain requires max CPT ownership of 100%.")
+                return
+
+        max_lineup_own = float(max_lineup_own_pct) if max_lineup_own_enabled else None
+        if max_lineup_own is not None and pool["own_proj"].isna().all():
+            st.error("Lineup ownership cap requires ownership projections.")
+            return
+
+        if onslaught_team and onslaught_min:
+            team_count = (pool["team"] == onslaught_team).sum()
+            if team_count < int(onslaught_min):
+                st.error("Onslaught team does not have enough players in the pool.")
+                return
+
         opt_pool = _build_optimizer_pool(pool)
 
         lineups, errors = _generate_lineups(
@@ -1206,6 +1363,17 @@ def render_showdown_generator(season: int, week: int) -> None:
             allowed_captains=allowed_captains,
             randomness=float(randomness),
             enforce_unique=enforce_unique,
+            max_cpt_pct=max_cpt_pct,
+            max_lineup_own=max_lineup_own,
+            min_salary_unused=min_unused_value,
+            max_overlap=max_overlap_value,
+            min_qb=min_qb,
+            max_qb=max_qb,
+            min_rb=min_rb,
+            min_wrte=min_wrte,
+            require_dst=require_dst,
+            onslaught_team=onslaught_team,
+            onslaught_min=onslaught_min,
         )
 
         if errors:
@@ -1237,6 +1405,18 @@ def render_showdown_generator(season: int, week: int) -> None:
             )
 
         lineup_df = pd.DataFrame(lineup_rows)
+        pool_index = pool.set_index("player_key")
+        lineup_own = []
+        for lineup in lineups:
+            own_sum = 0.0
+            for base_id in lineup["base_id"].unique().tolist():
+                if base_id in pool_index.index:
+                    val = pool_index.loc[base_id].get("own_proj", 0)
+                    if pd.isna(val):
+                        val = 0.0
+                    own_sum += float(val)
+            lineup_own.append(round(own_sum, 1))
+        lineup_df["Lineup Own %"] = lineup_own
         if use_simulation:
             history_df = _load_histories(
                 season=season,
@@ -1256,7 +1436,15 @@ def render_showdown_generator(season: int, week: int) -> None:
             )
             lineup_df["Sim Mean"] = [round(x, 2) for x in sim_means]
             lineup_df[f"Top {int(top_pct)}% Avg"] = [round(x, 2) for x in sim_metrics]
-            lineup_df = lineup_df.sort_values(f"Top {int(top_pct)}% Avg", ascending=False)
+            if leverage_enabled:
+                lineup_df["Leverage Score"] = (
+                    lineup_df[f"Top {int(top_pct)}% Avg"] - lineup_df["Lineup Own %"] * float(leverage_lambda)
+                ).round(2)
+                lineup_df = lineup_df.sort_values("Leverage Score", ascending=False)
+            else:
+                lineup_df = lineup_df.sort_values(f"Top {int(top_pct)}% Avg", ascending=False)
+        elif leverage_enabled:
+            st.warning("Leverage scoring requires simulation mode.")
         st.subheader("Generated Lineups")
         st.dataframe(lineup_df, use_container_width=True, hide_index=True)
 

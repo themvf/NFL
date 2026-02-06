@@ -9,9 +9,11 @@ import re
 import numpy as np
 import pandas as pd
 import streamlit as st
+import sqlite3
 
 
 DATA_BASE = Path("data/processed").resolve()
+DB_PATH = Path("data/nfl_merged.db").resolve()
 
 TEAM_ALIASES = {
     "JAC": "JAX",
@@ -135,28 +137,33 @@ def _read_player_week(season: int, weeks: Sequence[int]) -> pd.DataFrame:
 
 
 def _compute_dk_points(df: pd.DataFrame) -> pd.Series:
-    def col(name: str) -> pd.Series:
-        if name in df.columns:
-            return pd.to_numeric(df[name], errors="coerce").fillna(0.0)
+    def col_any(names: Sequence[str]) -> pd.Series:
+        for name in names:
+            if name in df.columns:
+                return pd.to_numeric(df[name], errors="coerce").fillna(0.0)
         return pd.Series([0.0] * len(df), index=df.index)
 
-    passing_yards = col("passing_yards")
-    passing_tds = col("passing_tds")
-    interceptions = col("interceptions")
-    pass_2pt = col("passing_2pt_conversions")
+    passing_yards = col_any(["passing_yards"])
+    passing_tds = col_any(["passing_tds"])
+    interceptions = col_any(["interceptions", "passing_interceptions"])
+    pass_2pt = col_any(["passing_2pt_conversions"])
 
-    rushing_yards = col("rushing_yards")
-    rushing_tds = col("rushing_tds")
-    rush_2pt = col("rushing_2pt_conversions")
+    rushing_yards = col_any(["rushing_yards"])
+    rushing_tds = col_any(["rushing_tds"])
+    rush_2pt = col_any(["rushing_2pt_conversions"])
 
-    receiving_yards = col("receiving_yards")
-    receiving_tds = col("receiving_tds")
-    rec_2pt = col("receiving_2pt_conversions")
-    receptions = col("receptions")
+    receiving_yards = col_any(["receiving_yards"])
+    receiving_tds = col_any(["receiving_tds"])
+    rec_2pt = col_any(["receiving_2pt_conversions"])
+    receptions = col_any(["receptions"])
 
-    special_tds = col("special_teams_tds")
+    special_tds = col_any(["special_teams_tds"])
 
-    fumbles_lost = col("rushing_fumbles_lost") + col("receiving_fumbles_lost") + col("sack_fumbles_lost")
+    fumbles_lost = (
+        col_any(["rushing_fumbles_lost"])
+        + col_any(["receiving_fumbles_lost"])
+        + col_any(["sack_fumbles_lost"])
+    )
 
     pass_bonus = (passing_yards >= 300).astype(float) * 3.0
     rush_bonus = (rushing_yards >= 100).astype(float) * 3.0
@@ -180,13 +187,70 @@ def _compute_dk_points(df: pd.DataFrame) -> pd.Series:
     )
 
 
+def _read_player_stats_db(season: int, weeks: Sequence[int]) -> pd.DataFrame:
+    if not DB_PATH.exists() or not weeks:
+        return pd.DataFrame()
+    cols = [
+        "player_display_name",
+        "player_name",
+        "position",
+        "team",
+        "season",
+        "week",
+        "passing_yards",
+        "passing_tds",
+        "passing_interceptions",
+        "passing_2pt_conversions",
+        "rushing_yards",
+        "rushing_tds",
+        "rushing_2pt_conversions",
+        "receiving_yards",
+        "receiving_tds",
+        "receiving_2pt_conversions",
+        "receptions",
+        "special_teams_tds",
+        "rushing_fumbles_lost",
+        "receiving_fumbles_lost",
+        "sack_fumbles_lost",
+    ]
+    conn = sqlite3.connect(str(DB_PATH))
+    placeholder = ",".join("?" for _ in weeks)
+    query = f"""
+        SELECT {",".join(cols)}
+        FROM player_stats
+        WHERE season = ?
+          AND week IN ({placeholder})
+          AND season_type IN ('REG', 'POST')
+    """
+    params = [season] + list(weeks)
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    df.columns = [c.lower() for c in df.columns]
+    return df
+
+
+def _list_db_weeks(season: int) -> List[int]:
+    if not DB_PATH.exists():
+        return []
+    conn = sqlite3.connect(str(DB_PATH))
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT week FROM player_stats WHERE season = ? ORDER BY week", (season,))
+    weeks = [int(r[0]) for r in cur.fetchall() if r[0] is not None]
+    conn.close()
+    return weeks
+
+
 def _build_stat_projections(
     season: int,
     week: int,
     recent_weeks: int,
     use_full_season: bool,
+    source: str,
 ) -> Dict[str, pd.DataFrame]:
-    weeks_all = _list_available_weeks("player_week", season)
+    if source == "db":
+        weeks_all = _list_db_weeks(season)
+    else:
+        weeks_all = _list_available_weeks("player_week", season)
     if not weeks_all:
         return {}
 
@@ -196,7 +260,10 @@ def _build_stat_projections(
         past = [w for w in weeks_all if w <= week]
         weeks = past[-recent_weeks:] if past else []
 
-    df = _read_player_week(season, weeks)
+    if source == "db":
+        df = _read_player_stats_db(season, weeks)
+    else:
+        df = _read_player_week(season, weeks)
     if df.empty:
         return {}
 
@@ -684,9 +751,29 @@ def render_showdown_generator(season: int, week: int) -> None:
     with col3:
         fallback_to_dk_avg = st.checkbox("Fallback to DK AvgPointsPerGame", value=True)
 
+    src_col1, src_col2 = st.columns(2)
+    with src_col1:
+        projection_source = st.selectbox(
+            "Projection source",
+            options=["DB (player_stats)", "Parquet (player_week)"],
+            index=0,
+        )
+    with src_col2:
+        if projection_source.startswith("DB") and not DB_PATH.exists():
+            st.warning("DB not found; falling back to Parquet.")
+            projection_source = "Parquet (player_week)"
+
+    source_key = "db" if projection_source.startswith("DB") else "parquet"
+
+    weeks_available = _list_db_weeks(season) if source_key == "db" else _list_available_weeks("player_week", season)
+    max_week_available = max(weeks_available) if weeks_available else week
+    effective_week = min(week, max_week_available) if week else max_week_available
+    if week and max_week_available and week > max_week_available:
+        st.warning(f"Selected week {week} not available in {projection_source}. Using week {max_week_available}.")
+
     stat_maps: Dict[str, pd.DataFrame] = {}
     try:
-        stat_maps = _build_stat_projections(season, week, int(recent_weeks), use_full_season)
+        stat_maps = _build_stat_projections(season, effective_week, int(recent_weeks), use_full_season, source_key)
     except Exception:
         stat_maps = {}
 
@@ -776,6 +863,7 @@ def render_showdown_generator(season: int, week: int) -> None:
             "dk_avg": counts.get("dk_avg", 0),
             "zero_projection": int((pool["proj_points"] <= 0).sum()),
         })
+        st.caption(f"Projection source: {projection_source} | Week used: {effective_week}")
         fallback = pool[pool["proj_source"].isin(["dk_avg", ""])]
         if not fallback.empty:
             st.caption("Players using DK AvgPointsPerGame or no match:")

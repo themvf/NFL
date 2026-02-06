@@ -888,6 +888,18 @@ def render_showdown_generator(season: int, week: int) -> None:
     with kdst_col2:
         replace_zero_with_dk_avg = st.checkbox("Replace zero proj with DK Avg", value=True)
 
+    own_col1, own_col2, own_col3 = st.columns(3)
+    with own_col1:
+        ownership_method = st.selectbox(
+            "Ownership projection",
+            options=["None", "Proxy (My Proj + Salary)", "Proxy (DK Avg + Salary)"],
+            index=1,
+        )
+    with own_col2:
+        ownership_floor = st.slider("Ownership floor %", min_value=0, max_value=20, value=2, step=1)
+    with own_col3:
+        ownership_cap = st.slider("Ownership cap %", min_value=10, max_value=90, value=60, step=5)
+
     weeks_available = _list_db_weeks(season) if source_key == "db" else _list_available_weeks("player_week", season)
     max_week_available = max(weeks_available) if weeks_available else week
     effective_week = min(week, max_week_available) if week else max_week_available
@@ -956,14 +968,39 @@ def render_showdown_generator(season: int, week: int) -> None:
 
     pool["proj_points"] = pool["proj_points"].fillna(0.0)
 
+    if ownership_method != "None":
+        if ownership_cap < ownership_floor:
+            ownership_cap = ownership_floor
+        proj = pool["proj_points"].astype(float)
+        dk_avg = pool["avg_points"].astype(float)
+        salary = pool["salary"].replace(0, np.nan).astype(float)
+        if ownership_method.startswith("Proxy (My Proj"):
+            base = proj
+        else:
+            base = dk_avg
+        value = (base / (salary / 1000.0)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        if base.std(ddof=0) == 0:
+            score = base
+        elif value.std(ddof=0) == 0:
+            score = (base - base.mean()) / base.std(ddof=0)
+        else:
+            z_base = (base - base.mean()) / base.std(ddof=0)
+            z_value = (value - value.mean()) / value.std(ddof=0)
+            score = 0.7 * z_base + 0.3 * z_value
+        ranks = score.rank(pct=True).fillna(0.5)
+        pool["own_proj"] = (ownership_floor + ranks * (ownership_cap - ownership_floor)).round(1)
+    else:
+        pool["own_proj"] = np.nan
+
     proj_display = pool[
-        ["display_name", "team", "position", "salary", "avg_points", "proj_points", "proj_source"]
+        ["display_name", "team", "position", "salary", "avg_points", "proj_points", "own_proj", "proj_source"]
     ].copy()
     proj_display = proj_display.rename(
         columns={
             "display_name": "Player",
             "avg_points": "DK Avg",
             "proj_points": "My Proj",
+            "own_proj": "Own %",
             "proj_source": "Source",
         }
     )
@@ -974,13 +1011,17 @@ def render_showdown_generator(season: int, week: int) -> None:
         column_config={
             "DK Avg": st.column_config.NumberColumn("DK Avg", format="%.2f"),
             "My Proj": st.column_config.NumberColumn("My Proj", format="%.2f"),
+            "Own %": st.column_config.NumberColumn("Own %", format="%.1f"),
         },
         disabled=["Player", "team", "position", "salary", "DK Avg", "Source"],
         key="showdown_proj_editor",
     )
-    pool = pool.merge(edited[["Player", "My Proj"]], left_on="display_name", right_on="Player", how="left")
+    pool = pool.merge(
+        edited[["Player", "My Proj", "Own %"]], left_on="display_name", right_on="Player", how="left"
+    )
     pool["proj_points"] = pool["My Proj"].fillna(pool["proj_points"])
-    pool = pool.drop(columns=["Player", "My Proj"])
+    pool["own_proj"] = pool["Own %"].fillna(pool.get("own_proj"))
+    pool = pool.drop(columns=["Player", "My Proj", "Own %"])
 
     with st.expander("Matching diagnostics", expanded=False):
         total = len(pool)
@@ -1001,11 +1042,14 @@ def render_showdown_generator(season: int, week: int) -> None:
         if not fallback.empty:
             st.caption("Players using DK AvgPointsPerGame or no match:")
             st.dataframe(
-                fallback[["display_name", "team", "position", "avg_points", "proj_points", "proj_source"]].rename(
+                fallback[
+                    ["display_name", "team", "position", "avg_points", "proj_points", "own_proj", "proj_source"]
+                ].rename(
                     columns={
                         "display_name": "Player",
                         "avg_points": "DK Avg",
                         "proj_points": "My Proj",
+                        "own_proj": "Own %",
                         "proj_source": "Source",
                     }
                 ),

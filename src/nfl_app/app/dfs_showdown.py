@@ -989,6 +989,8 @@ def render_showdown_generator(season: int, week: int) -> None:
             score = 0.7 * z_base + 0.3 * z_value
         ranks = score.rank(pct=True).fillna(0.5)
         pool["own_proj"] = (ownership_floor + ranks * (ownership_cap - ownership_floor)).round(1)
+        zero_mask = (pool["proj_points"].fillna(0) <= 0) & (pool["avg_points"].fillna(0) <= 0)
+        pool.loc[zero_mask, "own_proj"] = 0.0
     else:
         pool["own_proj"] = np.nan
 

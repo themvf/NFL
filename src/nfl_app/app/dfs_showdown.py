@@ -479,6 +479,30 @@ def _load_local_injuries(season: int, week: int) -> Tuple[pd.DataFrame, Optional
     return df, use_week
 
 
+def _load_db_injuries(season: int, week: int) -> Tuple[pd.DataFrame, Optional[int]]:
+    if not DB_PATH.exists():
+        return pd.DataFrame(), None
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT week FROM injuries WHERE season = ?", (season,))
+        weeks = [int(r[0]) for r in cur.fetchall() if r[0] is not None]
+        if not weeks:
+            return pd.DataFrame(), None
+        use_week = week if week in weeks else max(weeks)
+        df = pd.read_sql_query(
+            "SELECT * FROM injuries WHERE season = ? AND week = ?",
+            conn,
+            params=(season, use_week),
+        )
+        df.columns = [c.lower() for c in df.columns]
+        return df, use_week
+    except Exception:
+        return pd.DataFrame(), None
+    finally:
+        conn.close()
+
+
 def _load_live_injuries(season: int) -> pd.DataFrame:
     try:
         import nfl_data_py as nfl  # type: ignore
@@ -581,42 +605,59 @@ def _apply_injury_exclusions(
     season: int,
     week: int,
     exclude_statuses: Sequence[str],
-    use_live: bool,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[int]]:
-    if use_live:
+    source: str,
+    manual_names: Sequence[str],
+) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[int], str]:
+    injury_week = None
+    if source == "live":
         inj = _load_live_injuries(season)
-        injury_week = None
+    elif source == "db":
+        inj, injury_week = _load_db_injuries(season, week)
     else:
         inj, injury_week = _load_local_injuries(season, week)
 
     if inj.empty:
-        return pool, pd.DataFrame(), injury_week
+        inj = pd.DataFrame()
 
     status_col = "report_status" if "report_status" in inj.columns else "practice_status"
     if status_col not in inj.columns:
-        return pool, pd.DataFrame(), injury_week
+        status_col = None
 
     name_col = "full_name" if "full_name" in inj.columns else "player_name"
     team_col = "team" if "team" in inj.columns else "club"
 
-    inj = inj.copy()
-    inj["status"] = inj[status_col].astype(str).str.upper().str.strip()
-    inj["name_key"] = inj[name_col].astype(str).map(normalize_name)
-    inj["team_key"] = inj[team_col].astype(str).map(normalize_team)
+    injured = pd.DataFrame()
+    filtered = pool.copy()
 
-    excluded = inj[inj["status"].isin([s.upper() for s in exclude_statuses])]
-    if excluded.empty:
-        return pool, pd.DataFrame(), injury_week
+    if not inj.empty and status_col:
+        inj = inj.copy()
+        inj["status"] = inj[status_col].astype(str).str.upper().str.strip()
+        inj["name_key"] = inj[name_col].astype(str).map(normalize_name)
+        inj["team_key"] = inj[team_col].astype(str).map(normalize_team)
+        excluded = inj[inj["status"].isin([s.upper() for s in exclude_statuses])]
+        if not excluded.empty:
+            merged = filtered.merge(
+                excluded[["name_key", "team_key", "status"]],
+                left_on=["name_key", "team"],
+                right_on=["name_key", "team_key"],
+                how="left",
+            )
+            injured = merged[merged["status"].notna()].copy()
+            filtered = merged[merged["status"].isna()].drop(columns=["team_key", "status"])
 
-    merged = pool.merge(
-        excluded[["name_key", "team_key", "status"]],
-        left_on=["name_key", "team"],
-        right_on=["name_key", "team_key"],
-        how="left",
-    )
-    injured = merged[merged["status"].notna()].copy()
-    filtered = merged[merged["status"].isna()].drop(columns=["team_key", "status"])
-    return filtered, injured, injury_week
+    manual_set = [normalize_name(x) for x in manual_names if x.strip()]
+    if manual_set:
+        filtered = filtered[~filtered["name_key"].isin(manual_set)]
+
+    source_label = source
+    if source == "db":
+        source_label = "DB injuries"
+    elif source == "parquet":
+        source_label = "Local parquet"
+    elif source == "live":
+        source_label = "Live injuries"
+
+    return filtered, injured, injury_week, source_label
 
 
 def _build_optimizer_pool(pool: pd.DataFrame) -> pd.DataFrame:
@@ -1171,26 +1212,48 @@ def render_showdown_generator(season: int, week: int) -> None:
             )
 
     st.subheader("Injury Filters")
-    use_live_injuries = st.checkbox("Use live injuries (if available)", value=False)
+    injury_source = st.selectbox(
+        "Injury source",
+        options=["DB injuries", "Local parquet", "Live (nfl_data_py)"],
+        index=0,
+    )
     status_options = ["Out", "IR", "PUP", "Suspended", "DNP", "Doubtful", "Questionable"]
     exclude_statuses = st.multiselect(
         "Exclude injury statuses",
         options=status_options,
         default=["Out", "IR", "PUP", "Suspended", "DNP", "Doubtful"],
     )
+    manual_injured = st.text_area(
+        "Manual injury excludes (one player per line)",
+        placeholder="Antonio Gibson\nZach Charbonnet",
+    )
+    manual_list = [x.strip() for x in manual_injured.splitlines() if x.strip()]
 
-    filtered_pool, injured, injury_week = _apply_injury_exclusions(
+    source_key_inj = "db" if injury_source.startswith("DB") else "parquet"
+    if injury_source.startswith("Live"):
+        source_key_inj = "live"
+
+    filtered_pool, injured, injury_week, source_label = _apply_injury_exclusions(
         pool,
         season=season,
         week=week,
         exclude_statuses=exclude_statuses,
-        use_live=use_live_injuries,
+        source=source_key_inj,
+        manual_names=manual_list,
     )
     if injury_week:
-        st.caption(f"Using local injury data for week {injury_week}.")
+        st.caption(f"Using {source_label} for week {injury_week}.")
+    elif source_key_inj != "live":
+        st.caption(f"Using {source_label} (no week available).")
+    if injured.empty and not manual_list:
+        st.info("No injuries excluded. If injured players appear, add them to the manual list.")
     if not injured.empty:
-        st.warning(f"Excluded {len(injured)} injured players.")
-        st.dataframe(injured[["player_name", "team", "position", "status"]].rename(columns={"player_name": "Player"}), use_container_width=True)
+        st.warning(f"Excluded {len(injured)} injured players from {source_label}.")
+        cols = [c for c in ["player_name", "full_name", "team", "position", "status"] if c in injured.columns]
+        view = injured[cols].copy()
+        if "full_name" in view.columns and "player_name" not in view.columns:
+            view = view.rename(columns={"full_name": "player_name"})
+        st.dataframe(view.rename(columns={"player_name": "Player"}), use_container_width=True)
 
     pool = filtered_pool.copy().reset_index(drop=True)
     pool["proj_points"] = pd.to_numeric(pool["proj_points"], errors="coerce").fillna(0.0)

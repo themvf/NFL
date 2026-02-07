@@ -10,10 +10,17 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import sqlite3
+import json
 
 
 DATA_BASE = Path("data/processed").resolve()
 DB_PATH = Path("data/nfl_merged.db").resolve()
+
+# Optional GCS injury snapshots
+try:
+    import injury_snapshot_manager as ism  # type: ignore
+except Exception:
+    ism = None
 
 TEAM_ALIASES = {
     "JAC": "JAX",
@@ -503,6 +510,48 @@ def _load_db_injuries(season: int, week: int) -> Tuple[pd.DataFrame, Optional[in
         conn.close()
 
 
+def _load_snapshot_injuries(season: int) -> Tuple[pd.DataFrame, Optional[int], Optional[str]]:
+    if ism is None:
+        return pd.DataFrame(), None, None
+    bucket_name = st.secrets.get("gcs_bucket_name", "")
+    if not bucket_name or "gcs_service_account" not in st.secrets:
+        return pd.DataFrame(), None, None
+    try:
+        creds = dict(st.secrets["gcs_service_account"])
+        snapshot_mgr = ism.InjurySnapshotManager(
+            db_path=str(DB_PATH),
+            bucket_name=bucket_name,
+            service_account_dict=creds,
+        )
+        if not getattr(snapshot_mgr, "bucket", None):
+            return pd.DataFrame(), None, None
+
+        current_blob = snapshot_mgr.bucket.blob(
+            f"injury-snapshots/{season}/current-injuries.json"
+        )
+        if current_blob.exists():
+            snapshot = json.loads(current_blob.download_as_text())
+            injuries = snapshot.get("injuries", [])
+            df = pd.DataFrame(injuries)
+            if not df.empty:
+                df.columns = [c.lower() for c in df.columns]
+            return df, snapshot.get("week"), "Snapshot (current)"
+
+        snapshots = snapshot_mgr.list_snapshots(season)
+        if snapshots:
+            latest = max(snapshots, key=lambda x: x.get("week", 0))
+            snapshot = snapshot_mgr.load_snapshot(season, latest["week"])
+            if snapshot:
+                injuries = snapshot.get("injuries", [])
+                df = pd.DataFrame(injuries)
+                if not df.empty:
+                    df.columns = [c.lower() for c in df.columns]
+                return df, snapshot.get("week", latest["week"]), "Snapshot (latest)"
+    except Exception:
+        return pd.DataFrame(), None, None
+    return pd.DataFrame(), None, None
+
+
 def _load_live_injuries(season: int) -> pd.DataFrame:
     try:
         import nfl_data_py as nfl  # type: ignore
@@ -609,7 +658,10 @@ def _apply_injury_exclusions(
     manual_names: Sequence[str],
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[int], str]:
     injury_week = None
-    if source == "live":
+    source_label = source
+    if source == "snapshot":
+        inj, injury_week, source_label = _load_snapshot_injuries(season)
+    elif source == "live":
         inj = _load_live_injuries(season)
     elif source == "db":
         inj, injury_week = _load_db_injuries(season, week)
@@ -619,12 +671,25 @@ def _apply_injury_exclusions(
     if inj.empty:
         inj = pd.DataFrame()
 
-    status_col = "report_status" if "report_status" in inj.columns else "practice_status"
-    if status_col not in inj.columns:
-        status_col = None
+    status_col = None
+    for candidate in ("report_status", "practice_status", "status", "injury_type"):
+        if candidate in inj.columns:
+            status_col = candidate
+            break
 
-    name_col = "full_name" if "full_name" in inj.columns else "player_name"
-    team_col = "team" if "team" in inj.columns else "club"
+    name_col = "player_name"
+    if "full_name" in inj.columns:
+        name_col = "full_name"
+    elif "player_display_name" in inj.columns:
+        name_col = "player_display_name"
+
+    team_col = "team"
+    if "team_abbr" in inj.columns:
+        team_col = "team_abbr"
+    elif "club" in inj.columns:
+        team_col = "club"
+    elif "recent_team" in inj.columns:
+        team_col = "recent_team"
 
     injured = pd.DataFrame()
     filtered = pool.copy()
@@ -649,13 +714,16 @@ def _apply_injury_exclusions(
     if manual_set:
         filtered = filtered[~filtered["name_key"].isin(manual_set)]
 
-    source_label = source
+    if source_label is None:
+        source_label = source
     if source == "db":
         source_label = "DB injuries"
     elif source == "parquet":
         source_label = "Local parquet"
     elif source == "live":
         source_label = "Live injuries"
+    elif source == "snapshot" and source_label == "snapshot":
+        source_label = "Snapshot injuries"
 
     return filtered, injured, injury_week, source_label
 
@@ -1212,11 +1280,25 @@ def render_showdown_generator(season: int, week: int) -> None:
             )
 
     st.subheader("Injury Filters")
+    snapshot_available = (
+        ism is not None
+        and st.secrets.get("gcs_bucket_name", "")
+        and "gcs_service_account" in st.secrets
+    )
+    injury_options = [
+        "Snapshot (GCS)",
+        "DB injuries",
+        "Local parquet",
+        "Live (nfl_data_py)",
+    ]
+    default_injury_index = 0 if snapshot_available else 1
     injury_source = st.selectbox(
         "Injury source",
-        options=["DB injuries", "Local parquet", "Live (nfl_data_py)"],
-        index=0,
+        options=injury_options,
+        index=default_injury_index,
     )
+    if injury_source.startswith("Snapshot") and not snapshot_available:
+        st.warning("Snapshot source requires GCS credentials in Streamlit secrets.")
     status_options = ["Out", "IR", "PUP", "Suspended", "DNP", "Doubtful", "Questionable"]
     exclude_statuses = st.multiselect(
         "Exclude injury statuses",
@@ -1232,6 +1314,8 @@ def render_showdown_generator(season: int, week: int) -> None:
     source_key_inj = "db" if injury_source.startswith("DB") else "parquet"
     if injury_source.startswith("Live"):
         source_key_inj = "live"
+    if injury_source.startswith("Snapshot"):
+        source_key_inj = "snapshot"
 
     filtered_pool, injured, injury_week, source_label = _apply_injury_exclusions(
         pool,
@@ -1249,8 +1333,24 @@ def render_showdown_generator(season: int, week: int) -> None:
         st.info("No injuries excluded. If injured players appear, add them to the manual list.")
     if not injured.empty:
         st.warning(f"Excluded {len(injured)} injured players from {source_label}.")
-        cols = [c for c in ["player_name", "full_name", "team", "position", "status"] if c in injured.columns]
+        cols = [
+            c
+            for c in [
+                "player_name",
+                "full_name",
+                "team",
+                "team_abbr",
+                "club",
+                "position",
+                "status",
+            ]
+            if c in injured.columns
+        ]
         view = injured[cols].copy()
+        if "team_abbr" in view.columns and "team" not in view.columns:
+            view = view.rename(columns={"team_abbr": "team"})
+        elif "club" in view.columns and "team" not in view.columns:
+            view = view.rename(columns={"club": "team"})
         if "full_name" in view.columns and "player_name" not in view.columns:
             view = view.rename(columns={"full_name": "player_name"})
         st.dataframe(view.rename(columns={"player_name": "Player"}), use_container_width=True)
